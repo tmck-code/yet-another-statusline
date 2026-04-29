@@ -441,8 +441,8 @@ class Renderer:
 
     def path_git(self, short_pwd: str, git: GitInfo, session_id: str) -> str:
         return (
-            f'{self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}∈{self.R}'
+            f'\033[38;5;117m  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}\033[38;5;46m\033[1m∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{self.LABEL}/{self.R}'
             f'{self.COMMIT}{git.commit}{self.R}'
