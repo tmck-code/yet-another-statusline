@@ -48,10 +48,6 @@ class Model(NamedTuple):
         return self.display_name or self.id or "unknown"
 
     @property
-    def context_limit(self) -> int:
-        return 200_000
-
-    @property
     def cost_rates(self) -> tuple[float, float]:
         n = self.name.lower()
         if "opus" in n:
@@ -76,6 +72,11 @@ class GitInfo(NamedTuple):
     commit: str
 
 
+class RateLimit(NamedTuple):
+    used_percentage: float
+    resets_at: int
+
+
 class OpenSpecChange(NamedTuple):
     name: str
     done: int
@@ -90,12 +91,17 @@ class Info:
     transcript_path: str
     context_window: ContextWindow
     workspace: Workspace
+    rate_five_hour: RateLimit | None = None
+    rate_seven_day: RateLimit | None = None
 
     @classmethod
     def from_json(cls, d: dict) -> "Info":
         m = d.get("model") or {}
         cw = d.get("context_window") or {}
         ws = d.get("workspace") or {}
+        rl = d.get("rate_limits") or {}
+        five = rl.get("five_hour")
+        seven = rl.get("seven_day")
         return cls(
             cwd=d.get("cwd") or "",
             model=Model(
@@ -110,6 +116,14 @@ class Info:
                 used_percentage=cw.get("used_percentage"),
             ),
             workspace=Workspace(project_dir=ws.get("project_dir")),
+            rate_five_hour=RateLimit(
+                used_percentage=float(five["used_percentage"]),
+                resets_at=int(five["resets_at"]),
+            ) if five else None,
+            rate_seven_day=RateLimit(
+                used_percentage=float(seven["used_percentage"]),
+                resets_at=int(seven["resets_at"]),
+            ) if seven else None,
         )
 
     @cached_property
@@ -324,6 +338,16 @@ class Info:
             return f"{n / 1000:.1f}K"
         return str(n)
 
+    def _fmt_reset(self, ts: int) -> str:
+        remaining = ts - int(time.time())
+        if remaining <= 0:
+            return ""
+        h, rem = divmod(remaining, 3600)
+        m = rem // 60
+        if h > 0:
+            return f"{h}h{m}m"
+        return f"{m}m"
+
     def _line1(self) -> str:
         out = f"{C.PWD}{self.short_pwd}{C.R}"
         g = self.git
@@ -339,26 +363,13 @@ class Info:
 
     def _line2(self) -> str:
         out = f"{C.MODEL}💻 {self.model.name}{C.R}"
+        sc = f"{self.session_cost:.4f}"
+        dc = f"{self.day_cost:.4f}"
+        out += f" 💰 {C.COST}${sc}{C.R}"
+        if dc != sc:
+            out += f"{C.LABEL}/{C.R}{C.COST}${dc}{C.R}"
         if self.skills:
             out += f" {C.LABEL}|{C.R} [{C.SKILLS}{self.skills_display}{C.R}]"
-        pct = self.context_window.used_percentage
-        if pct is not None:
-            p = float(pct)
-            pi = int(round(p))
-            used_tok = self.context_window.total_input_tokens + self.context_window.total_output_tokens
-            limit = self.model.context_limit
-            used_s = self._fmt_tok(used_tok)
-            limit_s = self._fmt_tok(limit)
-            bar_w = 15
-            filled = int(p * bar_w / 100)
-            if p >= 80:
-                fill_color = "\033[38;5;196m"
-            elif p >= 60:
-                fill_color = "\033[38;5;214m"
-            else:
-                fill_color = C.BAR_FILL
-            bar = f"{fill_color}{'█' * filled}{C.R}{C.BAR_EMPTY}{'░' * (bar_w - filled)}{C.R}"
-            out += f"{C.LABEL}|{C.R} \033[38;5;15;1m✪ {bar} {C.CTX}{used_s}/{limit_s}{C.R} {C.CTX}{pi}%{C.R}"
         if self.plugins:
             joined = ",".join(self.plugins)
             out += f" {C.LABEL}|{C.R} {C.SKILLS}{joined}{C.R}"
@@ -381,11 +392,24 @@ class Info:
         if di_s != ti_s or do_s != to_s:
             out += f" / {C.LABEL}↓ {C.R}{C.TOK}{di_s}{C.R}"
             out += f"{C.LABEL}↑ {C.R}{C.TOK}{do_s}{C.R}"
-        sc = f"{self.session_cost:.4f}"
-        dc = f"{self.day_cost:.4f}"
-        out += f" 💰 {C.COST}${sc}{C.R}"
-        if dc != sc:
-            out += f"{C.LABEL}/{C.R}{C.COST}${dc}{C.R}"
+
+        for label, rl in [("5h", self.rate_five_hour), ("7d", self.rate_seven_day)]:
+            if rl is None:
+                continue
+            p = rl.used_percentage
+            pi = int(round(p))
+            bar_w = 10
+            filled = int(p * bar_w / 100)
+            if p >= 80:
+                fill_color = "\033[38;5;196m"
+            elif p >= 60:
+                fill_color = "\033[38;5;214m"
+            else:
+                fill_color = C.BAR_FILL
+            bar = f"{fill_color}{'█' * filled}{C.R}{C.BAR_EMPTY}{'░' * (bar_w - filled)}{C.R}"
+            reset_s = self._fmt_reset(rl.resets_at)
+            out += f" {C.LABEL}|{C.R} {C.LABEL}{label}{C.R} {bar} {C.CTX}{pi}%{C.R}"
+            out += f" {C.LABEL}⟳  {reset_s}{C.R}"
         return out
 
     def _openspec_lines(self) -> list[str]:
