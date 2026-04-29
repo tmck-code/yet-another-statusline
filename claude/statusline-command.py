@@ -11,7 +11,7 @@ from typing import NamedTuple
 
 
 class C:
-    RESET = "\033[0m"
+    R = "\033[0m"
     PWD = "\033[38;5;75m"
     BRANCH = "\033[38;5;114m"
     COMMIT = "\033[38;5;244m"
@@ -29,10 +29,14 @@ class C:
 
 
 HOME = Path.home()
-TOKEN_LOG = HOME / ".claude" / "statusline-tokens.log"
-INPUT_DUMP_DIR = HOME / ".claude" / "statusline-output"
-USER_SETTINGS = HOME / ".claude" / "settings.json"
-SKILLS_DIR = HOME / ".claude" / "skills"
+# TOKEN_LOG = HOME / ".claude" / "statusline-tokens.log"
+# INPUT_DUMP_DIR = HOME / ".claude" / "statusline-output"
+# USER_SETTINGS = HOME / ".claude" / "settings.json"
+# SKILLS_DIR = HOME / ".claude" / "skills"
+TOKEN_LOG = Path(__file__).parent / "statusline-tokens.log"
+INPUT_DUMP_DIR = Path(__file__).parent / "statusline-input-dumps"
+USER_SETTINGS = Path(__file__).parent / "settings.json"
+SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 class Model(NamedTuple):
@@ -42,6 +46,10 @@ class Model(NamedTuple):
     @property
     def name(self) -> str:
         return self.display_name or self.id or "unknown"
+
+    @property
+    def context_limit(self) -> int:
+        return 200_000
 
     @property
     def cost_rates(self) -> tuple[float, float]:
@@ -317,27 +325,43 @@ class Info:
         return str(n)
 
     def _line1(self) -> str:
-        out = f"{C.PWD}{self.short_pwd}{C.RESET}"
+        out = f"{C.PWD}{self.short_pwd}{C.R}"
         g = self.git
         if g is not None and g.branch:
-            out += f" {C.LABEL}∈{C.RESET}"
-            out += f" {C.BRANCH}{g.branch}{C.RESET}"
-            out += f"{C.LABEL}/{C.RESET}"
-            out += f"{C.COMMIT}{g.commit}{C.RESET}"
-        if self.session_id:
-            out += f" {C.SESSION}[{self.session_id}]{C.RESET}"
+            out += (
+                f" {C.LABEL}∈{C.R}"
+                f" {C.BRANCH}{g.branch}{C.R}"
+                f"{C.LABEL}/{C.R}"
+                f"{C.COMMIT}{g.commit}{C.R}"
+                f" {C.SESSION}[{self.session_id}]{C.R}"
+            )
         return out
 
     def _line2(self) -> str:
-        out = f"{C.MODEL}💻 {self.model.name}{C.RESET}"
+        out = f"{C.MODEL}💻 {self.model.name}{C.R}"
         if self.skills:
-            out += f" {C.LABEL}|{C.RESET} [{C.SKILLS}{self.skills_display}{C.RESET}]"
+            out += f" {C.LABEL}|{C.R} [{C.SKILLS}{self.skills_display}{C.R}]"
         pct = self.context_window.used_percentage
         if pct is not None:
-            out += f" {C.LABEL}|{C.RESET} {C.LABEL}⏳{C.RESET}{C.CTX}{int(round(float(pct)))}%{C.RESET}"
+            p = float(pct)
+            pi = int(round(p))
+            used_tok = self.context_window.total_input_tokens + self.context_window.total_output_tokens
+            limit = self.model.context_limit
+            used_s = self._fmt_tok(used_tok)
+            limit_s = self._fmt_tok(limit)
+            bar_w = 15
+            filled = int(p * bar_w / 100)
+            if p >= 80:
+                fill_color = "\033[38;5;196m"
+            elif p >= 60:
+                fill_color = "\033[38;5;214m"
+            else:
+                fill_color = C.BAR_FILL
+            bar = f"{fill_color}{'█' * filled}{C.R}{C.BAR_EMPTY}{'░' * (bar_w - filled)}{C.R}"
+            out += f"{C.LABEL}|{C.R} \033[38;5;15;1m✪ {bar} {C.CTX}{used_s}/{limit_s}{C.R} {C.CTX}{pi}%{C.R}"
         if self.plugins:
             joined = ",".join(self.plugins)
-            out += f" {C.LABEL}|{C.RESET} {C.SKILLS}{joined}{C.RESET}"
+            out += f" {C.LABEL}|{C.R} {C.SKILLS}{joined}{C.R}"
         return out
 
     def _line3(self) -> str:
@@ -348,20 +372,20 @@ class Info:
         to_s = self._fmt_tok(to)
         di_s = self._fmt_tok(di)
         do_s = self._fmt_tok(do)
-        time_str = time.strftime("%H:%M:%S")
-        out = f"{C.TIME}{time_str}{C.RESET}"
-        if self.elapsed:
-            out += f"{C.LABEL}(+{self.elapsed}){C.RESET}"
-        out += f" ⬙ {C.LABEL}↓{C.RESET}{C.TOK}{ti_s}{C.RESET}"
-        out += f"{C.LABEL} ↑{C.RESET}{C.TOK}{to_s}{C.RESET}"
+        # time_str = time.strftime("%H:%M:%S")
+        # out = f"{C.TIME}{time_str}{C.R}"
+        # if self.elapsed:
+        #     out += f"{C.LABEL}(+{self.elapsed}){C.R}"
+        out = f"⬙ {C.LABEL}↓ {C.R}{C.TOK}{ti_s}{C.R}"
+        out += f"{C.LABEL}↑ {C.R}{C.TOK}{to_s}{C.R}"
         if di_s != ti_s or do_s != to_s:
-            out += f" / {C.LABEL}↓{C.RESET}{C.TOK}{di_s}{C.RESET}"
-            out += f"{C.LABEL} ↑{C.RESET}{C.TOK}{do_s}{C.RESET}"
+            out += f" / {C.LABEL}↓ {C.R}{C.TOK}{di_s}{C.R}"
+            out += f"{C.LABEL}↑ {C.R}{C.TOK}{do_s}{C.R}"
         sc = f"{self.session_cost:.4f}"
         dc = f"{self.day_cost:.4f}"
-        out += f" 💰 {C.COST}${sc}{C.RESET}"
+        out += f" 💰 {C.COST}${sc}{C.R}"
         if dc != sc:
-            out += f"{C.LABEL}/{C.RESET}{C.COST}${dc}{C.RESET}"
+            out += f"{C.LABEL}/{C.R}{C.COST}${dc}{C.R}"
         return out
 
     def _openspec_lines(self) -> list[str]:
@@ -373,9 +397,11 @@ class Info:
             bar_empty = "░" * (bar_width - filled)
             pct = change.done * 100 // change.total
             ratio = f"{change.done}/{change.total}"
-            line = f"{C.BAR_FILL}{bar_filled}{C.RESET}{C.BAR_EMPTY}{bar_empty}{C.RESET}"
-            line += f" {C.LABEL}{ratio}{C.RESET} \033[1m{pct:>3}%\033[0m"
-            line += f" {C.LABEL}\033[3m{change.name}\033[0m{C.RESET}"
+            line = (
+                f"{C.BAR_FILL}{bar_filled}{C.R}{C.BAR_EMPTY}{bar_empty}{C.R}"
+                f" {C.LABEL}{ratio}{C.R} \033[1m{pct:>3}%{C.R}"
+                f" {C.LABEL}\033[3m{change.name}{C.R}"
+            )
             lines.append(line)
         return lines
 
