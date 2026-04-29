@@ -416,6 +416,28 @@ def fmt_tok(n: int) -> str:
     return str(n)
 
 
+RAINBOW_PALETTE = (
+    196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
+    46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
+    21, 57, 93, 129, 165, 201, 200, 199, 198, 197,
+)
+
+
+def rainbow_color() -> str:
+    state = HOME / '.claude' / 'statusline-rainbow'
+    try:
+        n = int(state.read_text().strip())
+    except (OSError, ValueError):
+        n = 0
+    color = RAINBOW_PALETTE[n % len(RAINBOW_PALETTE)]
+    try:
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(str((n + 1) % len(RAINBOW_PALETTE)))
+    except OSError:
+        pass
+    return f'\033[38;5;{color}m'
+
+
 class Renderer:
     R = '\033[0m'
     PWD = '\033[38;5;75m'
@@ -457,7 +479,7 @@ class Renderer:
                 pass
         return line + (
             f' {self.LABEL}|{self.R} {self.SKILLS}{plugin_names}{self.R}'
-            f' |{self.R} \033[38;5;15m\033[1m  {self.helper(five_hour_limit)}{self.R}'
+            f' |{self.R} {rainbow_color()}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
         )
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float) -> str:
