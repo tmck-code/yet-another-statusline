@@ -628,8 +628,16 @@ class Renderer:
 
     def helper(self, five_hour: RateBucket) -> str:
         try:
+            if not five_hour.resets_at:
+                if not five_hour.used_percentage:
+                    return f'∞'
+                return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}∞'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+            if delta.total_seconds() <= 0:
+                if not five_hour.used_percentage:
+                    return f'∞'
+                return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}∞'
             return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}T-{delta}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
