@@ -59,6 +59,7 @@ ITALIC = '\033[3m'
 
 CLR_GREY_DIM   = '\033[38;5;244m'
 CLR_GREY_DARK  = '\033[38;5;238m'
+CLR_BORDER_OFF = '\033[38;5;242m'
 CLR_SKY_BLUE   = '\033[38;5;75m'
 CLR_GREEN_OK   = '\033[38;5;114m'
 CLR_GREEN_DIM  = '\033[38;5;77m'
@@ -79,7 +80,7 @@ CLR_ALERT      = '\033[38;5;167m'
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
-    return 0x1F300 <= cp <= 0x1FAFF  # emoji only; nerd font PUA/SPUA are 1-wide in most terminals
+    return 0x1F300 <= cp <= 0x1FAFF
 
 
 def _visible_width(s: str) -> int:
@@ -733,43 +734,56 @@ class Renderer:
     SONNET    = CLR_GREEN_OK
     HAIKU     = CLR_SKY_BLUE
 
-    def border_top(self, width: int, session_id: str = '') -> str:
+    def border_top(self, width: int, session_id: str = '', fill: float = 1.0) -> str:
+        parts = [self.grad_at(0, width, fill=fill), '╭']
         if session_id:
             avail = max(0, width - 4)
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
-            rest = max(0, width - 4 - _visible_width(sid))
-            return f'{self.BORDER}╭──{self.SESSION}{sid}{self.BORDER}{"─" * rest}╮{self.R}'
-        return f'{self.BORDER}╭{"─" * (width - 2)}╮{self.R}'
+            sid_w = _visible_width(sid)
+            parts += [self.grad_at(1, width, fill=fill), '─', self.grad_at(2, width, fill=fill), '─', self.SESSION, sid]
+            offset = 3 + sid_w
+            rest = max(0, width - 4 - sid_w)
+            for i in range(rest):
+                parts += [self.grad_at(offset + i, width, fill=fill), '─']
+        else:
+            for i in range(1, width - 1):
+                parts += [self.grad_at(i, width, fill=fill), '─']
+        parts += [self.grad_at(width - 1, width, fill=fill), '╮', self.R]
+        return ''.join(parts)
 
-    def border_bottom(self, width: int, ups: tuple[int, ...] = ()) -> str:
+    def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
-        chars = ''.join('┴' if (i + 2) in ups_set else '─' for i in range(width - 2))
-        return f'{self.BORDER}╰{chars}╯{self.R}'
+        parts = [self.grad_at(0, width, fill=fill), '╰']
+        for i in range(width - 2):
+            ch = '┴' if (i + 2) in ups_set else '─'
+            parts += [self.grad_at(i + 1, width, fill=fill), ch]
+        parts += [self.grad_at(width - 1, width, fill=fill), '╯', self.R]
+        return ''.join(parts)
 
-    def border_separator(self, width: int, ups: tuple[int, ...] = ()) -> str:
+    def border_separator(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
-        chars = ''.join('┴' if (i + 2) in ups_set else '─' for i in range(width - 2))
-        return f'{self.BORDER}├{chars}┤{self.R}'
+        parts = [self.grad_at(0, width, fill=fill), '├']
+        for i in range(width - 2):
+            ch = '┴' if (i + 2) in ups_set else '─'
+            parts += [self.grad_at(i + 1, width, fill=fill), ch]
+        parts += [self.grad_at(width - 1, width, fill=fill), '┤', self.R]
+        return ''.join(parts)
 
-    def border_separator_dim(self, width: int, downs: tuple[int, ...] = ()) -> str:
-        palette = (244, 243, 242, 241, 240)
-        n = width - 2
-        mid = (n - 1) / 2
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
         downs_set = set(downs)
-        parts = []
-        for i in range(n):
+        parts = [self.grad_at(0, width, 0.6, fill=fill), '├']
+        for i in range(width - 2):
             col = i + 2
-            if col in downs_set:
-                parts.append(f'{self.BORDER}┬')
-                continue
-            dist = mid - abs(i - mid)
-            idx = min(int(dist), len(palette) - 1)
-            parts.append(f'\033[38;5;{palette[idx]}m┄')
-        return f'{self.BORDER}├{"".join(parts)}{self.BORDER}┤{self.R}'
+            ch = '┬' if col in downs_set else '┄'
+            parts += [self.grad_at(i + 1, width, 0.6, fill=fill), ch]
+        parts += [self.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
+        return ''.join(parts)
 
-    def border_line(self, content: str, width: int) -> str:
+    def border_line(self, content: str, width: int, fill: float = 1.0) -> str:
         pad = max(0, width - 3 - _visible_width(content))
-        return f'{self.BORDER}│{self.R} {content}{" " * pad}{self.BORDER}│{self.R}'
+        left  = self.grad_at(0, width, fill=fill)
+        right = self.grad_at(width - 1, width, fill=fill)
+        return f'{left}│{self.R} {content}{" " * pad}{right}│{self.R}'
 
     def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
         dirty = ''
@@ -836,20 +850,24 @@ class Renderer:
             extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
+    RATE_W  = 6
+    IN_W    = 6
+    CACHE_W = 6
+    OUT_W   = 6
+
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         day_clr = self.day_cost_colour(day_cost)
 
-        sess_in_s, day_in_s       = fmt_tok(sess_in), fmt_tok(day_in)
-        sess_cache_s, day_cache_s = fmt_tok(sess_cache), fmt_tok(day_cache)
-        sess_out_s, day_out_s     = fmt_tok(sess_out), fmt_tok(day_out)
-        in_w    = max(len(sess_in_s), len(day_in_s))
-        cache_w = max(len(sess_cache_s), len(day_cache_s))
-        out_w   = max(len(sess_out_s), len(day_out_s))
-        sess_in_s,    day_in_s    = sess_in_s.rjust(in_w),       day_in_s.rjust(in_w)
-        sess_cache_s, day_cache_s = sess_cache_s.rjust(cache_w), day_cache_s.rjust(cache_w)
-        sess_out_s,   day_out_s   = sess_out_s.rjust(out_w),     day_out_s.rjust(out_w)
+        sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
+        day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
+        sess_cache_s = fmt_tok(sess_cache).rjust(self.CACHE_W)
+        day_cache_s  = fmt_tok(day_cache).rjust(self.CACHE_W)
+        sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
+        day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
 
-        leader1 = f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_s = fmt_tok(tok_rate).rjust(self.RATE_W)
+
+        leader1 = f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
         leader2 = ' ' * _visible_width(leader1)
         vsep    = f'  {self.BORDER}│{self.R}  '
 
@@ -882,24 +900,49 @@ class Renderer:
             color = CLR_GREEN_OK
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
 
-    def gradient_color(self, t: float) -> str:
+    GRAD_STOPS = (
+        (0.00, ( 40, 200,  80)),
+        (0.50, (240, 220,  40)),
+        (0.75, (240, 140,  30)),
+        (1.00, (220,  40,  40)),
+    )
+    GREY_RGB = (108, 108, 108)  # matches xterm 242
+    FADE     = 0.06
+
+    def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
-        stops = (
-            (0.00, ( 40, 200,  80)),
-            (0.50, (240, 220,  40)),
-            (0.75, (240, 140,  30)),
-            (1.00, (220,  40,  40)),
-        )
-        for i in range(len(stops) - 1):
-            t0, c0 = stops[i]
-            t1, c1 = stops[i + 1]
+        for i in range(len(self.GRAD_STOPS) - 1):
+            t0, c0 = self.GRAD_STOPS[i]
+            t1, c1 = self.GRAD_STOPS[i + 1]
             if t <= t1:
                 u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
-                r = int(c0[0] + (c1[0] - c0[0]) * u)
-                g = int(c0[1] + (c1[1] - c0[1]) * u)
-                b = int(c0[2] + (c1[2] - c0[2]) * u)
-                return f'\033[38;2;{r};{g};{b}m'
-        r, g, b = stops[-1][1]
+                r = int((c0[0] + (c1[0] - c0[0]) * u) * dim)
+                g = int((c0[1] + (c1[1] - c0[1]) * u) * dim)
+                b = int((c0[2] + (c1[2] - c0[2]) * u) * dim)
+                return r, g, b
+        r, g, b = self.GRAD_STOPS[-1][1]
+        return int(r * dim), int(g * dim), int(b * dim)
+
+    def gradient_color(self, t: float, dim: float = 1.0) -> str:
+        r, g, b = self.gradient_rgb(t, dim)
+        return f'\033[38;2;{r};{g};{b}m'
+
+    def grad_at(self, col: int, width: int, dim: float = 1.0, fill: float = 1.0) -> str:
+        denom = max(1, width - 1)
+        t = col / denom
+        if fill <= 0:
+            return CLR_BORDER_OFF
+        fade = self.FADE
+        if t <= fill - fade:
+            return self.gradient_color(t, dim)
+        if t >= fill + fade:
+            return CLR_BORDER_OFF
+        er, eg, eb = self.gradient_rgb(min(t, fill), dim)
+        gr, gg, gb = self.GREY_RGB
+        u = max(0.0, min(1.0, (t - (fill - fade)) / (2 * fade)))
+        r = int(er + (gr - er) * u)
+        g = int(eg + (gg - eg) * u)
+        b = int(eb + (gb - eb) * u)
         return f'\033[38;2;{r};{g};{b}m'
 
     def gradient_bar(self, filled: int, bar_w: int) -> str:
@@ -928,7 +971,7 @@ class Renderer:
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R}{a}⚡ /clear?{self.R} '
+            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{"▱" * (bar_w - filled)}{self.R}'
@@ -1000,27 +1043,31 @@ def main() -> None:
     title_w = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
 
-    line_context = r.context_line(session.context_window, width - 3)
+    ctx = session.context_window
+    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
+    fill = min(total_tokens / SOFT_LIMIT, 1.0)
+
+    line_context = r.context_line(ctx, width - 3)
 
     lines = [
-        r.border_top(width, session.session_id),
-        r.border_line(line_path, width),
-        r.border_line(line_model, width),
+        r.border_top(width, session.session_id, fill=fill),
+        r.border_line(line_path, width, fill=fill),
+        r.border_line(line_model, width, fill=fill),
     ]
     if plugins_line:
-        lines.append(r.border_line(plugins_line, width))
-    lines.append(r.border_separator_dim(width))
-    lines.append(r.border_line(line_context, width))
-    lines.append(r.border_separator_dim(width, downs=vsep_cols))
+        lines.append(r.border_line(plugins_line, width, fill=fill))
+    lines.append(r.border_separator_dim(width, fill=fill))
+    lines.append(r.border_line(line_context, width, fill=fill))
+    lines.append(r.border_separator_dim(width, downs=vsep_cols, fill=fill))
     for lt in line_tokens:
-        lines.append(r.border_line(lt, width))
+        lines.append(r.border_line(lt, width, fill=fill))
     if openspec_bars:
-        lines.append(r.border_separator(width, ups=vsep_cols))
+        lines.append(r.border_separator(width, ups=vsep_cols, fill=fill))
         for bar in openspec_bars:
-            lines.append(r.border_line(bar, width))
-        lines.append(r.border_bottom(width))
+            lines.append(r.border_line(bar, width, fill=fill))
+        lines.append(r.border_bottom(width, fill=fill))
     else:
-        lines.append(r.border_bottom(width, ups=vsep_cols))
+        lines.append(r.border_bottom(width, ups=vsep_cols, fill=fill))
 
     sys.stdout.write('\n'.join(lines))
 

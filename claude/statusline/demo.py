@@ -9,11 +9,14 @@ residue on the developer's real filesystem.
 from __future__ import annotations
 
 import json
+import math
 import os
+import random
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 WRAPPER_DIR = Path(__file__).resolve().parent
@@ -21,7 +24,21 @@ FIXTURE_PATH = WRAPPER_DIR / 'session-info-example.json'
 STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline-command.py'
 
 
-DEMO_USAGE_TOTALS = (16322 + 123500, 2600)
+SKILLS_PROGRESSION = (
+    [],
+    ['grill-me'],
+    ['grill-me', 'caveman'],
+    ['grill-me', 'caveman', 'tdd'],
+    ['grill-me', 'caveman', 'tdd', 'rocky:rocky'],
+    ['grill-me', 'caveman', 'tdd', 'rocky:rocky', 'frontend-design:frontend-design'],
+)
+
+PLUGINS_PROGRESSION = (
+    [],
+    ['openspec@0.1.0'],
+    ['openspec@0.1.0', 'frontend-design@0.3.2'],
+    ['openspec@0.1.0', 'frontend-design@0.3.2', 'rocky@0.1.0'],
+)
 
 
 def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
@@ -33,39 +50,8 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     (project / 'openspec' / 'changes' / 'add-skills-row').mkdir(parents=True)
     (project / 'openspec' / 'changes' / 'port-statusline-to-python').mkdir(parents=True)
 
-    settings = {
-        'enabledPlugins': {
-            'openspec@0.1.0': True,
-            'frontend-design@0.3.2': True,
-        }
-    }
-    (claude / 'settings.json').write_text(json.dumps(settings, indent=2) + '\n')
-
-    transcript = claude / 'projects' / session_id / f'{session_id}.jsonl'
-    skill_lines = [
-        {'type': 'assistant', 'message': {
-            'id': 'msg_demo_1',
-            'role': 'assistant',
-            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'grill-me'}}],
-            'usage': {'input_tokens': 12, 'cache_creation_input_tokens': 8000, 'cache_read_input_tokens': 24000, 'output_tokens': 540},
-        }},
-        {'type': 'assistant', 'message': {
-            'id': 'msg_demo_2',
-            'role': 'assistant',
-            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'caveman'}}],
-            'usage': {'input_tokens': 6, 'cache_creation_input_tokens': 5200, 'cache_read_input_tokens': 41000, 'output_tokens': 820},
-        }},
-        {'type': 'assistant', 'message': {
-            'id': 'msg_demo_3',
-            'role': 'assistant',
-            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'frontend-design:frontend-design'}}],
-            'usage': {'input_tokens': 4, 'cache_creation_input_tokens': 3100, 'cache_read_input_tokens': 58500, 'output_tokens': 1240},
-        }},
-    ]
-    transcript.write_text('\n'.join(json.dumps(ln) for ln in skill_lines) + '\n')
-
     (project / '.git' / 'HEAD').write_text('ref: refs/heads/demo\n')
-    (project / '.git' / 'refs' / 'heads' / 'demo').write_text('a' * 40 + '\n')
+    (project / '.git' / 'refs' / 'heads' / 'demo').write_text('3219308b1c0d4f5a8e7b6c9d2f0a1e3b4c5d6e7f\n')
 
     (project / 'openspec' / 'changes' / 'add-skills-row' / 'tasks.md').write_text(
         '- [x] one\n- [x] two\n- [x] three\n- [ ] four\n'
@@ -74,13 +60,42 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
         '- [x] one\n- [ ] two\n- [ ] three\n- [ ] four\n'
     )
 
-    seed_ts = time.time() - 30
-    total_in, total_out = DEMO_USAGE_TOTALS
-    seed_in = max(0, total_in - 500)
-    seed_out = max(0, total_out - 80)
-    (claude / 'statusline-token-rate.log').write_text(
-        f'{seed_ts:.3f} {session_id} {seed_in} {seed_out}\n'
+    write_settings(claude, [])
+    write_transcript(claude / 'projects' / session_id / f'{session_id}.jsonl', [], 0, 0, 0, 0)
+    today = datetime.now().strftime('%Y-%m-%d')
+    (claude / 'statusline-tokens.log').write_text(
+        f'{today} demo-prior-session 8200000 215000000 1450000\n'
     )
+
+
+def write_settings(claude_dir: Path, plugins: list[str]) -> None:
+    settings = {'enabledPlugins': {p: True for p in plugins}}
+    (claude_dir / 'settings.json').write_text(json.dumps(settings, indent=2) + '\n')
+
+
+def write_transcript(transcript: Path, skills: list[str], total_in: int, total_cc: int, total_cr: int, total_out: int) -> None:
+    msgs = []
+    n = max(1, len(skills))
+    for i, skill in enumerate(skills or ['']):
+        last = (i == n - 1)
+        share_in   = total_in   // n + (total_in   % n if last else 0)
+        share_cc   = total_cc   // n + (total_cc   % n if last else 0)
+        share_cr   = total_cr   // n + (total_cr   % n if last else 0)
+        share_out  = total_out  // n + (total_out  % n if last else 0)
+        msg: dict = {
+            'id': f'msg_demo_{i+1}',
+            'role': 'assistant',
+            'usage': {
+                'input_tokens':                share_in,
+                'cache_creation_input_tokens': share_cc,
+                'cache_read_input_tokens':     share_cr,
+                'output_tokens':               share_out,
+            },
+        }
+        if skill:
+            msg['content'] = [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': skill}}]
+        msgs.append({'type': 'assistant', 'message': msg})
+    transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
 
 
 def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
@@ -98,6 +113,83 @@ def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
     return json.dumps(raw)
 
 
+SOFT_LIMIT = 150_000
+
+
+def render_once(env: dict, payload: str) -> str:
+    result = subprocess.run(
+        [sys.executable, str(STATUSLINE_SCRIPT)],
+        input=payload,
+        text=True,
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60, delay: float = 0.10) -> None:
+    raw.setdefault('context_window', {})
+    raw.setdefault('rate_limits', {}).setdefault('five_hour', {})
+    raw['rate_limits'].setdefault('seven_day', {})
+
+    claude       = tmpdir / '.claude'
+    project      = tmpdir / 'my-project'
+    transcript_p = claude / 'projects' / session_id / f'{session_id}.jsonl'
+    rate_log     = claude / 'statusline-token-rate.log'
+    moving_spec  = project / 'openspec' / 'changes' / 'port-statusline-to-python' / 'tasks.md'
+    spec_total   = 8
+
+    rng = random.Random(42)
+
+    sys.stdout.write('\n\n')
+    last_lines = 0
+
+    for i in range(steps + 1):
+        pct = i / steps
+
+        total_in   = int(150_000 * pct * 1.05)
+        total_cc   = int(total_in * 0.18)
+        total_cr   = int(total_in * 12.0)
+        total_out  = int(7_500 * pct + 120)
+
+        skill_idx  = min(int(pct * len(SKILLS_PROGRESSION)),  len(SKILLS_PROGRESSION) - 1)
+        plugin_idx = min(int(pct * len(PLUGINS_PROGRESSION)), len(PLUGINS_PROGRESSION) - 1)
+        skills_now  = SKILLS_PROGRESSION[skill_idx]
+        plugins_now = PLUGINS_PROGRESSION[plugin_idx]
+
+        spec_done = min(spec_total, int(pct * spec_total) + 1)
+        moving_spec.write_text(
+            ''.join(f'- [x] task {n}\n' for n in range(1, spec_done + 1))
+            + ''.join(f'- [ ] task {n}\n' for n in range(spec_done + 1, spec_total + 1))
+        )
+
+        write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out)
+        write_settings(claude, plugins_now)
+
+        session_sum = (total_in + total_cc) + total_out
+        target_rate = max(200, int(2200 + 1500 * math.sin(i * 0.55) + rng.randint(-400, 400)))
+        seed_sum    = max(0, session_sum - target_rate)
+        seed_in     = seed_sum // 2
+        seed_out    = seed_sum - seed_in
+        rate_log.write_text(f'{time.time() - 30:.3f} {session_id} {seed_in} {seed_out}\n')
+
+        raw['context_window']['total_input_tokens']  = total_in
+        raw['context_window']['total_output_tokens'] = total_out
+        raw['rate_limits']['five_hour']['used_percentage'] = round(15 + pct * 70, 1)
+        raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 55, 1)
+
+        out = render_once(env, json.dumps(raw))
+        if last_lines > 1:
+            sys.stdout.write(f'\033[{last_lines - 1}A\r')
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        last_lines = out.count('\n') + 1
+        time.sleep(delay)
+
+    sys.stdout.write('\n\n\n')
+
+
 def main() -> int:
     fixture = json.loads(FIXTURE_PATH.read_text())
     session_id = fixture['session_id']
@@ -106,18 +198,12 @@ def main() -> int:
         tmpdir = Path(raw_tmp)
         build_synthetic_env(tmpdir, session_id)
         payload = mutate_session_info(tmpdir, session_id, fixture)
+        raw = json.loads(payload)
 
         env = os.environ.copy()
         env['HOME'] = str(tmpdir)
 
-        subprocess.run(
-            [sys.executable, str(STATUSLINE_SCRIPT)],
-            input=payload,
-            text=True,
-            env=env,
-            check=True,
-        )
-    sys.stdout.write('\n')
+        animate(env, raw, tmpdir, session_id)
     return 0
 
 
