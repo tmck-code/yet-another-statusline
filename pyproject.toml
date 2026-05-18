@@ -1,0 +1,86 @@
+[project]
+name = "claude-code-config"
+version = "0.1.0"
+description = "My Claude Code config"
+readme = "README.md"
+
+requires-python = ">=3.14"
+
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "ruff",
+    "uv",
+]
+
+[tool.mypy]
+exclude = [
+    ".claude/",
+    ".venv/",
+    "claude/",
+    "openspec/",
+]
+plugins = []
+disallow_untyped_defs = true  # no functions without type annotations
+warn_return_any = true        # warn about functions that return Any
+ignore_missing_imports = true # ignore imports that can't be resolved (e.g., third-party libraries without type stubs)
+strict = true                 # enable all strict type-checking options
+warn_unused_configs = true
+disallow_subclassing_any = true
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".claude/",
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "claude/",
+    "openspec/",
+]
+
+line-length = 140
+indent-width = 4
+target-version = "py312"
+
+
+[tool.ruff.lint]
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = [
+    "E4", # E subset of the pycodestyle (`E`)  codes by default.
+    "E7",
+    "E9",
+    "F",  # Enable Pyflakes (`F`)
+]
+ignore = [
+    "E401", # multiple imports on one line
+    "E701", # multiple statements on one line
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+# prevents whitespace from being removed
+unfixable = [
+    "E203", # whitespace before ':'
+    "E401", # multiple imports on one line
+    "E701", # multiple statements on one line
+]
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "preserve" # keep existing quote style (single or double)
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+preview = true
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "single"
+inline-quotes = "single"
+multiline-quotes = "single"
+

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-'''Claude Code statusLine command (Python port).'''
+'Claude Code statusLine command (Python port).'
 
 from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -14,11 +15,66 @@ from pathlib import Path
 from typing import NamedTuple
 
 
-HOME = Path(os.path.expanduser('~'))
-
-MIN_WIDTH = 80
+HOME       = Path(os.path.expanduser('~'))
+MIN_WIDTH  = 80
+MAX_WIDTH  = 160
 SOFT_LIMIT = 150_000
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+_ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def terminal_width() -> int:
+    try:
+        w = int((HOME / '.claude' / 'terminal-width').read_text().strip())
+        if w > 0:
+            return w
+    except (OSError, ValueError):
+        pass
+    try:
+        cols = int(os.environ.get('COLUMNS', '0'))
+        if cols > 0:
+            return cols
+    except ValueError:
+        pass
+    w = shutil.get_terminal_size(fallback=(0, 0)).columns
+    if w > 0:
+        return w
+    for fd in (2, 1, 0):
+        try:
+            return os.get_terminal_size(fd).columns
+        except OSError:
+            pass
+    try:
+        tty_fd = os.open('/dev/tty', os.O_RDONLY)
+        try:
+            return os.get_terminal_size(tty_fd).columns
+        finally:
+            os.close(tty_fd)
+    except OSError:
+        pass
+    return MAX_WIDTH
+
+RESET  = '\033[0m'
+BOLD   = '\033[1m'
+ITALIC = '\033[3m'
+
+CLR_GREY_DIM   = '\033[38;5;244m'
+CLR_GREY_DARK  = '\033[38;5;238m'
+CLR_SKY_BLUE   = '\033[38;5;75m'
+CLR_GREEN_OK   = '\033[38;5;114m'
+CLR_GREEN_DIM  = '\033[38;5;77m'
+CLR_GREEN_BRT  = '\033[38;5;46m'
+CLR_PURPLE     = '\033[38;5;183m'
+CLR_GOLD       = '\033[38;5;222m'
+CLR_YELLOW     = '\033[38;5;226m'
+CLR_YELLOW_BRT = '\033[38;5;11m'
+CLR_CYAN       = '\033[38;5;116m'
+CLR_CYAN_DIM   = '\033[38;5;103m'
+CLR_CYAN_ICON  = '\033[38;5;117m'
+CLR_PINK       = '\033[38;5;210m'
+CLR_PEACH      = '\033[38;5;216m'
+CLR_WHITE_BRT  = '\033[38;5;15m'
+CLR_WARN       = '\033[38;5;214m'
+CLR_ALERT      = '\033[38;5;167m'
 
 
 def _is_wide(ch: str) -> bool:
@@ -36,7 +92,7 @@ class Model(NamedTuple):
     display_name: str = ''
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Model':
+    def from_dict(cls, d: dict) -> Model:
         return cls(id=d.get('id', ''), display_name=d.get('display_name', ''))
 
     @property
@@ -53,7 +109,7 @@ class OutputStyle(NamedTuple):
     name: str = 'default'
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'OutputStyle':
+    def from_dict(cls, d: dict) -> OutputStyle:
         return cls(name=d.get('name', 'default'))
 
 
@@ -61,7 +117,7 @@ class Effort(NamedTuple):
     level: str = ''
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Effort':
+    def from_dict(cls, d: dict) -> Effort:
         return cls(level=d.get('level', ''))
 
 
@@ -69,7 +125,7 @@ class Thinking(NamedTuple):
     enabled: bool = False
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Thinking':
+    def from_dict(cls, d: dict) -> Thinking:
         return cls(enabled=bool(d.get('enabled', False)))
 
 
@@ -80,12 +136,12 @@ class CurrentUsage(NamedTuple):
     cache_read_input_tokens: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'CurrentUsage':
+    def from_dict(cls, d: dict) -> CurrentUsage:
         return cls(
-            input_tokens=d.get('input_tokens', 0),
-            output_tokens=d.get('output_tokens', 0),
-            cache_creation_input_tokens=d.get('cache_creation_input_tokens', 0),
-            cache_read_input_tokens=d.get('cache_read_input_tokens', 0),
+            input_tokens                = d.get('input_tokens', 0),
+            output_tokens               = d.get('output_tokens', 0),
+            cache_creation_input_tokens = d.get('cache_creation_input_tokens', 0),
+            cache_read_input_tokens     = d.get('cache_read_input_tokens', 0),
         )
 
 
@@ -94,10 +150,10 @@ class RateBucket(NamedTuple):
     resets_at: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'RateBucket':
+    def from_dict(cls, d: dict) -> RateBucket:
         return cls(
-            used_percentage=round(float(d.get('used_percentage', 0.0)), 2),
-            resets_at=d.get('resets_at', 0),
+            used_percentage = round(float(d.get('used_percentage', 0.0)), 2),
+            resets_at       = d.get('resets_at', 0),
         )
 
 
@@ -108,11 +164,11 @@ class Workspace:
     added_dirs: list = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Workspace':
+    def from_dict(cls, d: dict) -> Workspace:
         return cls(
-            current_dir=d.get('current_dir', ''),
-            project_dir=d.get('project_dir', ''),
-            added_dirs=d.get('added_dirs') or [],
+            current_dir = d.get('current_dir', ''),
+            project_dir = d.get('project_dir', ''),
+            added_dirs  = d.get('added_dirs') or [],
         )
 
     @property
@@ -145,13 +201,13 @@ class Cost:
     total_lines_removed: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Cost':
+    def from_dict(cls, d: dict) -> Cost:
         return cls(
-            total_cost_usd=d.get('total_cost_usd', 0.0),
-            total_duration_ms=d.get('total_duration_ms', 0),
-            total_api_duration_ms=d.get('total_api_duration_ms', 0),
-            total_lines_added=d.get('total_lines_added', 0),
-            total_lines_removed=d.get('total_lines_removed', 0),
+            total_cost_usd        = d.get('total_cost_usd', 0.0),
+            total_duration_ms     = d.get('total_duration_ms', 0),
+            total_api_duration_ms = d.get('total_api_duration_ms', 0),
+            total_lines_added     = d.get('total_lines_added', 0),
+            total_lines_removed   = d.get('total_lines_removed', 0),
         )
 
 
@@ -165,14 +221,14 @@ class ContextWindow:
     remaining_percentage: float | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'ContextWindow':
+    def from_dict(cls, d: dict) -> ContextWindow:
         return cls(
-            total_input_tokens=d.get('total_input_tokens', 0),
-            total_output_tokens=d.get('total_output_tokens', 0),
-            context_window_size=d.get('context_window_size', 0),
-            current_usage=CurrentUsage.from_dict(d.get('current_usage') or {}),
-            used_percentage=d.get('used_percentage'),
-            remaining_percentage=d.get('remaining_percentage'),
+            total_input_tokens   = d.get('total_input_tokens', 0),
+            total_output_tokens  = d.get('total_output_tokens', 0),
+            context_window_size  = d.get('context_window_size', 0),
+            current_usage        = CurrentUsage.from_dict(d.get('current_usage') or {}),
+            used_percentage      = d.get('used_percentage'),
+            remaining_percentage = d.get('remaining_percentage'),
         )
 
 
@@ -182,10 +238,10 @@ class RateLimits:
     seven_day: RateBucket = field(default_factory=RateBucket)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'RateLimits':
+    def from_dict(cls, d: dict) -> RateLimits:
         return cls(
-            five_hour=RateBucket.from_dict(d.get('five_hour') or {}),
-            seven_day=RateBucket.from_dict(d.get('seven_day') or {}),
+            five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
+            seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
         )
 
 
@@ -206,21 +262,21 @@ class SessionInfo:
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'SessionInfo':
+    def from_dict(cls, d: dict) -> SessionInfo:
         return cls(
-            session_id=d.get('session_id', ''),
-            transcript_path=d.get('transcript_path', ''),
-            cwd=d.get('cwd', ''),
-            model=Model.from_dict(d.get('model') or {}),
-            workspace=Workspace.from_dict(d.get('workspace') or {}),
-            version=d.get('version', ''),
-            output_style=OutputStyle.from_dict(d.get('output_style') or {}),
-            cost=Cost.from_dict(d.get('cost') or {}),
-            context_window=ContextWindow.from_dict(d.get('context_window') or {}),
-            exceeds_200k_tokens=d.get('exceeds_200k_tokens', False),
-            effort=Effort.from_dict(d.get('effort') or {}),
-            thinking=Thinking.from_dict(d.get('thinking') or {}),
-            rate_limits=RateLimits.from_dict(d.get('rate_limits') or {}),
+            session_id          = d.get('session_id', ''),
+            transcript_path     = d.get('transcript_path', ''),
+            cwd                 = d.get('cwd', ''),
+            model               = Model.from_dict(d.get('model') or {}),
+            workspace           = Workspace.from_dict(d.get('workspace') or {}),
+            version             = d.get('version', ''),
+            output_style        = OutputStyle.from_dict(d.get('output_style') or {}),
+            cost                = Cost.from_dict(d.get('cost') or {}),
+            context_window      = ContextWindow.from_dict(d.get('context_window') or {}),
+            exceeds_200k_tokens = d.get('exceeds_200k_tokens', False),
+            effort              = Effort.from_dict(d.get('effort') or {}),
+            thinking            = Thinking.from_dict(d.get('thinking') or {}),
+            rate_limits         = RateLimits.from_dict(d.get('rate_limits') or {}),
         )
 
     @property
@@ -325,7 +381,7 @@ class TokenLog:
     day_out: int = 0
 
     @classmethod
-    def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> 'TokenLog':
+    def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> TokenLog:
         log = HOME / '.claude' / 'statusline-tokens.log'
         lines = []
         if log.exists():
@@ -357,6 +413,7 @@ class TokenLog:
             except ValueError:
                 pass
         return cls(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out)
+
 
 
 class TokenRate:
@@ -407,13 +464,18 @@ class GitInfo:
     untracked: int = 0
 
     @classmethod
-    def from_cwd(cls, cwd: str) -> 'GitInfo':
-        repo, gitdir = cls._find_repo(cwd)
+    def from_cwd(cls, cwd: str) -> GitInfo:
+        repo, gitdir   = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)
         modified = untracked = 0
         if branch:
             modified, untracked = cls._dirty(repo)
-        return cls(branch=branch, commit=commit, modified=modified, untracked=untracked)
+        return cls(
+            branch    = branch,
+            commit    = commit,
+            modified  = modified,
+            untracked = untracked,
+        )
 
     @staticmethod
     def _find_repo(cwd: str) -> tuple[str, str]:
@@ -469,7 +531,7 @@ class GitInfo:
                 ['git', '-C', repo, 'ls-files', '-m'],
                 capture_output=True, text=True, timeout=2,
             )
-            modified = sum(1 for l in r.stdout.splitlines() if l.strip())
+            modified = sum(1 for ln in r.stdout.splitlines() if ln.strip())
         except Exception:
             pass
         try:
@@ -478,7 +540,7 @@ class GitInfo:
                  '--directory', '--no-empty-directory'],
                 capture_output=True, text=True, timeout=2,
             )
-            untracked = sum(1 for l in r.stdout.splitlines() if l.strip())
+            untracked = sum(1 for ln in r.stdout.splitlines() if ln.strip())
         except Exception:
             pass
         return modified, untracked
@@ -489,7 +551,7 @@ class LoadedSkills:
     names: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_transcript(cls, transcript_path: str) -> 'LoadedSkills':
+    def from_transcript(cls, transcript_path: str) -> LoadedSkills:
         if not transcript_path:
             return cls()
         p = Path(transcript_path)
@@ -527,7 +589,7 @@ class TranscriptUsage:
     output_tokens: int = 0
 
     @classmethod
-    def from_transcript(cls, transcript_path: str) -> 'TranscriptUsage':
+    def from_transcript(cls, transcript_path: str) -> TranscriptUsage:
         if not transcript_path:
             return cls()
         p = Path(transcript_path)
@@ -557,10 +619,10 @@ class TranscriptUsage:
         except OSError:
             return cls()
         return cls(
-            input_tokens=ti,
-            cache_creation_input_tokens=cc,
-            cache_read_input_tokens=cr,
-            output_tokens=to,
+            input_tokens                = ti,
+            cache_creation_input_tokens = cc,
+            cache_read_input_tokens     = cr,
+            output_tokens               = to,
         )
 
     @property
@@ -581,7 +643,7 @@ class OpenSpec:
     changes: list[tuple[str, int, int]] = field(default_factory=list)
 
     @classmethod
-    def from_cwd(cls, cwd: str) -> 'OpenSpec':
+    def from_cwd(cls, cwd: str) -> OpenSpec:
         root = cls._find_root(cwd)
         if not root:
             return cls()
@@ -644,27 +706,39 @@ def rainbow_color() -> str:
 
 
 class Renderer:
-    R = '\033[0m'
-    BORDER = '\033[38;5;244m'
-    PWD = '\033[38;5;75m'
-    BRANCH = '\033[38;5;114m'
-    COMMIT = '\033[38;5;244m'
-    SESSION = '\033[38;5;244m'
-    MODEL = '\033[38;5;183m'
-    SKILLS = '\033[38;5;222m'
-    TIME = '\033[38;5;244m'
-    TOK = '\033[38;5;116m'
-    TOK_DIM = '\033[38;5;103m'
-    COST = '\033[38;5;210m'
-    BAR_FILL = '\033[38;5;114m'
-    BAR_EMPTY = '\033[38;5;238m'
-    DIM_GREEN = '\033[38;5;77m'
-    LABEL = '\033[38;5;244m'
-    CTX = '\033[38;5;216m'
-    BOLDW = '\033[1m\033[38;5;15m'
-    BOLDY = '\033[38;5;226m'
+    R         = RESET
+    BORDER    = CLR_GREY_DIM
+    PWD       = CLR_SKY_BLUE
+    BRANCH    = CLR_GREEN_OK
+    COMMIT    = CLR_GREY_DIM
+    SESSION   = CLR_GREY_DIM
+    MODEL     = CLR_PURPLE
+    SKILLS    = CLR_GOLD
+    TIME      = CLR_GREY_DIM
+    TOK       = CLR_CYAN
+    TOK_DIM   = CLR_CYAN_DIM
+    COST      = CLR_PINK
+    BAR_FILL  = CLR_GREEN_OK
+    BAR_EMPTY = CLR_GREY_DARK
+    DIM_GREEN = CLR_GREEN_DIM
+    LABEL     = CLR_GREY_DIM
+    CTX       = CLR_PEACH
+    BOLDW     = BOLD + CLR_WHITE_BRT
+    BOLDY     = CLR_YELLOW
+    DIRTY     = CLR_WARN
+    ICON_PATH = CLR_CYAN_ICON
+    ARROW     = CLR_GREEN_BRT
+    TOK_ICON  = CLR_YELLOW_BRT
+    OPUS      = CLR_YELLOW
+    SONNET    = CLR_GREEN_OK
+    HAIKU     = CLR_SKY_BLUE
 
-    def border_top(self, width: int) -> str:
+    def border_top(self, width: int, session_id: str = '') -> str:
+        if session_id:
+            avail = max(0, width - 4)
+            sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
+            rest = max(0, width - 4 - _visible_width(sid))
+            return f'{self.BORDER}╭──{self.SESSION}{sid}{self.BORDER}{"─" * rest}╮{self.R}'
         return f'{self.BORDER}╭{"─" * (width - 2)}╮{self.R}'
 
     def border_bottom(self, width: int) -> str:
@@ -677,58 +751,54 @@ class Renderer:
         pad = max(0, width - 3 - _visible_width(content))
         return f'{self.BORDER}│{self.R} {content}{" " * pad}{self.BORDER}│{self.R}'
 
-    def path_git(self, short_pwd: str, git: GitInfo, session_id: str, elapsed: str = '') -> str:
+    def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
         dirty = ''
         if git.modified > 0:
-            dirty += f' \033[38;5;214m✹ {git.modified}\033[0m'
+            dirty += f' {CLR_WARN}✹ {git.modified}{RESET}'
         if git.untracked > 0:
-            dirty += f' \033[38;5;214m✭ {git.untracked}\033[0m'
-        if elapsed and elapsed != '0m':
-            session_label = f'[{session_id} · {elapsed}]'
-        else:
-            session_label = f'[{session_id}]'
+            dirty += f' {CLR_WARN}✭ {git.untracked}{RESET}'
+        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (elapsed and elapsed != '0m') else ''
 
         return (
-            f'\033[38;5;117m  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}\033[38;5;46m\033[1m∈{self.R}'
+            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{self.LABEL}/{self.R}'
             f'{self.COMMIT}{git.commit}{self.R}'
-            f'{dirty}'
-            f' {self.SESSION}{session_label}{self.R}'
+            f'{dirty}{tail}'
         )
 
     def model_colour(self, model_name: str) -> str:
         m = model_name.lower()
         if 'opus' in m:
-            return '\033[38;5;226m'
+            return CLR_YELLOW
         if 'sonnet' in m:
-            return '\033[38;5;114m'
+            return CLR_GREEN_OK
         if 'haiku' in m:
-            return '\033[38;5;75m'
-        return '\033[38;5;183m'
+            return CLR_SKY_BLUE
+        return CLR_PURPLE
 
     def fill_colour(self, pct: float) -> str:
         if pct >= 90:
-            return '\033[38;5;167m'
+            return CLR_ALERT
         if pct >= 70:
-            return '\033[38;5;214m'
-        return '\033[38;5;114m'
+            return CLR_WARN
+        return CLR_GREEN_OK
 
     def day_cost_colour(self, cost: float) -> str:
         if cost > 50:
-            return '\033[38;5;167m'
+            return CLR_ALERT
         if cost >= 25:
-            return '\033[38;5;226m'
-        return '\033[38;5;114m'
+            return CLR_YELLOW
+        return CLR_GREEN_OK
 
-    def model_section(self, model_name: str, model_thinking: str, rate_limits: 'RateLimits') -> str:
+    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits) -> str:
         step = rainbow_step()
         c_think = rainbow_at(step, 0)
         c_helper = rainbow_at(step, 9)
         model_clr = self.model_colour(model_name)
-        line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{model_clr}\033[3m{model_thinking}\033[0m'
-        line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(rate_limits.five_hour)}{self.R}'
+        line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+        line += f' |{self.R} {c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
@@ -741,15 +811,15 @@ class Renderer:
         c_plugins = rainbow_at(step, 6)
         extras = []
         if skills_count > 0:
-            extras.append(f'{c_skills}\033[1m󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
+            extras.append(f'{c_skills}{BOLD}󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
-            extras.append(f'{c_plugins}\033[1m  {self.R}{self.SKILLS}{plugin_names}{self.R}')
+            extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         day_clr = self.day_cost_colour(day_cost)
         return (
-            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
+            f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
             f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R} {self.TOK_DIM}({fmt_tok(day_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
             f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
@@ -762,64 +832,65 @@ class Renderer:
         bar_filled = '█' * filled
         bar_empty = '░' * (30 - filled)
         if ratio >= 0.9:
-            color = '\033[38;5;167m'
+            color = CLR_ALERT
         elif ratio >= 0.7:
-            color = '\033[38;5;214m'
+            color = CLR_WARN
         else:
-            color = '\033[38;5;114m'
+            color = CLR_GREEN_OK
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
 
     def context_bar_color(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
         if ratio >= 0.9:
-            return '\033[38;5;167m'
+            return CLR_ALERT
         elif ratio >= 0.7:
-            return '\033[38;5;214m'
+            return CLR_WARN
         else:
-            return '\033[38;5;114m'
+            return CLR_GREEN_OK
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft = total_tokens / SOFT_LIMIT * 100
-        alert = total_tokens >= SOFT_LIMIT
+        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
+        pct_soft     = total_tokens / SOFT_LIMIT * 100
 
-        if alert:
-            A = '\033[1m\033[38;5;167m'
+        if total_tokens >= SOFT_LIMIT:
+            a = BOLD + CLR_ALERT
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
-                secondary = f' {A}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {A}{fmt_tok(total_tokens)}{self.R} {A}\033[1m{pct_soft:.0f}%{self.R}{A}⚡ /clear?{self.R} '
-            bar_w = max(4, available - _visible_width(prefix)-3)
+                secondary = f' {a}({pct_model:.0f}%){self.R}'
+            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R}{a}⚡ /clear?{self.R} '
+            bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
-            bar = f'{A}{"█" * filled}{"░" * (bar_w - filled)}{self.R}'
-            return f'{A}{self.R} {prefix}{bar}'
-        else:
-            bar_clr = self.fill_colour(pct_soft)
-            secondary = ''
-            if ctx.context_window_size > 0:
-                pct_model = total_tokens / ctx.context_window_size * 100
-                secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
-            prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}\033[1m{pct_soft:.0f}% '
-            bar_w = max(4, available - _visible_width(prefix)-3)
-            filled = int(fill_ratio * bar_w)
-            bar = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
-            return f'{bar_clr}{self.R} {prefix}{bar}'
+            bar    = f'{a}{"█" * filled}{"░" * (bar_w - filled)}{self.R}'
+            return f'{a}{self.R} {prefix}{bar}'
 
-    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80) -> str:
+        bar_clr = self.fill_colour(pct_soft)
+        secondary = ''
+        if ctx.context_window_size > 0:
+            pct_model = total_tokens / ctx.context_window_size * 100
+            secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
+        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
+        bar_w  = max(4, available - _visible_width(prefix) - 3)
+        filled = int(fill_ratio * bar_w)
+        bar    = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
+        return f'{bar_clr}{self.R} {prefix}{bar}'
+
+    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
         pct = done * 100 // total
-        title = (name[:22] + '...') if len(name) > 25 else name.ljust(25)
-        # title(25) + space(1) + space(1) + counts + space(1) + pct(4)
+        if len(name) > title_w:
+            title = name[:max(1, title_w - 3)] + '...'
+        else:
+            title = name.ljust(title_w)
         suffix_visible = 7 + len(str(done)) + len(str(total))
-        bar_w = max(4, (box_width - 3) - 26 - suffix_visible)
+        bar_w = max(4, (box_width - 3) - (title_w + 1) - suffix_visible)
         filled = done * bar_w // total
         bar_filled, bar_empty = '█' * filled, '░' * (bar_w - filled)
 
         return (
-            f'{self.LABEL}\033[3m{title}\033[0m{self.R} '
+            f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
             f'{self.BAR_FILL}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
-            f' {self.LABEL}{done}/{total}{self.R} \033[1m{pct:>3d}%\033[0m'
+            f' {self.LABEL}{done}/{total}{self.R} {BOLD}{pct:>3d}%{RESET}'
         )
 
     def helper(self, five_hour: RateBucket) -> str:
@@ -849,22 +920,21 @@ def main() -> None:
     token_log = session.token_log
 
     git = GitInfo.from_cwd(session.cwd)
-    line_path = r.path_git(session.short_pwd, git, session.session_id, session.elapsed)
+    line_path = r.path_git(session.short_pwd, git, session.elapsed)
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
     line_tokens = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
 
-    other_content = [line_path, line_model, line_tokens]
-    if plugins_line:
-        other_content.append(plugins_line)
-    width = max(MIN_WIDTH, max(_visible_width(l) + 4 for l in other_content))
-    openspec_bars = [r.openspec_bar(name, d, t, width) for name, d, t in OpenSpec.from_cwd(session.cwd).changes]
+    width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
+    changes = OpenSpec.from_cwd(session.cwd).changes
+    title_cap = max(10, width - 45)
+    title_w = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
+    openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
 
-    # context line fills to the computed width; available = width minus borders/padding
     line_context = r.context_line(session.context_window, width - 3)
 
     lines = [
-        r.border_top(width),
+        r.border_top(width, session.session_id),
         r.border_line(line_path, width),
         r.border_line(line_context, width),
         r.border_line(line_model, width),
