@@ -33,6 +33,12 @@ _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 def terminal_width() -> int:
     try:
+        w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
+        if w > 0:
+            return w
+    except OSError:
+        pass
+    try:
         w = int((HOME / '.claude' / 'terminal-width').read_text().strip())
         if w > 0:
             return w
