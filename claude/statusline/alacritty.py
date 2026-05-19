@@ -23,7 +23,7 @@ for line in map(str.strip, sys.stdin):
         if new_columns != columns:
             print('terminal width changed! new columns:', new_columns, file=sys.stderr)
             columns = new_columns
-            with open('/home/freman/.claude/terminal-width', 'w') as f:
+            with open(f'{os.environ["HOME"]}/.claude/terminal-width', 'w') as f:
                 f.write(str(columns))
             try:
                 r = subprocess.run(['pgrep', '-f', 'claude'], capture_output=True, text=True)
