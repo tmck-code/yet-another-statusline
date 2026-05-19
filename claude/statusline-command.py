@@ -97,6 +97,8 @@ CLR_ALERT      = '\033[38;5;167m'
 # terminal.
 ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
+GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
+GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 
 
 def _is_wide(ch: str) -> bool:
@@ -821,6 +823,93 @@ def rainbow_color() -> str:
     return rainbow_at(rainbow_step())
 
 
+ANCHOR_RGB = {
+    'opus':   (255, 255,   0),
+    'sonnet': (135, 215, 135),
+    'haiku':  ( 95, 175, 255),
+    'other':  (215, 175, 255),
+}
+
+SHIFT_WARM = {
+    'opus':   (255, 165,   0),
+    'sonnet': ( 44, 208, 168),
+    'haiku':  (123, 230, 255),
+    'other':  (240, 165, 224),
+}
+
+SHIFT_COOL = {
+    'opus':   (180, 230,  60),
+    'sonnet': ( 44, 140,  80),
+    'haiku':  ( 74, 110, 224),
+    'other':  (138, 111, 214),
+}
+
+LEVEL_PCT = {
+    'low':    30,
+    'medium': 55,
+    'high':   80,
+    'xhigh':  100,
+    'max':    140,
+}
+
+BG_LUM_THRESHOLD = 110
+
+
+def model_key(name: str) -> str:
+    m = name.lower()
+    if 'opus'   in m: return 'opus'
+    if 'sonnet' in m: return 'sonnet'
+    if 'haiku'  in m: return 'haiku'
+    return 'other'
+
+
+def _scale(rgb: tuple[int, int, int], pct: int) -> tuple[int, int, int]:
+    return tuple(min(255, max(0, c * pct // 100)) for c in rgb)
+
+
+def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]],
+                  anchor: tuple[int, int, int],
+                  shift: tuple[int, int, int],
+                  pct: int) -> str:
+    c0 = _scale(anchor, pct)
+    c1 = _scale(shift, pct)
+    n = max(1, len(cells) - 1)
+    parts: list[str] = []
+    prev_bg = prev_fg = None
+    prev_bold = prev_italic = False
+    for i, (ch, fg, bold, italic) in enumerate(cells):
+        t = i / n
+        r = int(c0[0] + (c1[0] - c0[0]) * t)
+        g = int(c0[1] + (c1[1] - c0[1]) * t)
+        b = int(c0[2] + (c1[2] - c0[2]) * t)
+        lum = (r * 299 + g * 587 + b * 114) // 1000
+        fg_rgb = (15, 15, 15) if lum >= BG_LUM_THRESHOLD else (fg if fg is not None else None)
+        cur_bg = (r, g, b)
+        if cur_bg != prev_bg:
+            parts.append(f'\033[48;2;{r};{g};{b}m')
+            prev_bg = cur_bg
+        if fg_rgb != prev_fg:
+            if fg_rgb is None:
+                parts.append('\033[39m')
+            else:
+                parts.append(f'\033[38;2;{fg_rgb[0]};{fg_rgb[1]};{fg_rgb[2]}m')
+            prev_fg = fg_rgb
+        if bold != prev_bold:
+            parts.append('\033[1m' if bold else '\033[22m')
+            prev_bold = bold
+        if italic != prev_italic:
+            parts.append('\033[3m' if italic else '\033[23m')
+            prev_italic = italic
+        parts.append(ch)
+    parts.append('\033[49m')
+    if prev_bold:
+        parts.append('\033[22m')
+    if prev_italic:
+        parts.append('\033[23m')
+    parts.append('\033[39m')
+    return ''.join(parts)
+
+
 def _short_agent_name(agent_type: str, description: str) -> str:
     if agent_type.lower() in ('general-purpose', 'explore', 'plan'):
         parts = description.split(' - ', 1)
@@ -828,6 +917,37 @@ def _short_agent_name(agent_type: str, description: str) -> str:
     return agent_type.replace('-executor', '')
 
 class Renderer:
+    def __init__(self, bg_shift: str = 'warm'):
+        self.bg_shift = bg_shift if bg_shift in ('warm', 'cool') else 'warm'
+
+    def _bg_shift_table(self) -> dict:
+        return SHIFT_WARM if self.bg_shift == 'warm' else SHIFT_COOL
+
+    def _model_bg_pct(self, effort_level: str) -> int:
+        return LEVEL_PCT.get(effort_level.lower(), 0)
+
+    def _model_anchor_pair(self, model_name: str) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        key    = model_key(model_name)
+        anchor = ANCHOR_RGB[key]
+        shift  = self._bg_shift_table()[key]
+        return anchor, shift
+
+    def model_bg_lead(self, model_name: str, effort_level: str) -> str:
+        pct = self._model_bg_pct(effort_level)
+        if not pct:
+            return ''
+        anchor, _ = self._model_anchor_pair(model_name)
+        r, g, b   = _scale(anchor, pct)
+        return f'\033[48;2;{r};{g};{b}m'
+
+    def model_bg_trail(self, model_name: str, effort_level: str) -> str:
+        pct = self._model_bg_pct(effort_level)
+        if not pct:
+            return ''
+        _, shift = self._model_anchor_pair(model_name)
+        r, g, b  = _scale(shift, pct)
+        return f'\033[48;2;{r};{g};{b}m'
+
     R         = RESET
     BORDER    = CLR_GREY_DIM
     PWD       = CLR_SKY_BLUE
@@ -911,11 +1031,16 @@ class Renderer:
         parts += [self.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0) -> str:
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '') -> str:
         pad = max(0, width - 3 - _visible_width(content))
         left  = self.grad_at(0, width, fill=fill)
         right = self.grad_at(width - 1, width, fill=fill)
-        return f'{left}│{self.R} {content}{" " * pad}{right}│{self.R}'
+        lead = f'{bg_lead} \033[49m' if bg_lead else ' '
+        if bg_trail and pad > 0:
+            pad_str = f'{" " * (pad - 1)}{bg_trail} \033[49m'
+        else:
+            pad_str = ' ' * pad
+        return f'{left}│{self.R}{lead}{content}{pad_str}{right}│{self.R}'
 
     def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
         dirty = ''
@@ -978,12 +1103,30 @@ class Renderer:
             return CLR_YELLOW
         return CLR_GREEN_OK
 
-    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits) -> tuple[str, int]:
-        step = rainbow_step()
-        c_think = rainbow_at(step, 0)
-        c_helper = rainbow_at(step, 9)
+    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '') -> tuple[str, int]:
+        step      = rainbow_step()
+        c_think   = rainbow_at(step, 0)
+        c_helper  = rainbow_at(step, 9)
         model_clr = self.model_colour(model_name)
-        line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+        pct       = self._model_bg_pct(effort_level)
+        if pct:
+            anchor, shift = self._model_anchor_pair(model_name)
+            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+            cells.append((GLYPH_MODEL,    anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            for ch in model_name:
+                cells.append((ch, anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((GLYPH_THINKING, anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            for ch in model_thinking:
+                cells.append((ch, anchor, False, True))
+            cells.append((' ', anchor, False, False))
+            line = paint_bg_span(cells, anchor, shift, pct)
+        else:
+            line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
         left_w = _visible_width(line)
         vsep = f'  {self.BORDER}│{self.R}  '
         line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
@@ -993,8 +1136,10 @@ class Renderer:
             line += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
         return line, left_w + 2
 
-    def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int) -> str:
+    def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> str:
         model_clr = self.model_colour(model_name)
+        pct_bg    = self._model_bg_pct(effort_level)
+        anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
         pct       = rate_limits.five_hour.used_percentage or 0
         pct_clr   = self.fill_colour(float(pct))
         step      = rainbow_step()
@@ -1016,6 +1161,20 @@ class Renderer:
             pass
 
         def _build(name: str, rate: str) -> str:
+            if pct_bg:
+                cells = []
+                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                for ch in name:
+                    cells.append((ch, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                painted = paint_bg_span(cells, anchor, shift, pct_bg)
+                return (
+                    f'{painted}'
+                    f'{self.LABEL}|{self.R}'
+                    f' {c_helper}{BOLD}{self.R} {rate}'
+                )
             return (
                 f'{model_clr}󰢹  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
@@ -1334,9 +1493,21 @@ class Renderer:
             return f'{e.__class__.__name__}, {str(e)}'
 
 def main() -> None:
+    bg_shift = 'warm'
+    args = sys.argv[1:]
+    while args:
+        a = args.pop(0)
+        if a == '--bg-shift' and args:
+            v = args.pop(0).lower()
+            if v in ('warm', 'cool'):
+                bg_shift = v
+        elif a.startswith('--bg-shift='):
+            v = a.split('=', 1)[1].lower()
+            if v in ('warm', 'cool'):
+                bg_shift = v
     info    = json.loads(sys.stdin.read())
     session = SessionInfo.from_dict(info)
-    r       = Renderer()
+    r       = Renderer(bg_shift=bg_shift)
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
@@ -1348,12 +1519,16 @@ def main() -> None:
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
+    effort_for_bg = session.effort.level if session.thinking.enabled else ''
+    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
+    bg_trail      = r.model_bg_trail(session.model_name, effort_for_bg)
+
     if width < NARROW_WIDTH:
-        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3)
+        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
         line_context = r.context_line_compact(ctx, width - 3)
         lines = [
             r.border_top(width, session.session_id, fill=fill),
-            r.border_line(line_model, width, fill=fill),
+            r.border_line(line_model, width, fill=fill, bg_lead=bg_lead),
             r.border_separator_dim(width, fill=fill),
             r.border_line(line_context, width, fill=fill),
             r.border_bottom(width, fill=fill),
@@ -1362,7 +1537,7 @@ def main() -> None:
     elif width < MEDIUM_WIDTH:
         git          = GitInfo.from_cwd(session.cwd)
         line_path    = r.path_git_compact(session.short_pwd, git)
-        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3)
+        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
         line_context = r.context_line_compact(ctx, width - 3)
         combined = r.path_model_row(line_path, line_model, width)
         if combined is not None:
@@ -1378,7 +1553,7 @@ def main() -> None:
             lines = [
                 r.border_top(width, session.session_id, fill=fill),
                 r.border_line(line_path, width, fill=fill),
-                r.border_line(line_model, width, fill=fill),
+                r.border_line(line_model, width, fill=fill, bg_lead=bg_lead),
                 r.border_separator_dim(width, fill=fill),
                 r.border_line(line_context, width, fill=fill),
                 r.border_bottom(width, fill=fill),
@@ -1392,7 +1567,7 @@ def main() -> None:
 
         git          = GitInfo.from_cwd(session.cwd)
         line_path    = r.path_git(session.short_pwd, git, session.elapsed)
-        line_model, model_div_offset = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
+        line_model, model_div_offset = r.model_section(session.model_name, session.model_thinking, session.rate_limits, session.effort.level if session.thinking.enabled else '')
         line_tokens, vsep_cols = r.tokens_cost(
             session.total_in, session.cache_read, session.total_out,
             token_log.day_in, token_log.day_cache_read, token_log.day_out,
@@ -1413,7 +1588,7 @@ def main() -> None:
             model_div_col = top_div_col + 3 + model_div_offset
             lines = [
                 r.border_top(width, session.session_id, downs=(top_div_col, model_div_col), fill=fill),
-                r.border_line(combined_line, width, fill=fill),
+                r.border_line(combined_line, width, fill=fill, bg_trail=bg_trail),
             ]
             next_ups: tuple[int, ...] = (top_div_col, model_div_col)
         else:
@@ -1421,7 +1596,7 @@ def main() -> None:
             lines = [
                 r.border_top(width, session.session_id, fill=fill),
                 r.border_line(line_path, width, fill=fill),
-                r.border_line(line_model, width, fill=fill),
+                r.border_line(line_model, width, fill=fill, bg_lead=bg_lead, bg_trail=bg_trail),
             ]
             next_ups = (model_div_col,)
         if plugins_line:

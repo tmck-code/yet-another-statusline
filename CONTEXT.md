@@ -29,6 +29,15 @@ The model's per-session maximum, from the session JSON's `context_window.context
 Token consumption above 150K. Auto-compaction looms and output quality degrades regardless of how much **Context Window Size** remains. Drives the bar/percentage colour: green ≤50K, yellow ≤80K, orange ≤150K, red >150K.
 _Avoid_: "context full" — the bar can be 15% full on a 1M-context model and still be in the red zone.
 
+### Thinking effort
+
+**Effort Level**:
+The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
+_Avoid_: "thinking level" (overloaded — the *level* names a setting, the *effort* names the resource it spends).
+
+**Hue shift**:
+The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's foreground colour. Selectable via `--bg-shift {warm,cool}`. `warm` is the default.
+
 ### Rate limits
 
 **Five-Hour Limit**:
