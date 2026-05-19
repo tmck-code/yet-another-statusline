@@ -167,12 +167,19 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60
         write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out)
         write_settings(claude, plugins_now)
 
-        session_sum = (total_in + total_cc) + total_out
-        target_rate = max(200, int(2200 + 1500 * math.sin(i * 0.55) + rng.randint(-400, 400)))
-        seed_sum    = max(0, session_sum - target_rate)
-        seed_in     = seed_sum // 2
-        seed_out    = seed_sum - seed_in
-        rate_log.write_text(f'{time.time() - 30:.3f} {session_id} {seed_in} {seed_out}\n')
+        now = time.time()
+        cumul_in = total_in + total_cc
+        cumul_out = total_out
+        n_history = 30
+        entries = []
+        for j in range(n_history + 1):
+            t = now - 60.0 + (60.0 * j / n_history)
+            progress = (j / n_history) * pct
+            hist_in = int(150_000 * progress * 1.05 * 1.18) + int(rng.random() * 800)
+            hist_out = int(7_500 * progress + 120) + int(rng.random() * 200)
+            entries.append(f'{t:.3f} {session_id} {hist_in} {hist_out}')
+        entries.append(f'{now:.3f} {session_id} {cumul_in} {cumul_out}')
+        rate_log.write_text('\n'.join(entries) + '\n')
 
         raw['context_window']['total_input_tokens']  = total_in
         raw['context_window']['total_output_tokens'] = total_out

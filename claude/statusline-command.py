@@ -456,6 +456,45 @@ class TokenRate:
         _, ti1, to1 = samples[-1]
         return max(0, (ti1 + to1) - (ti0 + to0))
 
+    @classmethod
+    def history(cls, session_id: str, n_buckets: int, window: float) -> list[int]:
+        if n_buckets <= 0 or not session_id:
+            return []
+        log = HOME / '.claude' / 'statusline-token-rate.log'
+        now = time.time()
+        samples: list[tuple[float, int, int]] = []
+        if log.exists():
+            for ln in log.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    ts = float(parts[0])
+                    sid = parts[1]
+                    ti = int(parts[2])
+                    to = int(parts[3])
+                except ValueError:
+                    continue
+                if sid == session_id and now - ts <= window:
+                    samples.append((ts, ti, to))
+        if len(samples) < 2:
+            return [0] * n_buckets
+        samples.sort()
+        bucket_size = window / n_buckets
+        start = now - window
+        buckets = [0] * n_buckets
+        for i in range(len(samples) - 1):
+            ts0, ti0, to0 = samples[i]
+            ts1, ti1, to1 = samples[i + 1]
+            delta = max(0, (ti1 + to1) - (ti0 + to0))
+            if delta == 0:
+                continue
+            midpoint = (ts0 + ts1) / 2
+            idx = int((midpoint - start) / bucket_size)
+            idx = max(0, min(n_buckets - 1, idx))
+            buckets[idx] += delta
+        return buckets
+
 
 @dataclass
 class GitInfo:
@@ -678,6 +717,16 @@ class OpenSpec:
         return ''
 
 
+def sparkline_width(terminal_width: int) -> int:
+    if terminal_width >= 130:
+        return 30
+    if terminal_width >= 110:
+        return 20
+    if terminal_width >= 90:
+        return 10
+    return 0
+
+
 def fmt_tok(n: int) -> str:
     if n >= 1_000_000:
         return f'{n/1_000_000:.1f}M'
@@ -850,12 +899,28 @@ class Renderer:
             extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
+    SPARK_CHARS = '▁▂▃▄▅▆▇█'
+
+    def sparkline(self, history: list[int]) -> str:
+        if not history:
+            return ''
+        max_val = max(history)
+        parts = []
+        for val in history:
+            if val == 0 or max_val == 0:
+                parts.append(f'{CLR_GREY_DARK}▁{self.R}')
+            else:
+                ratio = val / max_val
+                idx = min(int(ratio * 7), 7)
+                parts.append(f'{self.gradient_color(ratio)}{self.SPARK_CHARS[idx]}{self.R}')
+        return ''.join(parts)
+
     RATE_W  = 6
     IN_W    = 6
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, spark_history: list[int] | None = None) -> str:
         day_clr = self.day_cost_colour(day_cost)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -868,7 +933,14 @@ class Renderer:
         rate_s = fmt_tok(tok_rate).rjust(self.RATE_W)
 
         leader1 = f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
-        leader2 = ' ' * _visible_width(leader1)
+        leader1_w = _visible_width(leader1)
+        if spark_history:
+            display = spark_history[-leader1_w:] if len(spark_history) > leader1_w else spark_history
+            spark_str = self.sparkline(display)
+            pad = max(0, leader1_w - len(display))
+            leader2 = f'{" " * pad}{spark_str}'
+        else:
+            leader2 = ' ' * leader1_w
         vsep    = f'  {self.BORDER}│{self.R}  '
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
@@ -1031,13 +1103,14 @@ def main() -> None:
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     token_log = session.token_log
 
+    width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
+    spark_history = TokenRate.history(session.session_id, 30, 60.0) if session.session_id else []
+
     git = GitInfo.from_cwd(session.cwd)
     line_path = r.path_git(session.short_pwd, git, session.elapsed)
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
-    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
+    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, spark_history)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
-
-    width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
     changes = OpenSpec.from_cwd(session.cwd).changes
     title_cap = max(10, width - 45)
     title_w = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
@@ -1055,6 +1128,7 @@ def main() -> None:
         r.border_line(line_model, width, fill=fill),
     ]
     if plugins_line:
+        lines.append(r.border_separator_dim(width, fill=fill))
         lines.append(r.border_line(plugins_line, width, fill=fill))
     lines.append(r.border_separator_dim(width, fill=fill))
     lines.append(r.border_line(line_context, width, fill=fill))
