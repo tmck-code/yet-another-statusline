@@ -14,15 +14,15 @@ def test_gradient_rgb_at_zero() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5.3  gradient_rgb(1.0) and gradient_rgb(1.5) both clamp to (210, 20, 50)
+# 5.3  gradient_rgb(1.0) and gradient_rgb(1.5) both clamp to (170, 60, 210)
 # ---------------------------------------------------------------------------
 
 def test_gradient_rgb_at_one() -> None:
-    assert _r.gradient_rgb(1.0) == (210, 20, 50)
+    assert _r.gradient_rgb(1.0) == (170, 60, 210)
 
 
 def test_gradient_rgb_clamps_above_one() -> None:
-    assert _r.gradient_rgb(1.5) == (210, 20, 50)
+    assert _r.gradient_rgb(1.5) == (170, 60, 210)
 
 
 # ---------------------------------------------------------------------------

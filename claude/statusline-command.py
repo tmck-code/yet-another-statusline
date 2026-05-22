@@ -1031,14 +1031,11 @@ def _short_agent_name(agent_type: str, description: str) -> str:
 
 class GradientEngine:
     GRAD_STOPS = (
-        (0.00, ( 40, 210,  80)),
-        (0.25, ( 80, 230,  40)),
-        (0.45, (180, 240,  20)),
-        (0.55, (240, 230,  20)),
-        (0.68, (255, 170,  15)),
-        (0.78, (250, 100,  20)),
-        (0.88, (235,  55,  35)),
-        (1.00, (210,  20,  50)),
+        (0.00, ( 40, 210,  80)),  # green
+        (0.25, (240, 230,  20)),  # yellow
+        (0.50, (255, 140,  20)),  # orange
+        (0.75, (220,  40,  50)),  # red
+        (1.00, (170,  60, 210)),  # purple
     )
     GREY_RGB = (108, 108, 108)
     FADE     = 0.06
@@ -1238,15 +1235,25 @@ class BorderRenderer:
         parts += [self.gradient.grad_at(width - 1, width, fill=fill), '┤', self.R]
         return ''.join(parts)
 
+    DIM_MIN  = 0.6
+    DIM_RAMP = 5
+
+    def _dim_for_col(self, col: int, elbow_cols: set[int]) -> float:
+        d = min(abs(col - e) for e in elbow_cols)
+        if d == 0:
+            return 1.0
+        return max(self.DIM_MIN, 1.0 - (1.0 - self.DIM_MIN) * (d / self.DIM_RAMP))
+
     def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
         downs_set = set(downs)
         ups_set = set(ups)
+        elbow_cols = {1, width} | downs_set | ups_set
         p = pill or Pill()
         edge = pill_edge if pill_edge == 'top' else 'bottom'
         if p.active and p.start <= 1:
             parts = [p.border_fg(p.start), p.border_char(p.start, edge)]
         else:
-            parts = [self.gradient.grad_at(0, width, 0.6, fill=fill), '├']
+            parts = [self.gradient.grad_at(0, width, self._dim_for_col(1, elbow_cols), fill=fill), '├']
         for i in range(width - 2):
             col = i + 2
             pc = p.border_char(col, edge) if p.active else ''
@@ -1261,11 +1268,11 @@ class BorderRenderer:
                     ch = '┴'
                 else:
                     ch = '┄'
-                parts += [self.gradient.grad_at(i + 1, width, 0.6, fill=fill), ch]
+                parts += [self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill), ch]
         if p.active and p.start <= width <= p.end:
             parts += [p.border_fg(width), p.border_char(width, edge), self.R]
         else:
-            parts += [self.gradient.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
+            parts += [self.gradient.grad_at(width - 1, width, self._dim_for_col(width, elbow_cols), fill=fill), '┤', self.R]
         return ''.join(parts)
 
     def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
@@ -1371,6 +1378,11 @@ class Renderer:
 
     def gradient_bar(self, filled: int, bar_w: int) -> str:
         return self.gradient.gradient_bar(filled, bar_w)
+
+    def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False) -> str:
+        color    = self.gradient.grad_at(col - 1, width, fill=fill)
+        trailing = ' ' if leader else '  '
+        return f'  {color}│{self.R}{trailing}'
 
     def sparkline(self, history: list[int]) -> tuple[str, str]:
         return self.gradient.sparkline(history)
@@ -1648,7 +1660,7 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
         day_clr = self.day_cost_colour(day_cost)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -1658,9 +1670,7 @@ class Renderer:
         sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
         day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
 
-        vsep    = f'  {self.BORDER}│{self.R}  '
-        vsep_w  = 5
-        vsep_leader   = f'  {self.BORDER}│{self.R} '
+        vsep_w        = 5
         vsep_leader_w = 4
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
@@ -1670,14 +1680,19 @@ class Renderer:
         cost2 = f'${day_cost:,.2f}'
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
 
-        end1 = f'{CLR_GREEN_OK}{ICON_COST} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
-        end2 = f'   {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
+        end1 = f'{CLR_GREEN_OK}{ICON_COST}{self.R}{self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end2 = f' {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
         label_w = 15
         w_middle = _visible_width(middle1)
         w_end    = max(_visible_width(end1), _visible_width(end2))
         content_w = box_width - 3
         leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
+
+        col1 = w_middle + vsep_w
+        col2 = w_middle + w_end + vsep_w + 5
+        vsep        = self.vsep_block(col1, box_width, fill=fill)
+        vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
         # bar_w = leader_w - label_w
 
         rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
@@ -1697,9 +1712,6 @@ class Renderer:
             leader1 = f'{rate_label_padded}{top_row}'
             # leader2 = f'{" " * label_w}{bot_row}'
             leader2 = f'{" " * rate_label_w}{bot_row}'
-
-        col1 = w_middle + vsep_w
-        col2 = w_middle + w_end + vsep_w + 5
 
         return [
             f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
@@ -1941,7 +1953,6 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
 
-    vsep     = f'  {r.BORDER}│{r.R}  '
     vsep_w   = 5
     rate_w   = _visible_width(rate_text)
     target_w = (width - 4) - vsep_w - rate_w - right_w
@@ -1953,6 +1964,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     path_div_col = 3 + path_w + 2
+    vsep = r.vsep_block(path_div_col, width, fill=fill)
     content = f'{line_path}{vsep}{rate_text}'
     if pill_pct:
         top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
@@ -2005,7 +2017,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
         sess_cost, day_cost, tok_rate,
-        session.session_id, width,
+        session.session_id, width, fill,
     )
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, subagents.subagents or None)
     changes      = OpenSpec.from_cwd(session.cwd).changes
@@ -2018,7 +2030,6 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
 
-    vsep     = f'  {r.BORDER}│{r.R}  '
     vsep_w   = 5
     helper_w = _visible_width(helper_text)
     target_w = (width - 4) - vsep_w - helper_w - right_w
@@ -2030,6 +2041,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     path_div_col = 3 + path_w + 2
+    vsep = r.vsep_block(path_div_col, width, fill=fill)
     content = f'{line_path}{vsep}{helper_text}'
     if pill_pct:
         rows += [
