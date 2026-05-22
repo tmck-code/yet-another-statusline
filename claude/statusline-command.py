@@ -84,7 +84,9 @@ CLR_GOLD       = '\033[38;5;222m'
 CLR_YELLOW     = '\033[38;5;226m'
 CLR_YELLOW_BRT = '\033[38;5;11m'
 CLR_CYAN       = '\033[38;5;116m'
-CLR_CYAN_DIM   = '\033[38;5;103m'
+CLR_CYAN_DIM   = '\033[38;5;244m'
+CLR_CYAN_DAY   = '\033[38;5;109m'
+CLR_CYAN_DAY_DIM = '\033[38;5;240m'
 CLR_CYAN_ICON  = '\033[38;5;117m'
 CLR_PINK       = '\033[38;5;210m'
 CLR_PEACH      = '\033[38;5;216m'
@@ -1334,6 +1336,8 @@ class Renderer:
     TIME      = CLR_GREY_DIM
     TOK       = CLR_CYAN
     TOK_DIM   = CLR_CYAN_DIM
+    TOK_DAY     = CLR_CYAN_DAY
+    TOK_DAY_DIM = CLR_CYAN_DAY_DIM
     COST      = CLR_PINK
     BAR_FILL  = CLR_GREEN_OK
     BAR_EMPTY = CLR_GREY_DARK
@@ -1660,7 +1664,7 @@ class Renderer:
         vsep_leader_w = 4
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
-        middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{day_in_s}{self.R} {self.TOK_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{day_out_s}{self.R}'
+        middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK_DAY}{day_out_s}{self.R}'
 
         cost1 = f'${sess_cost:,.2f}'
         cost2 = f'${day_cost:,.2f}'
