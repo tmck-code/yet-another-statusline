@@ -1014,6 +1014,7 @@ def _short_agent_name(agent_type: str, description: str) -> str:
         return parts[0] if len(parts) > 1 else description[:20]
     return agent_type.replace('-executor', '')
 
+
 class GradientEngine:
     GRAD_STOPS = (
         (0.00, ( 40, 210,  80)),
@@ -1076,19 +1077,25 @@ class GradientEngine:
             parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
-    def sparkline(self, history: list[int]) -> str:
+    def sparkline(self, history: list[int]) -> tuple[str, str]:
         if not history:
-            return ''
+            return '', ''
         max_val = max(history)
-        parts = []
+        top_parts = []
+        bot_parts = []
         for val in history:
-            if val == 0 or max_val == 0:
-                parts.append(' ')
+            ratio = (val / max_val) if max_val > 0 else 0.0
+            idx = min(int(ratio * 16), 16)
+            if idx == 0:
+                top_ch, bot_ch = ' ', self.SPARK_CHARS[0]
+            elif idx <= 8:
+                top_ch, bot_ch = ' ', self.SPARK_CHARS[idx - 1]
             else:
-                ratio = val / max_val
-                idx = min(int(ratio * 7), 7)
-                parts.append(f'{self.gradient_color(ratio)}{self.SPARK_CHARS[idx]}{RESET}')
-        return ''.join(parts)
+                top_ch, bot_ch = self.SPARK_CHARS[idx - 9], '█'
+            clr = self.gradient_color(ratio)
+            top_parts.append(f'{clr}{top_ch}{RESET}')
+            bot_parts.append(f'{clr}{bot_ch}{RESET}')
+        return ''.join(top_parts), ''.join(bot_parts)
 
 
 class BorderRenderer:
@@ -1286,7 +1293,7 @@ class Renderer:
     def gradient_bar(self, filled: int, bar_w: int) -> str:
         return self.gradient.gradient_bar(filled, bar_w)
 
-    def sparkline(self, history: list[int]) -> str:
+    def sparkline(self, history: list[int]) -> tuple[str, str]:
         return self.gradient.sparkline(history)
 
     # --- Border delegations (backward compat) ---
@@ -1572,10 +1579,10 @@ class Renderer:
         sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
         day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
 
-        rate_s = fmt_tok(tok_rate).rjust(self.RATE_W)
-
         vsep    = f'  {self.BORDER}│{self.R}  '
         vsep_w  = 5
+        vsep_leader   = f'  {self.BORDER}│{self.R} '
+        vsep_leader_w = 4
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
         middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{day_in_s}{self.R} {self.TOK_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{day_out_s}{self.R}'
@@ -1587,29 +1594,37 @@ class Renderer:
         end1 = f'{CLR_GREEN_OK}{ICON_COST} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
         end2 = f'   {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
+        label_w = 15
         w_middle = _visible_width(middle1)
         w_end    = max(_visible_width(end1), _visible_width(end2))
         content_w = box_width - 3
-        leader_w = max(11, content_w - w_middle - w_end - vsep_w * 2)
+        leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
+        # bar_w = leader_w - label_w
 
-        rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE}  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
-        pad_left = max(0, (leader_w - rate_label_w) // 2)
-        pad_right = max(0, leader_w - rate_label_w - pad_left)
-        leader1 = f'{" " * pad_left}{rate_label}{" " * pad_right}'
+        rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
+        bar_w = leader_w - rate_label_w
 
-        if session_id:
-            spark_history = TokenRate.history(session_id, leader_w, TokenRate.WINDOW * 2)
-            leader2 = self.sparkline(spark_history[::-1])
+        if bar_w <= 0:
+            leader1 = rate_label_padded
+            leader2 = ' ' * label_w
         else:
-            leader2 = ' ' * leader_w
+            if session_id:
+                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
+                top_row, bot_row = self.sparkline(spark_history[::-1])
+            else:
+                top_row, bot_row = ' ' * bar_w, ' ' * bar_w
+            leader1 = f'{rate_label_padded}{top_row}'
+            # leader2 = f'{" " * label_w}{bot_row}'
+            leader2 = f'{" " * rate_label_w}{bot_row}'
 
         col1 = w_middle + vsep_w
-        col2 = w_middle + w_end + vsep_w * 2
+        col2 = w_middle + w_end + vsep_w + 5
 
         return [
-            f'{middle1}{vsep}{end1}{vsep}{leader1}',
-            f'{middle2}{vsep}{end2}{vsep}{leader2}',
+            f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
+            f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
         ], (col1, col2)
 
     def context_bar(self, fill_ratio: float) -> str:

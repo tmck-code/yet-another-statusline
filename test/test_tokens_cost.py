@@ -1,12 +1,13 @@
 from typing import Any
 
 import statusline_command as sl
+from conftest import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
 
 
-BOX_WIDTH = 80
+BOX_WIDTH = 160
 
 
 def _call() -> Any:
@@ -31,3 +32,19 @@ def test_tokens_cost_cols_within_box() -> None:
     assert 1 <= col1
     assert col1 < col2
     assert col2 <= BOX_WIDTH - 3
+
+
+def test_tokens_cost_row1_starts_with_rate_icon_in_right_section() -> None:
+    lines, cols = _call()
+    _, col2 = cols
+    row1_stripped = strip_ansi(lines[0])
+    leader_start = col2 - 1
+    assert row1_stripped[leader_start] == sl.ICON_TOK_RATE
+
+
+def test_tokens_cost_row2_right_section_begins_with_15_spaces() -> None:
+    lines, cols = _call()
+    _, col2 = cols
+    row2_stripped = strip_ansi(lines[1])
+    leader_start = col2 - 1
+    assert row2_stripped[leader_start:leader_start + 15] == ' ' * 15
