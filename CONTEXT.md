@@ -51,6 +51,12 @@ _Avoid_: "palette" as a synonym (a palette is a *source* — Catppuccin Latte, S
 **Pill Foreground**:
 The text colour painted on top of the model-pill background. Two slots per theme: `pill_fg_dark` (used when the per-cell background luminance is above `BG_LUM_THRESHOLD`) and `pill_fg_light` (used below). Replaces the earlier rule that defaulted the foreground to the **Anchor** itself — that rule only worked because every shipped **Anchor** was bright.
 
+### Subagents
+
+**Running Subagent**:
+A subagent whose transcript jsonl was written to within the last 20 seconds. Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
+_Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
+
 ### Rate limits
 
 **Five-Hour Limit**:

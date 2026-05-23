@@ -114,36 +114,6 @@ class TestSparklineWidth:
 
 
 # ---------------------------------------------------------------------------
-# 2.5  _short_agent_name
-# ---------------------------------------------------------------------------
-
-class TestShortAgentName:
-    def test_general_purpose_uses_description_prefix(self) -> None:
-        result = sl._short_agent_name('general-purpose', 'Branch ship-readiness audit - other detail')
-        assert result == 'Branch ship-readiness audit'
-
-    def test_explore_uses_description_prefix(self) -> None:
-        result = sl._short_agent_name('Explore', 'Investigate - more')
-        assert result == 'Investigate'
-
-    def test_plan_uses_description_prefix(self) -> None:
-        result = sl._short_agent_name('Plan', 'Design system - details')
-        assert result == 'Design system'
-
-    def test_executor_suffix_stripped(self) -> None:
-        result = sl._short_agent_name('code-reviewer-executor', '')
-        assert result == 'code-reviewer'
-
-    def test_generic_no_separator_truncates_to_20(self) -> None:
-        result = sl._short_agent_name('explore', 'a' * 50)
-        assert result == 'a' * 20
-
-    def test_case_insensitive_general_purpose(self) -> None:
-        result = sl._short_agent_name('GENERAL-PURPOSE', 'Foo - Bar')
-        assert result == 'Foo'
-
-
-# ---------------------------------------------------------------------------
 # 2.6  rainbow_at
 # ---------------------------------------------------------------------------
 

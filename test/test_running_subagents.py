@@ -24,36 +24,56 @@ def _write_agent(
     agent_id: str,
     agent_type: str = 'Explore',
     description: str = 'find X',
+    jsonl_lines: list[str] | None = None,
     mtime: float | None = None,
 ) -> tuple[Path, Path]:
     subagents_dir.mkdir(parents=True, exist_ok=True)
     meta = subagents_dir / f'{agent_id}.meta.json'
     meta.write_text(json.dumps({'agentType': agent_type, 'description': description}))
     jsonl = subagents_dir / f'{agent_id}.jsonl'
-    jsonl.write_text('{"event": "start"}\n')
+    lines = jsonl_lines if jsonl_lines is not None else ['{"event": "start"}\n']
+    jsonl.write_text(''.join(lines))
     if mtime is not None:
         os.utime(jsonl, (mtime, mtime))
     return meta, jsonl
 
 
+def _assistant_line(msg_id: str, *, input_tokens: int = 0, cache_creation: int = 0, output_tokens: int = 0, timestamp: str | None = None) -> str:
+    d = {
+        'type': 'assistant',
+        'message': {
+            'id': msg_id,
+            'usage': {
+                'input_tokens': input_tokens,
+                'cache_creation_input_tokens': cache_creation,
+                'cache_read_input_tokens': 0,
+                'output_tokens': output_tokens,
+            },
+        },
+    }
+    if timestamp:
+        d['timestamp'] = timestamp
+    return json.dumps(d) + '\n'
+
+
 def test_missing_directory_returns_empty(tmp_home: Path) -> None:
-    """9.2 Missing subagents directory returns empty RunningSubagents."""
     result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert result == sl.RunningSubagents(subagents=[])
 
 
-def test_fresh_entry_included(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """9.3 Fresh meta + jsonl entry is included in the result."""
+def test_fresh_entry_included(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-1', agent_type='Explore', description='find X', mtime=now)
 
     result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
-    assert ('Explore', 'find X') in result.subagents
+    assert len(result.subagents) == 1
+    sub = result.subagents[0]
+    assert sub.agent_type  == 'Explore'
+    assert sub.description == 'find X'
 
 
 def test_stale_entry_excluded(tmp_home: Path) -> None:
-    """9.4 Stale jsonl (mtime > STALE_SECONDS ago) is excluded."""
     now = time.time()
     stale_mtime = now - sl.RunningSubagents.STALE_SECONDS - 1
     sdir = _subagents_dir(tmp_home)
@@ -63,14 +83,81 @@ def test_stale_entry_excluded(tmp_home: Path) -> None:
     assert result.subagents == []
 
 
+def test_stale_window_is_20_seconds() -> None:
+    assert sl.RunningSubagents.STALE_SECONDS == 20
+
+
 def test_project_dir_with_leading_slash_produces_correct_slug(tmp_home: Path) -> None:
-    """9.5 project_dir with leading '/' produces the right -<slug> prefix."""
     now = time.time()
-    # '/home/user/myproject' → replace '/' with '-' → '-home-user-myproject'
-    # strip leading '-' → 'home-user-myproject'
-    # stored under .claude/projects/-home-user-myproject/
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-2', mtime=now)
 
     result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert len(result.subagents) == 1
+
+
+def test_token_totals_sum_across_assistant_entries(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-tok',
+        jsonl_lines=[
+            _assistant_line('m1', input_tokens=6, cache_creation=14052, output_tokens=4, timestamp='2026-05-22T17:38:31.005Z'),
+            _assistant_line('m2', input_tokens=1, cache_creation=2824,  output_tokens=1528),
+        ],
+        mtime=now,
+    )
+
+    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.billed_in == 6 + 14052 + 1 + 2824
+    assert sub.output    == 4 + 1528
+
+
+def test_duplicate_message_id_deduped(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-dup',
+        jsonl_lines=[
+            _assistant_line('m1', input_tokens=10, output_tokens=20),
+            _assistant_line('m1', input_tokens=10, output_tokens=20),  # duplicate id, should be skipped
+        ],
+        mtime=now,
+    )
+
+    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.billed_in == 10
+    assert sub.output    == 20
+
+
+def test_first_timestamp_extracted(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-ts',
+        jsonl_lines=[
+            '{"event": "start"}\n',  # no timestamp
+            _assistant_line('m1', timestamp='2026-05-22T17:38:31.005Z'),
+            _assistant_line('m2', timestamp='2026-05-22T17:38:54.652Z'),
+        ],
+        mtime=now,
+    )
+
+    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # First timestamp wins (2026-05-22T17:38:31Z)
+    assert sub.first_timestamp > 0
+    # Spot check: epoch for 2026-05-22 17:38:31 UTC ≈ 1779471511
+    assert 1779471510 < sub.first_timestamp < 1779471512
+
+
+def test_subagents_sorted_by_first_timestamp_ascending(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(sdir, 'agent-late',  jsonl_lines=[_assistant_line('a', timestamp='2026-05-22T18:00:00Z')], mtime=now)
+    _write_agent(sdir, 'agent-early', jsonl_lines=[_assistant_line('b', timestamp='2026-05-22T17:00:00Z')], mtime=now)
+
+    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    assert [s.first_timestamp for s in result.subagents] == sorted(s.first_timestamp for s in result.subagents)

@@ -118,6 +118,9 @@ GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
+GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
+GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
+GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
 GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
 
 # Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
@@ -765,10 +768,19 @@ class LoadedSkills:
 
 
 @dataclass
-class RunningSubagents:
-    subagents: list[tuple[str, str]] = field(default_factory=list)  # (agentType, description)
+class RunningSubagent:
+    agent_type: str
+    description: str
+    billed_in: int
+    output: int
+    first_timestamp: float  # epoch seconds; baseline for live duration
 
-    STALE_SECONDS = 30
+
+@dataclass
+class RunningSubagents:
+    subagents: list[RunningSubagent] = field(default_factory=list)
+
+    STALE_SECONDS = 20
 
     @classmethod
     def from_session(cls, session_id: str, project_dir: str) -> RunningSubagents:
@@ -781,7 +793,7 @@ class RunningSubagents:
         if not subagents_dir.is_dir():
             return cls()
         now = time.time()
-        subagents: list[tuple[str, str]] = []
+        subagents: list[RunningSubagent] = []
         try:
             for meta in subagents_dir.glob('*.meta.json'):
                 agent_type = ''
@@ -802,10 +814,63 @@ class RunningSubagents:
                         continue
                 except OSError:
                     continue
-                subagents.append((agent_type, description))
+
+                billed_in, output, first_ts = cls._parse_transcript(jsonl)
+                subagents.append(RunningSubagent(
+                    agent_type      = agent_type,
+                    description     = description,
+                    billed_in       = billed_in,
+                    output          = output,
+                    first_timestamp = first_ts,
+                ))
         except OSError:
             pass
+        subagents.sort(key=lambda s: s.first_timestamp)
         return cls(subagents=subagents)
+
+    @staticmethod
+    def _parse_transcript(jsonl: Path) -> tuple[int, int, float]:
+        seen: set[str] = set()
+        billed_in = 0
+        output    = 0
+        first_ts  = 0.0
+        try:
+            with jsonl.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if first_ts == 0.0 and '"timestamp"' in ln:
+                        try:
+                            d = json.loads(ln)
+                            ts = d.get('timestamp', '')
+                            if ts:
+                                first_ts = _parse_iso_to_epoch(ts)
+                        except (ValueError, TypeError):
+                            pass
+                    if '"usage"' not in ln or '"assistant"' not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except (ValueError, TypeError):
+                        continue
+                    msg = d.get('message') or {}
+                    mid = msg.get('id')
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    u = msg.get('usage') or {}
+                    billed_in += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
+                    output    += u.get('output_tokens', 0) or 0
+        except OSError:
+            pass
+        return billed_in, output, first_ts
+
+
+def _parse_iso_to_epoch(ts: str) -> float:
+    try:
+        if ts.endswith('Z'):
+            ts = ts[:-1] + '+00:00'
+        return datetime.fromisoformat(ts).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
 
 
 @dataclass
@@ -922,6 +987,17 @@ def fmt_tok(n: int) -> str:
     return str(n)
 
 
+def fmt_dur(seconds: float) -> str:
+    s = int(seconds)
+    if s < 0:
+        s = 0
+    if s < 60:
+        return f'{s}s'
+    if s < 3600:
+        return f'{s // 60}m{s % 60:02d}s'
+    return f'{s // 3600}h{(s % 3600) // 60:02d}m'
+
+
 RAINBOW_PALETTE = (
     196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
     46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
@@ -1028,13 +1104,6 @@ def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
     g = int(c0[1] + (c1[1] - c0[1]) * t)
     b = int(c0[2] + (c1[2] - c0[2]) * t)
     return f'[38;2;{r};{g};{b}m'
-
-
-def _short_agent_name(agent_type: str, description: str) -> str:
-    if agent_type.lower() in ('general-purpose', 'explore', 'plan'):
-        parts = description.split(' - ', 1)
-        return parts[0] if len(parts) > 1 else description[:20]
-    return agent_type.replace('-executor', '')
 
 
 class GradientEngine:
@@ -1669,20 +1738,53 @@ class Renderer:
             right_text, right_w = _make_right(model_name[:budget] + '…')
         return rate_text, right_text, right_w
 
-    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str, subagents: list[tuple[str, str]] | None = None) -> str:
+    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
         step = rainbow_step()
         c_skills = rainbow_at(step, 3)
         c_plugins = rainbow_at(step, 6)
-        c_subagent = rainbow_at(step, 12)
         extras = []
         if skills_count > 0:
-            extras.append(f'{c_skills}{BOLD}󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
+            extras.append(f'{c_skills}{BOLD}{GLYPH_SKILLS}  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
-            extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
-        if subagents:
-            names = ','.join((_short_agent_name(t, d)) for t, d in subagents)
-            extras.append(f'{c_subagent}{BOLD}{GLYPH_SUBAGENT}  {self.R}{self.CTX}{names}{self.R}')
+            extras.append(f'{c_plugins}{BOLD}{GLYPH_PLUGINS}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
+
+    SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
+
+    def subagent_row(self, sub: RunningSubagent, width: int) -> str:
+        now    = time.time()
+        dur    = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
+        bin_s  = fmt_tok(sub.billed_in).rjust(self.SUBAGENT_TOK_W)
+        out_s  = fmt_tok(sub.output).rjust(self.SUBAGENT_TOK_W)
+        dur_s  = fmt_dur(dur).rjust(5)
+
+        right_text = (
+            f'{self.LABEL}{BOLD}↓{self.R}{self.CTX}{bin_s}{self.R}'
+            f' {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
+            f'   {self.CTX}{dur_s}{self.R}'
+        )
+        right_w = _visible_width(right_text)
+
+        step      = rainbow_step()
+        c_marker  = rainbow_at(step, 12)
+        type_text = sub.agent_type or '?'
+        desc_text = sub.description or ''
+
+        target_w = width - 4  # leave 1 col gap before the right │, matching sibling rows
+        head_w   = 3 + len(type_text) + 3  # '▶  ' + type + ' · '
+        budget   = max(0, target_w - head_w - 1 - right_w)
+        if len(desc_text) > budget:
+            desc_text = (desc_text[:budget - 1] + '…') if budget > 0 else ''
+
+        left_text = (
+            f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
+            f'{self.SKILLS}{type_text}{self.R}'
+            f' {self.LABEL}·{self.R} '
+            f'{self.CTX}{desc_text}{self.R}'
+        )
+        left_w = head_w + len(desc_text)
+        pad_w  = max(1, target_w - left_w - right_w)
+        return f'{left_text}{" " * pad_w}{right_text}'
 
     RATE_W  = 6
     IN_W    = 6
@@ -2048,7 +2150,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         sess_cost, day_cost, tok_rate,
         session.session_id, width, fill,
     )
-    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, subagents.subagents or None)
+    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     changes      = OpenSpec.from_cwd(session.cwd).changes
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
@@ -2093,6 +2195,11 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim', ups=next_ups))
     else:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
+
+    if subagents.subagents:
+        for sub in subagents.subagents:
+            rows.append(RowSpec('content', content=r.subagent_row(sub, width)))
+        rows.append(RowSpec('separator_dim'))
 
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('separator_dim', downs=vsep_cols))

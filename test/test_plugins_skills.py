@@ -5,19 +5,17 @@ _visible_width = sl._visible_width
 Renderer = sl.Renderer
 
 
-def test_plugins_skills_all_three_groups() -> None:
+def test_plugins_skills_skills_and_plugins() -> None:
     r = Renderer()
     out = r.plugins_skills(
         skills_count=1,
         skills_names='tdd',
         plugin_names='foo,bar',
-        subagents=[('Explore', 'find X - something')],
     )
     stripped = strip_ansi(out)
     assert 'tdd' in stripped
     assert 'foo,bar' in stripped
-    assert 'find X' in stripped
-    assert stripped.count('|') == 2
+    assert stripped.count('|') == 1
 
 
 def test_plugins_skills_only_skills() -> None:
@@ -26,7 +24,6 @@ def test_plugins_skills_only_skills() -> None:
         skills_count=1,
         skills_names='tdd',
         plugin_names='',
-        subagents=None,
     )
     stripped = strip_ansi(out)
     assert 'tdd' in stripped
@@ -39,6 +36,5 @@ def test_plugins_skills_nothing() -> None:
         skills_count=0,
         skills_names='',
         plugin_names='',
-        subagents=None,
     )
     assert out == ''
