@@ -118,6 +118,7 @@ GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
+GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
 
 # Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
 # Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
@@ -1564,12 +1565,12 @@ class Renderer:
                 return (
                     f'{painted}'
                     f'{self.LABEL}|{self.R}'
-                    f' {c_helper}{BOLD}{self.R} {rate}'
+                    f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
                 ), pw
             return (
                 f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
-                f' {c_helper}{BOLD}{self.R} {rate}'
+                f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
             ), 0
 
         if rate_with_time:
@@ -1617,7 +1618,7 @@ class Renderer:
 
         right_w = _visible_width(right_text)
 
-        helper_text = f'{c_helper}{BOLD}{self.R} {self.white_brt}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        helper_text = f'{c_helper}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
@@ -1698,7 +1699,7 @@ class Renderer:
         sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
         day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
 
-        vsep_w        = 5
+        vsep_w        = 4
         vsep_leader_w = 4
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
@@ -1708,8 +1709,8 @@ class Renderer:
         cost2 = f'${day_cost:,.2f}'
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
 
-        end1 = f'{self.safe}{ICON_COST}{self.R}{self.COST}{cost1.rjust(cost_width)}{self.R}'
-        end2 = f' {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
+        end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end2 = f'  {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
         label_w = 15
         w_middle = _visible_width(middle1)
@@ -1717,9 +1718,9 @@ class Renderer:
         content_w = box_width - 3
         leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
 
-        col1 = w_middle + vsep_w
-        col2 = w_middle + w_end + vsep_w + 5
-        vsep        = self.vsep_block(col1, box_width, fill=fill)
+        col1 = w_middle + 5                  # 1-indexed position of vsep │
+        col2 = w_middle + vsep_w + w_end + 5  # 1-indexed position of vsep_leader │
+        vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
         # bar_w = leader_w - label_w
 
@@ -1950,7 +1951,7 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         ]
     else:
         rate_w = _visible_width(rate_text)
-        pad    = max(1, (width - 3) - rate_w - right_w)
+        pad    = max(1, (width - 4) - rate_w - right_w)
         full   = f'{rate_text}{" " * pad}{right_text}'
         spec.rows = [
             RowSpec('top_border'),
@@ -1992,7 +1993,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     path_div_col = 3 + path_w + 2
-    vsep = r.vsep_block(path_div_col, width, fill=fill)
+    vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
     content = f'{line_path}{vsep}{rate_text}'
     if pill_pct:
         top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
@@ -2069,7 +2070,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     path_div_col = 3 + path_w + 2
-    vsep = r.vsep_block(path_div_col, width, fill=fill)
+    vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
     content = f'{line_path}{vsep}{helper_text}'
     if pill_pct:
         rows += [
