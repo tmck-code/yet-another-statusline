@@ -199,3 +199,37 @@ def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyP
             f'index {idx} in result_t1 has no matching index {idx+1} in result_t; '
             f'result_t={result_t}, result_t1={result_t1}'
         )
+
+
+def test_recently_active_no_log(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
+    monkeypatch.setattr(sl, 'time', FakeTime)
+    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    assert not in_a and not out_a
+
+
+def test_recently_active_detects_growth(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
+    log = setup_rate(monkeypatch, tmp_home)
+    FakeTime._now = NOW
+    _write_row(log, NOW - 5.0, 'sess-1', 100, 50)
+    _write_row(log, NOW - 1.0, 'sess-1', 200, 50)  # in grew, out same
+    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    assert in_a
+    assert not out_a
+
+
+def test_recently_active_both_grow(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
+    log = setup_rate(monkeypatch, tmp_home)
+    FakeTime._now = NOW
+    _write_row(log, NOW - 5.0, 'sess-1', 100, 50)
+    _write_row(log, NOW - 1.0, 'sess-1', 200, 80)
+    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    assert in_a and out_a
+
+
+def test_recently_active_stale_data(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
+    log = setup_rate(monkeypatch, tmp_home)
+    FakeTime._now = NOW
+    _write_row(log, NOW - 20.0, 'sess-1', 100, 50)
+    _write_row(log, NOW - 15.0, 'sess-1', 200, 80)
+    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    assert not in_a and not out_a

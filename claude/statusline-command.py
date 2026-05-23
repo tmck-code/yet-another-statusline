@@ -186,6 +186,10 @@ class Pill:
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
+    # Supplemental Arrows-C (U+1F800-U+1F8FF) are EAW=N despite being in the
+    # emoji range — exclude them so arrow icons like 🡅/🡇 count as 1 col.
+    if 0x1F800 <= cp <= 0x1F8FF:
+        return False
     return 0x1F300 <= cp <= 0x1FAFF
 
 
@@ -640,6 +644,33 @@ class TokenRate:
             if first_bucket <= abs_bucket <= last_bucket:
                 buckets[abs_bucket - first_bucket] += delta
         return buckets
+
+    @classmethod
+    def recently_active(cls, session_id: str, window: float = 10.0) -> tuple[bool, bool]:
+        """Return (in_active, out_active) — True if that count grew in the last `window` seconds."""
+        if not session_id:
+            return False, False
+        log = HOME / '.claude' / 'statusline-token-rate.log'
+        if not log.exists():
+            return False, False
+        now = time.time()
+        samples: list[tuple[float, int, int]] = []
+        for ln in log.read_text().splitlines():
+            parts = ln.split()
+            if len(parts) < 4:
+                continue
+            try:
+                ts, sid, ti, to = float(parts[0]), parts[1], int(parts[2]), int(parts[3])
+            except ValueError:
+                continue
+            if sid == session_id and now - ts <= window:
+                samples.append((ts, ti, to))
+        if len(samples) < 2:
+            return False, False
+        samples.sort()
+        ti0, to0 = samples[0][1], samples[0][2]
+        ti1, to1 = samples[-1][1], samples[-1][2]
+        return ti1 > ti0, to1 > to0
 
 
 @dataclass
@@ -1383,7 +1414,7 @@ class BorderRenderer:
                 avail = max(0, min(avail, p.start - 5))
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
             sid_w = _visible_width(sid)
-            parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, sid]
+            parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, ITALIC, sid, '\033[23m']
             offset = 3 + sid_w
             rest = max(0, width - 4 - sid_w)
             for i in range(rest):
@@ -1944,6 +1975,9 @@ class Renderer:
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
         day_clr = self.day_cost_colour(day_cost)
+        in_active, out_active = TokenRate.recently_active(session_id)
+        in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
+        out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
         day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
@@ -1955,8 +1989,8 @@ class Renderer:
         vsep_w        = 4
         vsep_leader_w = 4
 
-        middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
-        middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK_DAY}{day_out_s}{self.R}'
+        middle1 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}'
+        middle2 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK_DAY}{day_out_s}{self.R}'
 
         cost1 = f'${sess_cost:,.2f}'
         cost2 = f'${day_cost:,.2f}'
@@ -2158,7 +2192,7 @@ class Renderer:
         bar_empty = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
 
         return (
-            f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
+            f'{CLR_WHITE_BRT}{ITALIC}{title}{RESET}{self.R} '
             f'{bar_filled}{self.R}{bar_empty}'
             f' {self.LABEL}{done}/{total}{self.R} {BOLD}{pct:>3d}%{RESET}'
         )
