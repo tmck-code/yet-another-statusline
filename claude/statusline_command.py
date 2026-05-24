@@ -2517,6 +2517,20 @@ def resolve_theme(cli_name: str | None) -> Theme:
     return CLAUDE_DARK
 
 
+def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
+    if width < MIN_WIDTH:
+        return ''
+    session = SessionInfo.from_dict(session_info)
+    r       = Renderer(bg_shift=bg_shift, theme=theme)
+    if width < NARROW_WIDTH:
+        spec = build_narrow(session, width, r)
+    elif width < MEDIUM_WIDTH:
+        spec = build_medium(session, width, r)
+    else:
+        spec = build_wide(session, width, r)
+    return '\n'.join(render_layout(spec, r))
+
+
 def main() -> None:
     bg_shift   = 'warm'
     theme_name: str | None = None
@@ -2536,25 +2550,23 @@ def main() -> None:
         elif a.startswith('--theme='):
             theme_name = a.split('=', 1)[1]
 
-    info    = json.loads(sys.stdin.read())
-    session = SessionInfo.from_dict(info)
-    theme   = resolve_theme(theme_name)
-    r       = Renderer(bg_shift=bg_shift, theme=theme)
+    info  = json.loads(sys.stdin.read())
+    theme = resolve_theme(theme_name)
+
+    # Write payload so the multi-session observer can index it.
+    try:
+        out_dir = HOME / '.claude' / 'statusline-output'
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f'statusline.{int(time.time())}.json').write_text(json.dumps(info))
+    except OSError:
+        pass
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
         return
-
     width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
 
-    if width < NARROW_WIDTH:
-        spec = build_narrow(session, width, r)
-    elif width < MEDIUM_WIDTH:
-        spec = build_medium(session, width, r)
-    else:
-        spec = build_wide(session, width, r)
-
-    sys.stdout.write('\n'.join(render_layout(spec, r)))
+    sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
 
 
 if __name__ == '__main__':

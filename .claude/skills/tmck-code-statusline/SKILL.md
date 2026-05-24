@@ -155,6 +155,10 @@ Every `┬` in a top border must line up with a `│` in the row beneath it and 
 3. **Tests** — any behaviour change needs a test added or updated. Use the `strip_ansi` helper from `test/conftest.py` (which imports the script as `statusline_command`). Width-sensitive assertions go through `_visible_width`. Put new tests in the file that matches the layer touched: `test_gradient_math.py`, `test_borders.py`, `test_model_section.py`, `test_context_line.py`, `test_openspec_bar.py`, `test_tokens_cost.py`, etc.
 4. **`CONTEXT.md`** — if any displayed term changed (label, glyph meaning, what a number represents), update the glossary in the same change.
 
+## Multi-session observer
+
+`claude/mon.py` is a companion script that aggregates every active session's statusline into a single alternate-screen TUI. It lives alongside `statusline_command.py` in `claude/` and imports the public `render(session_info, width, *, bg_shift, theme)` callable exposed by that module. The supporting package at `claude/mon/` contains four sub-modules: `discovery.py` (finds active sessions via `~/.claude/projects/*/*.jsonl` mtimes and indexes payloads from `~/.claude/statusline-output/`), `lifecycle.py` (classifies sessions as bright/dim/removed and applies the SGR-faint dim post-processing), `layout.py` (header/footer formatting, empty/narrow body stubs, overflow clipping, rate-limit and cost aggregation), and `tui.py` (alt-screen entry/exit, `RefreshClock`, SIGWINCH handler, CLI argument parsing). Use `make mon/run` to launch it locally and `make mon/install` to symlink it into `~/.claude/`.
+
 ## Sibling skills
 
 `python-style` and `pytest-style` apply as usual when touching `.py` files. This skill adds the statusline-specific rules on top.
