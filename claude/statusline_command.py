@@ -2605,28 +2605,39 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
 
-    # First post-tokens separator threads `ups` back into the tokens vseps.
+    # First post-tokens separator threads `ups` back into the tokens vseps and
+    # is drawn as the heavy "seam" marking the static→dynamic split. Only the
+    # first one — later inter-section separators keep their normal style. When
+    # nothing dynamic follows, no seam is drawn (the bottom border closes off).
     pending_ups: tuple[int, ...] = vsep_cols
+    seam_pending = True
+
+    def sep_kind(normal: str) -> str:
+        nonlocal seam_pending
+        if seam_pending:
+            seam_pending = False
+            return 'separator_seam'
+        return normal
 
     if plugins_line:
-        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
         rows.append(RowSpec('content', content=plugins_line))
         pending_ups = ()
 
     if tasks.is_visible():
-        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
         rows.append(RowSpec('content', content=r.task_row(tasks, width)))
         pending_ups = ()
 
     if subagents.subagents:
-        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
         for sub in subagents.subagents:
             for line in r.subagent_row(sub, width).split('\n'):
                 rows.append(RowSpec('content', content=line))
         pending_ups = ()
 
     if openspec_bars:
-        rows.append(RowSpec('separator', ups=pending_ups))
+        rows.append(RowSpec(sep_kind('separator'), ups=pending_ups))
         for bar in openspec_bars:
             rows.append(RowSpec('content', content=bar))
         rows.append(RowSpec('bottom_border'))
@@ -2645,6 +2656,10 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
         elif row.kind == 'bottom_border':
             lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill))
         elif row.kind == 'separator':
+            lines.append(r.border_separator(spec.width, ups=row.ups, fill=spec.fill))
+        elif row.kind == 'separator_seam':
+            # Static→dynamic split: a full-brightness solid rule (vs the dotted-dim
+            # separators between dynamic sections). Renders via the solid separator.
             lines.append(r.border_separator(spec.width, ups=row.ups, fill=spec.fill))
         elif row.kind == 'separator_dim':
             lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge))
