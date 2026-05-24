@@ -4,7 +4,7 @@
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
-To install (note: requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
+To install (note: currently requires the Iosevka ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
 
 ```bash
 make install
