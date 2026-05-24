@@ -861,10 +861,16 @@ class RunningSubagents:
     def from_session(cls, session_id: str, project_dir: str) -> RunningSubagents:
         if not session_id or not project_dir:
             return cls()
-        project_slug = project_dir.replace('/', '-')
-        if project_slug.startswith('-'):
-            project_slug = project_slug[1:]
-        subagents_dir = CLAUDE_DIR / 'projects' / f'-{project_slug}' / session_id / 'subagents'
+        # Match Claude Code's projects/ dir convention: replace every non-
+        # alphanumeric character with '-'. Works on both Unix
+        # ('/home/user/my-project' -> '-home-user-my-project') and Windows
+        # ('C:\\Users\\desal\\Project' -> 'C--Users-desal-Project'). The old
+        # logic was Unix-only because it normalized only '/' and relied on a
+        # leading slash producing the '-' prefix that Claude Code uses on
+        # Unix; on Windows paths start with a drive letter (no leading '-'
+        # in CC's dir name) so the f-string prefix gave a wrong path.
+        project_slug = re.sub(r'[^A-Za-z0-9]', '-', project_dir)
+        subagents_dir = CLAUDE_DIR / 'projects' / project_slug / session_id / 'subagents'
         if not subagents_dir.is_dir():
             return cls()
         now = time.time()
@@ -2684,6 +2690,15 @@ def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: The
 
 
 def main() -> None:
+    # Force UTF-8 on stdout so the script renders correctly on Windows
+    # (cp1252 default codec can't encode box-drawing or Nerd Font glyphs,
+    # crashes with UnicodeEncodeError on the first border char). Python's
+    # PEP 540 UTF-8 mode and PYTHONIOENCODING env var both fix this from
+    # the outside; reconfiguring stdout here removes the requirement that
+    # callers set either. No-op on platforms whose default codec is
+    # already UTF-8 (most Unix systems since Python 3.7).
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     bg_shift   = 'warm'
     theme_name: str | None = None
     args = sys.argv[1:]

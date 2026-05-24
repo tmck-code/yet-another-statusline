@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -149,8 +150,10 @@ def write_subagents(
 
     action is (tool_name, input_dict) or None; if absent or None, content is omitted.
     """
-    project_slug = str(project_dir).replace('/', '-').lstrip('-')
-    subagents_dir = claude_dir / 'projects' / f'-{project_slug}' / session_id / 'subagents'
+    # Match Claude Code's projects/ dir convention (cross-platform).
+    # See statusline_command.py:RunningSubagents.from_session for full notes.
+    project_slug = re.sub(r'[^A-Za-z0-9]', '-', str(project_dir))
+    subagents_dir = claude_dir / 'projects' / project_slug / session_id / 'subagents'
     subagents_dir.mkdir(parents=True, exist_ok=True)
     for f in subagents_dir.iterdir():
         f.unlink()
