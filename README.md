@@ -16,11 +16,11 @@ This symlinks the files into your `~/.claude/` user dir, allowing you to easily 
 
 A dummy session to demonstrate the layout:
 
-<img width="1264" height="552" alt="statusline-demo" src="https://github.com/user-attachments/assets/64e941b8-90a4-4ec8-98e0-973a57c04212" />
+<img width="2162" height="802" alt="statusline" src="https://github.com/user-attachments/assets/d5891a2b-d909-499e-8981-92f32c432d10" />
 
 ## Layout Reference
 
-<img width="1723" height="688" alt="image" src="https://github.com/user-attachments/assets/03c65cb2-f533-4194-94df-416d9b7e820e" />
+<img width="1623" height="973" alt="image" src="https://github.com/user-attachments/assets/870dd289-6abb-4c80-8dca-f7e283a4c2c1" />
 
 ## Widths
 
