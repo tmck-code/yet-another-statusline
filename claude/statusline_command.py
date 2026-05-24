@@ -2596,39 +2596,42 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
             RowSpec('top_border', downs=(path_div_col,)),
             RowSpec('content', content=content_full),
         ]
-    next_ups: tuple[int, ...] = (path_div_col,)
 
-    if plugins_line:
-        rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
-        rows.append(RowSpec('content', content=plugins_line))
-        next_ups = ()
-        rows.append(RowSpec('separator_dim', ups=next_ups))
-    else:
-        rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
-
-    if tasks.is_visible():
-        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
-        rows.append(RowSpec('separator_dim'))
-
-    if subagents.subagents:
-        for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
-                rows.append(RowSpec('content', content=line))
-        rows.append(RowSpec('separator_dim'))
-
+    rows.append(RowSpec('separator_dim', ups=(path_div_col,), pill=pill))
     rows.append(RowSpec('content', content=line_context))
+
     tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
     rows.append(RowSpec('separator_dim', downs=tokens_downs))
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
 
+    # First post-tokens separator threads `ups` back into the tokens vseps.
+    pending_ups: tuple[int, ...] = vsep_cols
+
+    if plugins_line:
+        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        rows.append(RowSpec('content', content=plugins_line))
+        pending_ups = ()
+
+    if tasks.is_visible():
+        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
+        pending_ups = ()
+
+    if subagents.subagents:
+        rows.append(RowSpec('separator_dim', ups=pending_ups))
+        for sub in subagents.subagents:
+            for line in r.subagent_row(sub, width).split('\n'):
+                rows.append(RowSpec('content', content=line))
+        pending_ups = ()
+
     if openspec_bars:
-        rows.append(RowSpec('separator', ups=vsep_cols))
+        rows.append(RowSpec('separator', ups=pending_ups))
         for bar in openspec_bars:
             rows.append(RowSpec('content', content=bar))
         rows.append(RowSpec('bottom_border'))
     else:
-        rows.append(RowSpec('bottom_border', ups=vsep_cols))
+        rows.append(RowSpec('bottom_border', ups=pending_ups))
 
     spec.rows = rows
     return spec
