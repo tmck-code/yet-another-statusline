@@ -330,54 +330,64 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
     KEEP = max(300.0, DEMO_TOKEN_WINDOW * 4)
 
     sys.stdout.write('\n\n')
+    sys.stdout.write('\033[?25l')  # hide cursor to prevent it jumping during redraws
+    sys.stdout.flush()
     last_lines = 0
     rate_cumul_in = 0
 
-    for i in range(steps + 1):
-        pct = i / steps
+    try:
+        for i in range(steps + 1):
+            pct = i / steps
 
-        total_in   = int(150_000 * pct * 1.25)
-        total_cc   = int(total_in * 0.18)
-        total_cr   = int(total_in * 12.0)
-        total_out  = int(7_500 * pct + 120)
+            total_in   = int(150_000 * pct * 1.25)
+            total_cc   = int(total_in * 0.18)
+            total_cr   = int(total_in * 12.0)
+            total_out  = int(7_500 * pct + 120)
 
-        skill_idx    = min(int(pct * len(SKILLS_PROGRESSION)),    len(SKILLS_PROGRESSION) - 1)
-        plugin_idx   = min(int(pct * len(PLUGINS_PROGRESSION)),   len(PLUGINS_PROGRESSION) - 1)
-        subagent_idx = min(int(pct * len(SUBAGENTS_PROGRESSION)), len(SUBAGENTS_PROGRESSION) - 1)
-        openspec_idx = min(int(pct * len(OPENSPEC_PROGRESSION)),  len(OPENSPEC_PROGRESSION) - 1)
-        skills_now   = SKILLS_PROGRESSION[skill_idx]
-        plugins_now  = PLUGINS_PROGRESSION[plugin_idx]
-        subagent_now = SUBAGENTS_PROGRESSION[subagent_idx]
-        openspec_now = OPENSPEC_PROGRESSION[openspec_idx]
+            skill_idx    = min(int(pct * len(SKILLS_PROGRESSION)),    len(SKILLS_PROGRESSION) - 1)
+            plugin_idx   = min(int(pct * len(PLUGINS_PROGRESSION)),   len(PLUGINS_PROGRESSION) - 1)
+            subagent_idx = min(int(pct * len(SUBAGENTS_PROGRESSION)), len(SUBAGENTS_PROGRESSION) - 1)
+            openspec_idx = min(int(pct * len(OPENSPEC_PROGRESSION)),  len(OPENSPEC_PROGRESSION) - 1)
+            skills_now   = SKILLS_PROGRESSION[skill_idx]
+            plugins_now  = PLUGINS_PROGRESSION[plugin_idx]
+            subagent_now = SUBAGENTS_PROGRESSION[subagent_idx]
+            openspec_now = OPENSPEC_PROGRESSION[openspec_idx]
 
-        tasks_now = task_state_for(pct)
-        write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now)
-        write_settings(claude, plugins_now)
-        write_subagents(claude, session_id, project, subagent_now)
-        write_openspec_changes(project, openspec_now)
+            tasks_now = task_state_for(pct)
+            write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now)
+            write_settings(claude, plugins_now)
+            write_subagents(claude, session_id, project, subagent_now)
+            write_openspec_changes(project, openspec_now)
 
-        now = time.time()
-        rate_cumul_in += RATE_PEAK_PROFILE.get(i, RATE_BASE_DELTA)
-        cumul_out = total_out
+            now = time.time()
+            rate_cumul_in += RATE_PEAK_PROFILE.get(i, RATE_BASE_DELTA)
+            cumul_out = total_out
 
-        existing = rate_log.read_text().splitlines() if rate_log.exists() else []
-        kept = [ln for ln in existing if ln and now - float(ln.split()[0]) <= KEEP]
-        kept.append(f'{now:.3f} {session_id} {rate_cumul_in} {cumul_out}')
-        rate_log.write_text('\n'.join(kept) + '\n')
+            existing = rate_log.read_text().splitlines() if rate_log.exists() else []
+            kept = [ln for ln in existing if ln and now - float(ln.split()[0]) <= KEEP]
+            kept.append(f'{now:.3f} {session_id} {rate_cumul_in} {cumul_out}')
+            rate_log.write_text('\n'.join(kept) + '\n')
 
-        raw['context_window']['total_input_tokens']  = total_in
-        raw['context_window']['total_output_tokens'] = total_out
-        raw['rate_limits']['five_hour']['used_percentage'] = round(15 + pct * 70, 1)
-        raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 55, 1)
+            raw['context_window']['total_input_tokens']  = total_in
+            raw['context_window']['total_output_tokens'] = total_out
+            raw['rate_limits']['five_hour']['used_percentage'] = round(15 + pct * 70, 1)
+            raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 55, 1)
 
-        out = render_once(env, json.dumps(raw))
-        if last_lines > 1:
-            sys.stdout.write(f'\033[{last_lines - 1}A\r')
-        sys.stdout.write('\033[J')
-        sys.stdout.write(out)
+            out = render_once(env, json.dumps(raw))
+            # Write cursor-up + new content + erase-below in one call so the
+            # terminal never shows a blank frame between redraws.
+            frame = ''
+            if last_lines > 1:
+                frame += f'\033[{last_lines - 1}A\r'
+            frame += out
+            frame += '\033[J'  # erase any leftover lines from a taller previous frame
+            sys.stdout.write(frame)
+            sys.stdout.flush()
+            last_lines = out.count('\n') + 1
+            time.sleep(delay)
+    finally:
+        sys.stdout.write('\033[?25h')  # always restore cursor
         sys.stdout.flush()
-        last_lines = out.count('\n') + 1
-        time.sleep(delay)
 
     sys.stdout.write('\n\n\n')
 
@@ -606,7 +616,7 @@ def render_scenario(
     snap_env = {**env, 'COLUMNS': str(SNAPSHOT_COLS), 'STATUSLINE_TOKEN_WINDOW': str(SNAP_WINDOW)}
     out = render_once(snap_env, json.dumps(raw))
     dest = out_dir / f'{cfg.name}.txt'
-    dest.write_text(out)
+    dest.write_text('\n\n'+out+'\n\n')
     print(f'  wrote {dest}')
 
 
