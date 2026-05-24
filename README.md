@@ -1,6 +1,12 @@
 # claude-code-config
 My claude code configuration and helper scripts
 
+## Install
+
+```bash
+make install
+```
+
 ## Statusline
 
 ### Demo

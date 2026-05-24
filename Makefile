@@ -1,18 +1,14 @@
 STATUSLINE_SRC := $(CURDIR)/claude/statusline_command.py
-STATUSLINE_SH  := $(CURDIR)/claude/statusline-command.sh
 THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
 MON_SRC        := $(CURDIR)/claude/mon.py
-INSTALL_DIRS   := $(HOME)/.claude $(HOME)/.claude.personal
+INSTALL_DIR	   := $(HOME)/.claude
 
 install:
-	@for dir in $(INSTALL_DIRS); do \
-		mkdir -p "$$dir/statusline"; \
-		ln -sf $(STATUSLINE_SRC) "$$dir/statusline-command.py"; \
-		ln -sf $(STATUSLINE_SRC) "$$dir/statusline_command.py"; \
-		ln -sf $(STATUSLINE_SH)  "$$dir/statusline-command.sh"; \
-		ln -sf $(THEMES_SRC)     "$$dir/statusline/themes.py"; \
-		echo "installed -> $$dir"; \
-	done
+	@mkdir -p "$(INSTALL_DIR)/statusline"
+	@ln -sf $(STATUSLINE_SRC) "$(INSTALL_DIR)/statusline_command.py" || true
+	@ln -sf $(THEMES_SRC)     "$(INSTALL_DIR)/statusline/themes.py" || true
+	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
+	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
 
 demo:
 	@python3 claude/statusline/demo.py
