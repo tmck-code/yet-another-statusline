@@ -30,6 +30,7 @@ jobs:
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           enable-cache: true
+          save-cache: false # ensure cache only written by one step (test)
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -47,6 +48,7 @@ jobs:
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           enable-cache: true
+          save-cache: false # ensure cache only written by one step (test)
 
       - name: Install dependencies
         run: uv sync --group dev
