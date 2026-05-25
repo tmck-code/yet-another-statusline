@@ -7,6 +7,7 @@ Covers:
 - context_line() renders proportional % for 1M-context models (not overflowed)
 - context_line() still triggers warning zone for 200K models near soft limit
 - context_line_compact() mirrors the same proportional/warning behaviour
+- build_wide / build_medium / build_narrow LayoutSpec.fill reflects scaled limit
 """
 
 import re
@@ -112,4 +113,69 @@ class TestContextLineCompactSoftLimit:
         pct_values = [int(m) for m in re.findall(r'(\d+)%', plain)]
         assert any(v >= 100 for v in pct_values), (
             f'Expected >=100% soft pct for 180K on 200K model (compact), got pcts: {pct_values} in {plain!r}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_wide / build_medium / build_narrow — LayoutSpec.fill uses scaled limit
+#
+# fill = min(total_tokens / _effective_soft_limit(ctx), 1.0)
+# On a 1M-context model with 170K tokens: 170_000 / 750_000 ≈ 0.2267
+# With bare SOFT_LIMIT (150K):            170_000 / 150_000 ≈ 1.133 → clamped 1.0
+#
+# We assert fill < 0.5, which is satisfied by ~0.227 and would NOT be satisfied
+# by the clamped 1.0 from the old bug.  The exact expected value 170/750 ≈ 0.2267
+# is also checked to within floating-point tolerance.
+# ---------------------------------------------------------------------------
+
+def _session_1m(total_tokens: int) -> sl.SessionInfo:
+    """Minimal SessionInfo: 1M context window, given total_tokens as input."""
+    ctx = sl.ContextWindow(
+        total_input_tokens=total_tokens,
+        total_output_tokens=0,
+        context_window_size=1_000_000,
+    )
+    session = sl.SessionInfo()
+    session.context_window = ctx
+    return session
+
+
+class TestBuildFunctionsSoftLimit:
+    """build_wide/medium/narrow LayoutSpec.fill must use _effective_soft_limit."""
+
+    def setup_method(self) -> None:
+        self.r = sl.Renderer()
+
+    def test_build_wide_does_not_overflow_on_1m_model(self) -> None:
+        # 170K tokens on 1M-context model → soft_limit=750K → fill≈0.227, not 1.0
+        session = _session_1m(170_000)
+        spec = sl.build_wide(session, width=120, r=self.r)
+        expected_fill = 170_000 / 750_000
+        assert spec.fill < 0.5, (
+            f'fill={spec.fill:.4f} should be ~0.227 on 1M model; old bug produced 1.0'
+        )
+        assert abs(spec.fill - expected_fill) < 1e-6, (
+            f'fill={spec.fill:.6f}, expected {expected_fill:.6f}'
+        )
+
+    def test_build_medium_does_not_overflow_on_1m_model(self) -> None:
+        session = _session_1m(170_000)
+        spec = sl.build_medium(session, width=68, r=self.r)
+        expected_fill = 170_000 / 750_000
+        assert spec.fill < 0.5, (
+            f'fill={spec.fill:.4f} should be ~0.227 on 1M model; old bug produced 1.0'
+        )
+        assert abs(spec.fill - expected_fill) < 1e-6, (
+            f'fill={spec.fill:.6f}, expected {expected_fill:.6f}'
+        )
+
+    def test_build_narrow_does_not_overflow_on_1m_model(self) -> None:
+        session = _session_1m(170_000)
+        spec = sl.build_narrow(session, width=48, r=self.r)
+        expected_fill = 170_000 / 750_000
+        assert spec.fill < 0.5, (
+            f'fill={spec.fill:.4f} should be ~0.227 on 1M model; old bug produced 1.0'
+        )
+        assert abs(spec.fill - expected_fill) < 1e-6, (
+            f'fill={spec.fill:.6f}, expected {expected_fill:.6f}'
         )

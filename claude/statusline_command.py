@@ -2751,7 +2751,8 @@ class LayoutSpec:
 def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -2798,7 +2799,8 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -2857,7 +2859,8 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
