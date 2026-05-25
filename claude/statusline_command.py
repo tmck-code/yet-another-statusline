@@ -114,6 +114,7 @@ CLR_ALERT      = '\033[38;5;167m'
 # chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
 # terminal.
 ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
+ICON_CODEX    = '\U000f19e3'  # nf-md-clock-time-eight-outline (Codex rate-limit row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
@@ -453,6 +454,100 @@ class RateLimits:
             five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
             seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
         )
+
+
+@dataclass
+class CodexRateLimits:
+    """Rate-limit state read from ~/.codex/sessions rollout files.
+
+    All fields are None when no Codex rollout data is available.
+    ``primary``   = 5-hour window
+    ``secondary`` = 7-day window (10080 min)
+    """
+
+    primary_pct:         float | None = None
+    secondary_pct:       float | None = None
+    primary_resets_at:   int   | None = None
+    secondary_resets_at: int   | None = None
+    plan_type:           str   | None = None
+    data_age_seconds:    float | None = None
+
+    # Stale threshold: if the newest token_count event is older than this, we
+    # surface a "(stale Xh)" indicator next to the plan label.
+    STALE_SECONDS: int = 3600
+
+    def is_stale(self) -> bool:
+        if self.data_age_seconds is None:
+            return False
+        return self.data_age_seconds > self.STALE_SECONDS
+
+    @classmethod
+    def load(cls, sessions_root: Path | None = None) -> CodexRateLimits:
+        """Load the most recent token_count event from Codex rollout files.
+
+        Args:
+            sessions_root: Override the default ``~/.codex/sessions`` root.
+                           Falls back to the ``YAS_CODEX_SESSIONS_DIR`` env
+                           var, then to the XDG default.
+        """
+        if sessions_root is None:
+            env_dir = os.environ.get('YAS_CODEX_SESSIONS_DIR')
+            if env_dir:
+                sessions_root = Path(env_dir)
+            else:
+                sessions_root = HOME / '.codex' / 'sessions'
+
+        rollout = cls._find_latest_rollout(sessions_root)
+        if rollout is None:
+            return cls()
+
+        data_age = time.time() - rollout.stat().st_mtime
+        event    = cls._last_token_count(rollout)
+        if event is None:
+            return cls()
+
+        rl = event.get('rate_limits') or {}
+        primary   = rl.get('primary')   or {}
+        secondary = rl.get('secondary') or {}
+        return cls(
+            primary_pct         = float(primary.get('used_percent', 0)),
+            secondary_pct       = float(secondary.get('used_percent', 0)),
+            primary_resets_at   = primary.get('resets_at'),
+            secondary_resets_at = secondary.get('resets_at'),
+            plan_type           = rl.get('plan_type'),
+            data_age_seconds    = data_age,
+        )
+
+    @staticmethod
+    def _find_latest_rollout(root: Path) -> Path | None:
+        """Return the most recently modified rollout-*.jsonl under root."""
+        if not root.is_dir():
+            return None
+        candidates = sorted(root.glob('*/*/[0-9][0-9]/rollout-*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not candidates:
+            # Also try direct rollout-*.jsonl at root (flat layout)
+            candidates = sorted(root.glob('rollout-*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _last_token_count(rollout: Path) -> dict | None:
+        """Reverse-scan ``rollout`` and return the last token_count payload."""
+        try:
+            lines = rollout.read_bytes().splitlines()
+        except OSError:
+            return None
+        for raw in reversed(lines):
+            if b'token_count' not in raw:
+                continue
+            try:
+                d = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if d.get('type') == 'event_msg':
+                p = d.get('payload') or {}
+                if p.get('type') == 'token_count':
+                    return p
+        return None
 
 
 @dataclass
@@ -2413,6 +2508,88 @@ class Renderer:
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
 
+    # ------------------------------------------------------------------
+    # Codex rate-limit gauge (3rd statusline row)
+    # ------------------------------------------------------------------
+
+    def codex_pct_colour(self, pct: float) -> str:
+        """Color for a Codex rate-limit percentage.
+
+        Thresholds differ from Claude's fill_colour (70/90) because
+        Codex Pro is flat-rate — hitting 85%+ of a window is operationally
+        more significant than a dollar cost approaching a soft limit.
+        """
+        if pct >= 85.0:
+            return self.alert
+        if pct >= 60.0:
+            return self.warn
+        return self.safe
+
+    def _codex_pct_bar(self, pct: float, bar_w: int = 8) -> str:
+        """A short filled/empty bar for a Codex window percentage."""
+        filled = max(0, min(bar_w, round(pct / 100 * bar_w)))
+        empty  = bar_w - filled
+        clr    = self.codex_pct_colour(pct)
+        return f'{clr}{BarChars.HEAVY * filled}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+
+    def codex_rate_row(self, rl: CodexRateLimits, width: int = 100) -> str:
+        """Render the Codex rate-limit gauge row.
+
+        Width modes:
+          wide   (>80) : icon  5h bar NN%  |  7d bar NN%  |  plan [stale Xh]
+          medium (<=80): icon  5h NN%  .  7d NN%
+          narrow (<=55): icon  5h NN%
+        """
+        # No-data state
+        if rl.primary_pct is None:
+            return f' {self.LABEL}{ICON_CODEX}  no codex data{self.R}'
+
+        primary_pct   = rl.primary_pct
+        secondary_pct = rl.secondary_pct if rl.secondary_pct is not None else 0.0
+        plan          = (rl.plan_type or '').lower()
+
+        p_clr = self.codex_pct_colour(primary_pct)
+        s_clr = self.codex_pct_colour(secondary_pct)
+
+        icon_str = f'{self.LABEL}{ICON_CODEX}{self.R}'
+
+        if width <= NARROW_WIDTH:
+            # Narrow: icon + 5h pct only
+            return f' {icon_str} {self.LABEL}5h{self.R} {p_clr}{primary_pct:.0f}%{self.R}'
+
+        if width <= MEDIUM_WIDTH:
+            # Medium: icon + 5h pct  .  7d pct
+            return (
+                f' {icon_str}'
+                f' {self.LABEL}5h{self.R} {p_clr}{primary_pct:.0f}%{self.R}'
+                f' {self.LABEL}\xb7{self.R}'
+                f' {self.LABEL}7d{self.R} {s_clr}{secondary_pct:.0f}%{self.R}'
+            )
+
+        # Wide: bars + plan label + optional stale indicator
+        p_bar = self._codex_pct_bar(primary_pct)
+        s_bar = self._codex_pct_bar(secondary_pct)
+
+        stale_str = ''
+        if rl.is_stale() and rl.data_age_seconds is not None:
+            stale_h = int(rl.data_age_seconds // 3600)
+            stale_m = int((rl.data_age_seconds % 3600) // 60)
+            stale_label = f'{stale_h}h' if stale_h else f'{stale_m}m'
+            stale_str = f' {self.COMMIT}(stale {stale_label}){self.R}'
+
+        sep = f'  {self.LABEL}│{self.R}  '
+
+        return (
+            f' {icon_str}'
+            f' {self.LABEL}5h{self.R} {p_bar} {p_clr}{primary_pct:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}7d{self.R} {s_bar} {s_clr}{secondary_pct:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}{plan}{self.R}'
+            f'{stale_str}'
+        )
+
+
 @dataclass
 class RowSpec:
     kind: str  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
@@ -2563,6 +2740,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
     tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
+    codex_rl      = CodexRateLimits.load()
 
     git          = GitInfo.from_cwd(session.cwd)
     helper_text, right_text, right_w = r.model_right_section(
@@ -2620,6 +2798,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     rows.append(RowSpec('separator_dim', downs=tokens_downs))
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
+
+    # Codex rate-limit gauge row (3rd cost row — flat-rate windows, not dollars)
+    codex_row = r.codex_rate_row(codex_rl, width)
+    rows.append(RowSpec('content', content=codex_row))
 
     # First post-tokens separator threads `ups` back into the tokens vseps and
     # is drawn as the heavy "seam" marking the static→dynamic split. Only the
