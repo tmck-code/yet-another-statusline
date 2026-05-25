@@ -93,7 +93,9 @@ def subagent_share(sub_inout: int, session_inout: int) -> float | None:
 
 def terminal_width() -> int:
     try:
-        w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
+        w = int(subprocess.run([
+            "tmux", "display-message", "-p", "-t", f"{os.environ["TMUX_PANE"]}", "'#{pane_width}'"
+        ], capture_output=True, text=True).stdout.strip().replace("'", ""))
         if w > 0:
             return w
     except (OSError, ValueError):
