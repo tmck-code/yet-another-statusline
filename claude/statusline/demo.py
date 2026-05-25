@@ -9,6 +9,7 @@ residue on the developer's real filesystem.
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import re
@@ -373,8 +374,11 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
 
             raw['context_window']['total_input_tokens']  = total_in
             raw['context_window']['total_output_tokens'] = total_out
-            raw['rate_limits']['five_hour']['used_percentage'] = round(15 + pct * 70, 1)
-            raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 55, 1)
+            # five_hour ideal_pct ≈ 60% (resets_at=now+2h, window=5h → 3h elapsed / 5h = 60%)
+            # sine arc: candle at start/end, flame at midpoint, hitting all colour thresholds
+            burn_5h = 60.0 + 22.0 * math.sin(pct * 2 * math.pi - math.pi / 2)
+            raw['rate_limits']['five_hour']['used_percentage'] = round(burn_5h, 1)
+            raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 30, 1)
 
             out = render_once(env, json.dumps(raw))
             # Write cursor-up + new content + erase-below in one call so the

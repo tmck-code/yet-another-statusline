@@ -2441,26 +2441,13 @@ class Renderer:
         if delta is None:
             return ''
         abs_delta = abs(delta)
-        if abs_delta <= 0.5:
-            return f'{self.LABEL}·{self.R}'
-        if delta > 0:
-            # over-burn: safe → warn → alert
-            if abs_delta < 5:
-                colour = self.safe
-            elif abs_delta < 15:
-                colour = self.warn
-            else:
-                colour = self.alert
-            return f'{colour}{GLYPH_FAST} {abs_delta:.1f}%{self.R}'
-        else:
-            # under-burn: dim green → mid green → bright green
-            if abs_delta < 5:
-                colour = self.DIM_GREEN
-            elif abs_delta < 15:
-                colour = self.safe
-            else:
-                colour = self.ARROW
-            return f'{colour}{GLYPH_CANDLE} {abs_delta:.1f}%{self.R}'
+        # Map delta onto the fill gradient: t=0 (green) at max under-burn,
+        # t=0.5 (yellow-orange midpoint) at neutral, t=1 (red/purple) at max over-burn.
+        t = max(0.0, min(1.0, 0.5 + delta / 50.0))
+        colour = self.gradient.gradient_color(t)
+        glyph = GLYPH_FAST if delta > 0 else GLYPH_CANDLE
+        sign  = '-' if delta < 0 else '+'
+        return f'{colour}{glyph} {sign}{abs_delta:05.2f}%{self.R}'
 
     def helper(self, five_hour: RateBucket) -> str:
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
