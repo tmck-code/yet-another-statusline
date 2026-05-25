@@ -155,6 +155,7 @@ GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
 GLYPH_CONTINUATION = '└'    # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (└)
 GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
 GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
+GLYPH_CANDLE       = '\U000f05e2' # nf-md-candle        (under-burn rate indicator)
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -2459,7 +2460,7 @@ class Renderer:
                 colour = self.safe
             else:
                 colour = self.ARROW
-            return f'{colour}▼ {abs_delta:.1f}%{self.R}'
+            return f'{colour}{GLYPH_CANDLE} {abs_delta:.1f}%{self.R}'
 
     def helper(self, five_hour: RateBucket) -> str:
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
