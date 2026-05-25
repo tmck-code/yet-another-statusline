@@ -267,19 +267,68 @@ def test_burn_cluster_wide_shows_tpm_and_share() -> None:
     assert '%' in plain
 
 
-def test_burn_cluster_atomic_drop_never_partial() -> None:
-    # 5.2: sweep widths from 101 to 200; at every width, either both or neither figure appears
-    sub = _make_established_sub()
-    session_inout = sub.total_input + sub.output + 5000
+def _pressure_sub() -> sl.RunningSubagent:
+    """Wide stat fields + a max-length (36-char) activity, so the narrowest
+    wide widths are forced to shed stats. tpm/share both have valid data."""
+    return _make_sub(
+        billed_in=900_000_000, output=500_000_000, total_input=900_000_000,
+        first_timestamp=time.time() - 60, model='claude-sonnet-4-6',
+        last_activity=('tool_use', 'Bash', {'command': 'x' * 60}),
+    )
+
+
+def _droppables(line2: str) -> tuple[bool, bool, bool]:
+    """(t/m, share%, ↑output) presence in a continuation line."""
+    p = strip_ansi(line2)
+    return ('t/m' in p, '%' in p, '↑' in p)
+
+
+def test_burn_cluster_drop_priority_respected() -> None:
+    # Stats shed in order share% → ↑output → t/m. So across every width the
+    # kept set is a prefix of [t/m, ↑output, share%] from the high-priority end;
+    # a lower-priority stat is never present without all higher-priority ones.
+    valid = {(True, True, True), (True, False, True), (True, False, False), (False, False, False)}
+    sub = _pressure_sub()
+    si  = 10 ** 12
     for w in range(101, 201):
-        out = _r.subagent_row(sub, w, session_inout=session_inout)
-        _, line2 = out.split('\n')
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
+        combo = _droppables(line2)
+        assert combo in valid, f'width={w}: out-of-priority cluster {combo}'
+
+
+def test_burn_cluster_all_drop_levels_reachable() -> None:
+    # The chain isn't vacuous: each successive drop level is actually hit.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    seen = {_droppables(_r.subagent_row(sub, w, session_inout=si).split('\n')[1])
+            for w in range(101, 201)}
+    assert (True, False, False) in seen   # share + output dropped, t/m kept
+    assert (True, False, True)  in seen    # share dropped, output kept
+    assert (True, True, True)   in seen    # nothing dropped
+
+
+def test_burn_cluster_tok_dur_model_never_drop() -> None:
+    # Token count, elapsed, and model survive at every width, even under pressure.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    for w in range(101, 201):
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
         plain = strip_ansi(line2)
-        has_tpm = 't/m' in plain
-        has_pct = '%' in plain
-        assert has_tpm == has_pct, (
-            f'width={w}: partial cluster (has_tpm={has_tpm}, has_pct={has_pct})'
-        )
+        assert re.search(r'\d+m\d{2}s', plain), f'width={w} dropped elapsed'
+        assert 'sonnet' in plain, f'width={w} dropped model'
+        assert sl.fmt_tok(sub.total_input) in plain, f'width={w} dropped token count'
+
+
+def test_burn_cluster_widening_only_adds_stats() -> None:
+    # Monotonic: a wider row never shows fewer droppable stats than a narrower one.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    prev_count = -1
+    for w in range(101, 201):
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
+        count = sum(_droppables(line2))
+        assert count >= prev_count, f'width={w}: stat count dropped on widening'
+        prev_count = count
 
 
 def test_burn_cluster_narrow_row_unchanged() -> None:

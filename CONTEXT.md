@@ -58,7 +58,7 @@ A subagent whose transcript jsonl was written to within the last 20 seconds. Ren
 - Identity row: `▶ agent_type · description` (fills the full width; elapsed and model live on the continuation row)
 - Continuation row: `└ <current-activity> ...   <t/m> t/m · <pie> <share>% ·  <N>K  ↑output · <elapsed> · <model>`
 
-The continuation row's right-hand cluster uses enforced static field widths so the `·` separators line up across rows. The `<t/m>`/`<share>%` pair drops atomically (both or neither) when throughput/share can't be computed; the `<N>K  ↑output` group, `<elapsed>`, and `<model>` always render. Token and output figures are space-grouped (no `·` between them); model is right-justified to a 6-col field.
+The continuation row's right-hand cluster uses enforced static field widths so the `·` separators line up across rows. When the row is too narrow to hold every stat, they are shed in priority order — `<share>%` first, then `↑output`, then `<t/m>` — while the `<N>K` token count, `<elapsed>`, and `<model>` always render. Independently of width, `<t/m>` is omitted when it can't be computed (subagent < 3s old) and `<share>%` when the session denominator is 0. Token and output figures are space-grouped (no `·` between them); model is right-justified to a 6-col field.
 
 At width ≤100 cols the pair collapses to a single row (description and tool args dropped).
 

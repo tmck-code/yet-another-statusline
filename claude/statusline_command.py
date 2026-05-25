@@ -2114,9 +2114,10 @@ class Renderer:
             line1   = f'{left1}{" " * pad1}'  # right side empty; pad keeps equal widths
 
             # --- continuation line (└) : burn-metric cluster ---
-            # All stats live here as ' · '-joined fields; duration and model
-            # relocate from the identity line. Static field widths keep the
-            # separators aligned across rows.
+            # Stats live here as ' · '-joined fields; duration and model relocate
+            # from the identity line. When width is tight, stats are shed in
+            # priority order — share % first, then ↑output, then the t/m rate.
+            # The token count, elapsed, and model always remain.
             tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, now)
             share = subagent_share(sub.total_input + sub.output, session_inout)
 
@@ -2125,35 +2126,48 @@ class Renderer:
             out_plain = f'↑ {out_s}'
             out_pad   = ' ' * max(0, 6 - len(out_plain))
 
-            frags: list[str] = []
-            # t/m and share % are an atomic pair: both appear or neither.
-            if tpm is not None and share is not None:
-                pct       = share * 100
+            tpm_str = f'{tpm:,d}'.rjust(5) if tpm is not None else ''
+            if share is not None:
                 share_clr = self.gradient.gradient_color(share)
-                tpm_str   = f'{tpm:,d}'.rjust(5)
-                share_str = f'{pct:.1f}%'.rjust(6)
-                frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
-                frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
-            # tok and ↑out are one space-grouped field (no · between them).
-            frags.append(
-                f'{ctx_clr}{tok_field}{self.R}'
-                f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
-            )
-            frags.append(f'{self.CTX}{dur_s}{self.R}')
-            frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
-            right2 = sep.join(frags)
+                share_str = f'{share * 100:.1f}%'.rjust(6)
 
-            activity   = self.subagent_activity(sub.last_activity)
-            activity_w = _visible_width(activity)
-            left2_w    = 6 + activity_w
-
+            activity = self.subagent_activity(sub.last_activity)
+            left2_w  = 6 + _visible_width(activity)
             left2 = (
                 f'   {self.CTX_DIM}{GLYPH_CONTINUATION}{self.R}  '
                 f'{self.CTX_DIM}{activity}{self.R}'
             )
 
-            pad2  = max(1, target_w - left2_w - _visible_width(right2))
-            line2 = f'{left2}{" " * pad2}{right2}'
+            def cluster(show_tpm: bool, show_share: bool, show_out: bool) -> str:
+                frags: list[str] = []
+                if show_tpm:
+                    frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
+                if show_share:
+                    frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
+                # tok and ↑out are one space-grouped field (no · between them).
+                tok_seg = f'{ctx_clr}{tok_field}{self.R}'
+                if show_out:
+                    tok_seg += f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
+                frags.append(tok_seg)
+                frags.append(f'{self.CTX}{dur_s}{self.R}')
+                frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
+                return sep.join(frags)
+
+            show_tpm, show_share, show_out = tpm is not None, share is not None, True
+
+            def fits() -> bool:
+                return left2_w + _visible_width(cluster(show_tpm, show_share, show_out)) + 1 <= target_w
+
+            if not fits() and show_share:
+                show_share = False
+            if not fits() and show_out:
+                show_out = False
+            if not fits() and show_tpm:
+                show_tpm = False
+
+            right2 = cluster(show_tpm, show_share, show_out)
+            pad2   = max(1, target_w - left2_w - _visible_width(right2))
+            line2  = f'{left2}{" " * pad2}{right2}'
 
             return f'{line1}\n{line2}'
 
