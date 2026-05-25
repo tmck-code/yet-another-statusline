@@ -16,7 +16,7 @@ This symlinks the files into your `~/.claude/` user dir, allowing you to easily 
 
 A dummy session to demonstrate the layout:
 
-<img width="2162" height="802" alt="statusline" src="https://github.com/user-attachments/assets/d5891a2b-d909-499e-8981-92f32c432d10" />
+<img width="1524" height="530" alt="statusline-demo-1779720526" src="https://github.com/user-attachments/assets/6be6e870-5207-4737-89f4-b85723c86620" />
 
 ## Layout Reference
 
