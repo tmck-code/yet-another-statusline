@@ -1745,6 +1745,19 @@ class BorderRenderer:
         return f'{left}│{self.R}{lead}{content}{pad_str}{right}│{self.R}'
 
 
+
+def _effective_soft_limit(ctx: 'ContextWindow') -> int:
+    """Soft-limit threshold scaled to the model's actual context window.
+
+    SOFT_LIMIT is the auto-compact warning zone for legacy 200K Claude models.
+    For 1M-context models, scale the soft limit to ~75% of the actual window so
+    the bar fills proportionally instead of overflowing at 15% real usage.
+    Falls back to the legacy constant when context_window_size is unknown.
+    """
+    if ctx.context_window_size > 0:
+        return max(SOFT_LIMIT, int(ctx.context_window_size * 0.75))
+    return SOFT_LIMIT
+
 class Renderer:
     def __init__(self, bg_shift: str = 'warm', theme: Theme | None = None) -> None:
         self.bg_shift = bg_shift if bg_shift in ('warm', 'cool') else 'warm'
@@ -2429,10 +2442,11 @@ class Renderer:
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        soft_limit   = _effective_soft_limit(ctx)
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a = BOLD + self.risk_zone_color(total_tokens)
             secondary = ''
             if ctx.context_window_size > 0:
@@ -2460,10 +2474,11 @@ class Renderer:
 
     def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        soft_limit   = _effective_soft_limit(ctx)
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a      = BOLD + self.risk_zone_color(total_tokens)
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
