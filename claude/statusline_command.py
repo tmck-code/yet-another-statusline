@@ -13,21 +13,28 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, NamedTuple
 
 
 # Load the themes module via importlib because this script runs as a top-level
 # file (not inside a package). The same shim is used by test/conftest.py.
+# TYPE_CHECKING lets mypy resolve the types via a normal import path while the
+# importlib load handles the runtime side.
+if TYPE_CHECKING:
+    from statusline.themes import ModelColors, Theme
+
 _THEMES_PATH = Path(__file__).resolve().parent / 'statusline' / 'themes.py'
 _themes_spec = importlib.util.spec_from_file_location('statusline_themes', _THEMES_PATH)
 assert _themes_spec is not None and _themes_spec.loader is not None
 themes = importlib.util.module_from_spec(_themes_spec)
 sys.modules['statusline_themes'] = themes
 _themes_spec.loader.exec_module(themes)
-Theme        = themes.Theme
-ModelColors  = themes.ModelColors
-THEMES       = themes.THEMES
-CLAUDE_DARK  = themes.CLAUDE_DARK
+if not TYPE_CHECKING:
+    Theme       = themes.Theme
+    ModelColors = themes.ModelColors
+THEMES:     dict[str, Theme] = themes.THEMES
+CLAUDE_DARK: Theme           = themes.CLAUDE_DARK
 
 
 class BarChars:
@@ -345,15 +352,40 @@ class TokenAccounting:
         return cost / 1_000_000
 
 
+def _as_int(v: object, default: int = 0) -> int:
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    return default
+
+
+def _as_float(v: object, default: float = 0.0) -> float:
+    if isinstance(v, (int, float)):
+        return float(v)
+    return default
+
+
+def _as_str(v: object, default: str = '') -> str:
+    if isinstance(v, str):
+        return v
+    return default
+
+
 class Model(NamedTuple):
     id: str = ''
     display_name: str = ''
 
     @classmethod
-    def from_dict(cls, d) -> Model:
+    def from_dict(cls, d: object) -> Model:
         if isinstance(d, str):
             return cls(id=d, display_name='')
-        return cls(id=d.get('id', ''), display_name=d.get('display_name', ''))
+        if isinstance(d, dict):
+            return cls(
+                id           = _as_str(d.get('id')),
+                display_name = _as_str(d.get('display_name')),
+            )
+        return cls()
 
     @property
     def cost_rates(self) -> tuple[float, float]:
@@ -364,23 +396,23 @@ class OutputStyle(NamedTuple):
     name: str = 'default'
 
     @classmethod
-    def from_dict(cls, d: dict) -> OutputStyle:
-        return cls(name=d.get('name', 'default'))
+    def from_dict(cls, d: dict[str, object]) -> OutputStyle:
+        return cls(name=_as_str(d.get('name'), 'default'))
 
 
 class Effort(NamedTuple):
     level: str = ''
 
     @classmethod
-    def from_dict(cls, d: dict) -> Effort:
-        return cls(level=d.get('level', ''))
+    def from_dict(cls, d: dict[str, object]) -> Effort:
+        return cls(level=_as_str(d.get('level')))
 
 
 class Thinking(NamedTuple):
     enabled: bool = False
 
     @classmethod
-    def from_dict(cls, d: dict) -> Thinking:
+    def from_dict(cls, d: dict[str, object]) -> Thinking:
         return cls(enabled=bool(d.get('enabled', False)))
 
 
@@ -391,12 +423,12 @@ class CurrentUsage(NamedTuple):
     cache_read_input_tokens: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> CurrentUsage:
+    def from_dict(cls, d: dict[str, object]) -> CurrentUsage:
         return cls(
-            input_tokens                = d.get('input_tokens', 0),
-            output_tokens               = d.get('output_tokens', 0),
-            cache_creation_input_tokens = d.get('cache_creation_input_tokens', 0),
-            cache_read_input_tokens     = d.get('cache_read_input_tokens', 0),
+            input_tokens                = _as_int(d.get('input_tokens', 0)),
+            output_tokens               = _as_int(d.get('output_tokens', 0)),
+            cache_creation_input_tokens = _as_int(d.get('cache_creation_input_tokens', 0)),
+            cache_read_input_tokens     = _as_int(d.get('cache_read_input_tokens', 0)),
         )
 
 
@@ -405,10 +437,10 @@ class RateBucket(NamedTuple):
     resets_at: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> RateBucket:
+    def from_dict(cls, d: dict[str, object]) -> RateBucket:
         return cls(
-            used_percentage = round(float(d.get('used_percentage', 0.0)), 2),
-            resets_at       = d.get('resets_at', 0),
+            used_percentage = round(_as_float(d.get('used_percentage', 0.0)), 2),
+            resets_at       = _as_int(d.get('resets_at', 0)),
         )
 
 
@@ -416,14 +448,17 @@ class RateBucket(NamedTuple):
 class Workspace:
     current_dir: str = ''
     project_dir: str = ''
-    added_dirs: list = field(default_factory=list)
+    added_dirs: list[object] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Workspace:
+    def from_dict(cls, d: dict[str, object]) -> Workspace:
+        current_dir = d.get('current_dir', '')
+        project_dir = d.get('project_dir', '')
+        added_dirs  = d.get('added_dirs')
         return cls(
-            current_dir = d.get('current_dir', ''),
-            project_dir = d.get('project_dir', ''),
-            added_dirs  = d.get('added_dirs') or [],
+            current_dir = str(current_dir) if current_dir else '',
+            project_dir = str(project_dir) if project_dir else '',
+            added_dirs  = list(added_dirs) if isinstance(added_dirs, list) else [],
         )
 
     @property
@@ -456,13 +491,13 @@ class Cost:
     total_lines_removed: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> Cost:
+    def from_dict(cls, d: dict[str, object]) -> Cost:
         return cls(
-            total_cost_usd        = d.get('total_cost_usd', 0.0),
-            total_duration_ms     = d.get('total_duration_ms', 0),
-            total_api_duration_ms = d.get('total_api_duration_ms', 0),
-            total_lines_added     = d.get('total_lines_added', 0),
-            total_lines_removed   = d.get('total_lines_removed', 0),
+            total_cost_usd        = _as_float(d.get('total_cost_usd', 0.0)),
+            total_duration_ms     = _as_int(d.get('total_duration_ms', 0)),
+            total_api_duration_ms = _as_int(d.get('total_api_duration_ms', 0)),
+            total_lines_added     = _as_int(d.get('total_lines_added', 0)),
+            total_lines_removed   = _as_int(d.get('total_lines_removed', 0)),
         )
 
 
@@ -476,14 +511,18 @@ class ContextWindow:
     remaining_percentage: float | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> ContextWindow:
+    def from_dict(cls, d: dict[str, object]) -> ContextWindow:
+        cu_raw = d.get('current_usage')
+        cu = CurrentUsage.from_dict(cu_raw if isinstance(cu_raw, dict) else {})
+        used_pct = d.get('used_percentage')
+        rem_pct  = d.get('remaining_percentage')
         return cls(
-            total_input_tokens   = d.get('total_input_tokens', 0),
-            total_output_tokens  = d.get('total_output_tokens', 0),
-            context_window_size  = d.get('context_window_size', 0),
-            current_usage        = CurrentUsage.from_dict(d.get('current_usage') or {}),
-            used_percentage      = d.get('used_percentage'),
-            remaining_percentage = d.get('remaining_percentage'),
+            total_input_tokens   = _as_int(d.get('total_input_tokens', 0)),
+            total_output_tokens  = _as_int(d.get('total_output_tokens', 0)),
+            context_window_size  = _as_int(d.get('context_window_size', 0)),
+            current_usage        = cu,
+            used_percentage      = float(used_pct) if isinstance(used_pct, (int, float)) else None,
+            remaining_percentage = float(rem_pct)  if isinstance(rem_pct,  (int, float)) else None,
         )
 
 
@@ -493,10 +532,12 @@ class RateLimits:
     seven_day: RateBucket = field(default_factory=RateBucket)
 
     @classmethod
-    def from_dict(cls, d: dict) -> RateLimits:
+    def from_dict(cls, d: dict[str, object]) -> RateLimits:
+        fh = d.get('five_hour')
+        sd = d.get('seven_day')
         return cls(
-            five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
-            seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
+            five_hour = RateBucket.from_dict(fh if isinstance(fh, dict) else {}),
+            seven_day = RateBucket.from_dict(sd if isinstance(sd, dict) else {}),
         )
 
 
@@ -518,22 +559,29 @@ class SessionInfo:
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
-    def from_dict(cls, d: dict) -> SessionInfo:
+    def from_dict(cls, d: dict[str, object]) -> SessionInfo:
+        def _dict(key: str) -> dict[str, object]:
+            v = d.get(key)
+            return v if isinstance(v, dict) else {}
+        session_id      = d.get('session_id', '')
+        transcript_path = d.get('transcript_path', '')
+        cwd             = d.get('cwd', '')
+        version         = d.get('version', '')
         return cls(
-            session_id          = d.get('session_id', ''),
-            transcript_path     = d.get('transcript_path', ''),
-            cwd                 = d.get('cwd', ''),
+            session_id          = str(session_id)      if session_id      is not None else '',
+            transcript_path     = str(transcript_path) if transcript_path is not None else '',
+            cwd                 = str(cwd)             if cwd             is not None else '',
             model               = Model.from_dict(d.get('model') or {}),
-            workspace           = Workspace.from_dict(d.get('workspace') or {}),
-            version             = d.get('version', ''),
-            output_style        = OutputStyle.from_dict(d.get('output_style') or {}),
-            cost                = Cost.from_dict(d.get('cost') or {}),
-            context_window      = ContextWindow.from_dict(d.get('context_window') or {}),
-            exceeds_200k_tokens = d.get('exceeds_200k_tokens', False),
-            effort              = Effort.from_dict(d.get('effort') or {}),
-            thinking            = Thinking.from_dict(d.get('thinking') or {}),
+            workspace           = Workspace.from_dict(_dict('workspace')),
+            version             = str(version)         if version         is not None else '',
+            output_style        = OutputStyle.from_dict(_dict('output_style')),
+            cost                = Cost.from_dict(_dict('cost')),
+            context_window      = ContextWindow.from_dict(_dict('context_window')),
+            exceeds_200k_tokens = bool(d.get('exceeds_200k_tokens', False)),
+            effort              = Effort.from_dict(_dict('effort')),
+            thinking            = Thinking.from_dict(_dict('thinking')),
             fast_mode           = bool(d.get('fast_mode', False)),
-            rate_limits         = RateLimits.from_dict(d.get('rate_limits') or {}),
+            rate_limits         = RateLimits.from_dict(_dict('rate_limits')),
         )
 
     @property
@@ -893,7 +941,7 @@ class RunningSubagent:
     model:         str                   = ''
     cache_read_in: int                   = 0
     total_input:   int                   = 0
-    last_activity: tuple[str, str, dict] = field(default_factory=lambda: ('', '', {}))
+    last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
 
 
 @dataclass
@@ -959,14 +1007,14 @@ class RunningSubagents:
         return cls(subagents=subagents)
 
     @staticmethod
-    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict]]:
+    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]]]:
         seen: set[str] = set()
         billed_in    = 0
         cache_read_in = 0
         output       = 0
         first_ts     = 0.0
         model        = ''
-        last_activity: tuple[str, str, dict] = ('', '', {})
+        last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
         try:
             with jsonl.open('r', errors='ignore') as fh:
                 for ln in fh:
@@ -1299,7 +1347,10 @@ def model_key(name: str) -> str:
 
 
 def _scale(rgb: tuple[int, int, int], pct: int) -> tuple[int, int, int]:
-    return tuple(min(255, max(0, c * pct // 100)) for c in rgb)
+    r, g, b = rgb
+    return (min(255, max(0, r * pct // 100)),
+            min(255, max(0, g * pct // 100)),
+            min(255, max(0, b * pct // 100)))
 
 
 def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]],
@@ -1320,12 +1371,13 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
         g = int(c0[1] + (c1[1] - c0[1]) * t)
         b = int(c0[2] + (c1[2] - c0[2]) * t)
         lum = (r * 299 + g * 587 + b * 114) // 1000
+        fg_rgb: tuple[int, int, int] | None
         if lum >= BG_LUM_THRESHOLD:
             fg_rgb = pill_fg_dark
         elif pill_fg_light is not None:
             fg_rgb = pill_fg_light
         else:
-            fg_rgb = fg if fg is not None else None
+            fg_rgb = fg
         cur_bg = (r, g, b)
         if cur_bg != prev_bg:
             parts.append(f'\033[48;2;{r};{g};{b}m')
@@ -1912,7 +1964,7 @@ class Renderer:
 
         def _build(name: str, rate: str) -> tuple[str, int]:
             if pct_bg:
-                cells = []
+                cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
                 cells.append((GLYPH_MODEL, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
@@ -2058,7 +2110,7 @@ class Renderer:
 
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
-    def subagent_activity(self, last_activity: tuple[str, str, dict]) -> str:
+    def subagent_activity(self, last_activity: tuple[str, str, dict[str, object]]) -> str:
         kind, name, inp = last_activity
         if kind == 'tool_use':
             key = TOOL_ARG_KEY.get(name)
@@ -2233,7 +2285,7 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> tuple[list[str], tuple[int, int], int]:
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
         in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
@@ -2403,7 +2455,7 @@ class Renderer:
         bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f' {prefix}{bar}'
 
-    SPEC_GRADIENTS = [
+    SPEC_GRADIENTS: Sequence[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = [
         ((20, 60, 200),  (30, 200, 180),  (220, 255, 120)),     # Ocean    blue → teal → pale green
         ((60, 20, 160),  (240, 60, 140),  (255, 200, 60)),      # Sunset   indigo → magenta → gold
         ((10, 80, 120),  (120, 220, 40),  (240, 240, 60)),      # Forest   navy → lime → yellow
@@ -2421,7 +2473,7 @@ class Renderer:
     SPEC_MID_MIN_WIDTH = 20
 
     def _spec_rgb_at(self, t: float, idx: int, three_stops: bool = True) -> tuple[int, int, int]:
-        stops = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        stops: tuple[tuple[int, int, int], ...] = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
         if not three_stops:
             stops = (stops[0], stops[-1])
         n = len(stops)
@@ -2645,8 +2697,6 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
-    bg_trail      = r.model_bg_trail(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
@@ -2802,7 +2852,7 @@ def resolve_theme(cli_name: str | None) -> Theme:
     return CLAUDE_DARK
 
 
-def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
+def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
     if width < MIN_WIDTH:
         return ''
     session = SessionInfo.from_dict(session_info)

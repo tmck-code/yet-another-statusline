@@ -117,7 +117,6 @@ class TestSingleRowGuarantee:
         path, helper, right, right_w = self._wide_combo(r, width)
         path_w   = _visible_width(path)
         helper_w = _visible_width(helper)
-        row_text = path + helper + right
         total    = path_w + self._vsep_w + helper_w + right_w
         assert total <= width - 4, f'row overflows: total={total} width={width}'
         assert strip_ansi(right_w and right or right) != ''
