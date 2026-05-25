@@ -72,6 +72,24 @@ def burndown_delta(
     return used_pct - ideal_pct
 
 
+def subagent_avg_tpm(
+    total_input: int,
+    output: int,
+    first_timestamp: float,
+    now: float,
+    floor_seconds: float = 3.0,
+) -> int | None:
+    if first_timestamp == 0 or now - first_timestamp < floor_seconds:
+        return None
+    return round((total_input + output) / ((now - first_timestamp) / 60))
+
+
+def subagent_share(sub_inout: int, session_inout: int) -> float | None:
+    if session_inout <= 0:
+        return None
+    return sub_inout / session_inout
+
+
 def terminal_width() -> int:
     try:
         w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
@@ -156,6 +174,7 @@ GLYPH_CONTINUATION = '└'    # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (└)
 GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
 GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
 GLYPH_CANDLE       = '\U000f05e2' # nf-md-candle        (under-burn rate indicator)
+GLYPH_PIE          = '\uf200'  # nf-fa-pie_chart     (subagent session share)
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -2059,7 +2078,7 @@ class Renderer:
             return f'{GLYPH_REPLYING} (replying)'
         return ''
 
-    def subagent_row(self, sub: RunningSubagent, width: int) -> str:
+    def subagent_row(self, sub: RunningSubagent, width: int, session_inout: int = 0) -> str:
         now     = time.time()
         dur     = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
@@ -2086,13 +2105,11 @@ class Renderer:
         target_w = width - 4  # content width (2 for '│ ' left, 2 for ' │' right)
 
         if width > 100:
-            # --- identity line (▶) ---
+            # --- identity line (▶) : duration · model ---
             right1 = (
-                f'{model_clr}{short_model}{self.R}'
+                f'{self.CTX}{dur_s}{self.R}'
                 f' {self.LABEL}·{self.R}'
-                f' {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {self.CTX}{dur_s}{self.R}'
+                f' {model_clr}{short_model.ljust(6)}{self.R}'
             )
             right1_w = _visible_width(right1)
 
@@ -2112,13 +2129,34 @@ class Renderer:
             pad1    = max(1, target_w - left1_w - right1_w)
             line1   = f'{left1}{" " * pad1}{right1}'
 
-            # --- continuation line (└) ---
-            right2 = (
-                f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {self.COST}${cost_s}{self.R}'
-            )
-            right2_w = _visible_width(right2)
+            # --- continuation line (└) : burn-metric cluster ---
+            # Static field widths keep the · separators aligned across rows.
+            tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, now)
+            share = subagent_share(sub.total_input + sub.output, session_inout)
+
+            sep       = f' {self.LABEL}·{self.R} '
+            tok_field = fmt_tok(sub.total_input).rjust(5)
+            out_plain = f'↑ {out_s}'
+            out_pad   = ' ' * max(0, 6 - len(out_plain))
+            cost_str  = f'${cost_s}'
+            cost_pad  = ' ' * max(0, 6 - len(cost_str))
+
+            frags: list[str] = []
+            if tpm is not None and share is not None:
+                pct       = share * 100
+                share_clr = self.gradient.gradient_color(share)
+                tpm_str   = f'{tpm:,d}'.rjust(5)
+                share_str = f'{f'{pct:4.2f}':>5s}%'
+                # pie glyph stands in for the · separator before the share %
+                frags.append(
+                    f'{self.TOK}{ICON_TOK_RATE} {tpm_str} t/m{self.R}'
+                    f' {share_clr}{GLYPH_PIE}{self.R} '
+                    f'{share_clr}{share_str}{self.R}'
+                )
+            frags.append(f'{ctx_clr}{tok_field}{self.R}')
+            frags.append(f'{out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}')
+            frags.append(f'{cost_pad}{self.COST}{cost_str}{self.R}')
+            right2 = sep.join(frags)
 
             activity   = self.subagent_activity(sub.last_activity)
             activity_w = _visible_width(activity)
@@ -2128,7 +2166,8 @@ class Renderer:
                 f'   {self.CTX_DIM}{GLYPH_CONTINUATION}{self.R}  '
                 f'{self.CTX_DIM}{activity}{self.R}'
             )
-            pad2  = max(1, target_w - left2_w - right2_w)
+
+            pad2  = max(1, target_w - left2_w - _visible_width(right2))
             line2 = f'{left2}{" " * pad2}{right2}'
 
             return f'{line1}\n{line2}'
@@ -2533,7 +2572,7 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         ]
     if subagents.subagents:
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -2592,7 +2631,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim'))
     if subagents.subagents:
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -2621,6 +2660,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     sess_cost     = compute_session_cost(session.model, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
+    session_inout = (
+        (usage.billed_in + usage.cache_read) + usage.out
+        + sum(s.total_input + s.output for s in subagents.subagents)
+    )
     tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
@@ -2708,7 +2751,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     if subagents.subagents:
         rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=session_inout).split('\n'):
                 rows.append(RowSpec('content', content=line))
         pending_ups = ()
 

@@ -55,17 +55,25 @@ The text colour painted on top of the model-pill background. Two slots per theme
 
 **Running Subagent**:
 A subagent whose transcript jsonl was written to within the last 20 seconds. Renders as a **row pair** at widths >100 cols:
-- Identity row: `▶ agent_type · description ... model · ↑output · elapsed`
-- Continuation row: `└ <current-activity> ...   <N>K · $cost`
+- Identity row: `▶ agent_type · description ... elapsed · model`
+- Continuation row: `└ <current-activity> ...   <t/m> t/m 󰠁 <share>% · <N>K · ↑output · $cost`
+
+The continuation row's right-hand cluster uses enforced static field widths so the `·` separators line up across rows. The `<t/m>`/`<share>%` pair drops atomically (both or neither) when throughput/share can't be computed; `<N>K · ↑output · $cost` always render.
 
 At width ≤100 cols the pair collapses to a single row (description and tool args dropped).
 
 `last_activity` typed vocabulary: `tool_use` → `<Tool>[<arg>]`; `thinking` → `(thinking)`; `text` → `(replying)`.
 
-The ` <N>K` field (hourglass = nf-fa-hourglass_half) in the continuation row is coloured by the **Compaction-Risk Zone** (green ≤50K, yellow ≤80K, orange ≤150K, red >150K) — the same thresholds as the main context bar.
+The ` <N>K` token figure is coloured by the **Compaction-Risk Zone** (green ≤50K, yellow ≤80K, orange ≤150K, red >150K) — the same thresholds as the main context bar. In the wide continuation row it renders bare (no glyph); the hourglass glyph (`GLYPH_HOURGLASS`, nf-fa-hourglass_half) prefixes it only in the width ≤100 single-line collapse.
 
 Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
 _Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
+
+**Average t/m (per-subagent)**:
+Cumulative average token throughput for a running subagent, computed as `(total_input + output) / duration_minutes`. Displayed with the gauge glyph (`ICON_TOK_RATE`, nf-md gauge) in the wide subagent row (terminal width > 100). Omitted when the subagent has run for less than 3 seconds or has no valid `first_timestamp`.
+
+**Session Share %**:
+This subagent's fraction of the whole session's token spend, computed as `sub_inout / (main_inout + Σ subagent_inout)`. Rendered as a fixed-width `NN.NN%` figure in the wide subagent continuation row, immediately after the t/m rate. The pie-chart glyph (`GLYPH_PIE`, nf-fa-pie_chart, U+F200) stands in for the `·` separator before it. Both glyph and figure are colour-mapped by magnitude via the fill gradient so the dominant agent glows hot. Omitted when the session denominator is 0.
 
 ### Task tracking
 

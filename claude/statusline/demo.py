@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 WRAPPER_DIR = Path(__file__).resolve().parent
@@ -58,10 +58,10 @@ OPENSPEC_PROGRESSION = (
 # action is (tool_name, input_dict) or None; omit to leave activity blank.
 SUBAGENTS_PROGRESSION = (
     [],
-    [('explore',         'Search codebase - looking for token tracking', 0, 0, ('Bash',  {'command': 'grep -rn "billed_in" claude/statusline_command.py'}))],
-    [('explore',         'Search codebase - looking for token tracking', 0, 0, ('Read',  {'file_path': 'claude/statusline_command.py'}))],
-    [('general-purpose', 'Fix sparkline - update bucket algorithm',      0, 0, ('Edit',  {'file_path': 'claude/statusline_command.py', 'old_string': 'old', 'new_string': 'new'}))],
-    [('general-purpose', 'Fix sparkline - update bucket algorithm',      0, 0, None)],
+    [('explore',         'Search codebase - looking for token tracking',  1_200,    80, ('Bash',  {'command': 'grep -rn "billed_in" claude/statusline_command.py'}))],
+    [('explore',         'Search codebase - looking for token tracking',  3_100,   190, ('Read',  {'file_path': 'claude/statusline_command.py'}))],
+    [('general-purpose', 'Fix sparkline - update bucket algorithm',       7_600,   680, ('Edit',  {'file_path': 'claude/statusline_command.py', 'old_string': 'old', 'new_string': 'new'}))],
+    [('general-purpose', 'Fix sparkline - update bucket algorithm',      11_800, 1_350, None)],
     [],
 )
 
@@ -146,10 +146,14 @@ def write_subagents(
     session_id:  str,
     project_dir: Path,
     subagents:   list[tuple],
+    *,
+    age_seconds: float = 0.0,
 ) -> None:
     """Each subagent entry: (agentType, description, billed_in, output_tokens[, action]).
 
     action is (tool_name, input_dict) or None; if absent or None, content is omitted.
+    age_seconds shifts the recorded start timestamp into the past so that duration
+    and t/m rate are non-zero when rendered.
     """
     # Match Claude Code's projects/ dir convention (cross-platform).
     # See statusline_command.py:RunningSubagents.from_session for full notes.
@@ -159,10 +163,12 @@ def write_subagents(
     for f in subagents_dir.iterdir():
         f.unlink()
     now = time.time()
-    ts  = datetime.now().astimezone().isoformat()
+    ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
+    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
     for i, row in enumerate(subagents, 1):
         agent_type, description, billed_in, output_tokens = row[:4]
         action = row[4] if len(row) > 4 else None
+        model  = _demo_models[(i - 1) % len(_demo_models)]
         name = f'demo-subagent-{i}'
         (subagents_dir / f'{name}.meta.json').write_text(
             json.dumps({'agentType': agent_type, 'description': description})
@@ -176,8 +182,9 @@ def write_subagents(
                 'type':      'assistant',
                 'timestamp': ts,
                 'message': {
-                    'id':   f'msg_demo_agent_{i}',
-                    'role': 'assistant',
+                    'id':    f'msg_demo_agent_{i}',
+                    'role':  'assistant',
+                    'model': model,
                     'usage': {
                         'input_tokens':                input_tokens,
                         'cache_creation_input_tokens': cache_creation,
@@ -360,7 +367,7 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
             tasks_now = task_state_for(pct)
             write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now)
             write_settings(claude, plugins_now)
-            write_subagents(claude, session_id, project, subagent_now)
+            write_subagents(claude, session_id, project, subagent_now, age_seconds=pct * 120)
             write_openspec_changes(project, openspec_now)
 
             now = time.time()
@@ -601,7 +608,7 @@ def render_scenario(
 
     write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
     write_settings(claude, cfg.plugins)
-    write_subagents(claude, session_id, project, cfg.subagents)
+    write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
 
@@ -642,12 +649,15 @@ def main() -> int:
 
         env = os.environ.copy()
         env['HOME'] = str(tmpdir)
+        env['CLAUDE_CONFIG_DIR'] = str(tmpdir / '.claude')
 
         if args.snapshots:
             out_dir = Path(args.snapshots)
             out_dir.mkdir(parents=True, exist_ok=True)
+
             for cfg in SCENARIOS:
                 render_scenario(env, fixture, tmpdir, session_id, cfg, out_dir)
+
         else:
             payload = mutate_session_info(tmpdir, session_id, fixture)
             raw = json.loads(payload)

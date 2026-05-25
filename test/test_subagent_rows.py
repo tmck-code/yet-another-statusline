@@ -239,3 +239,55 @@ def test_subagent_activity_replying() -> None:
 
 def test_subagent_activity_empty() -> None:
     assert _r.subagent_activity(('', '', {})) == ''
+
+
+# E. Burn-metric cluster (tasks 5.1–5.3)
+
+def _make_established_sub(**kwargs) -> sl.RunningSubagent:
+    """Subagent running for 60s with enough tokens to produce valid tpm."""
+    defaults = dict(
+        first_timestamp=time.time() - 60,
+        total_input=3000,
+        billed_in=3000,
+        output=600,
+    )
+    defaults.update(kwargs)
+    return _make_sub(**defaults)
+
+
+def test_burn_cluster_wide_shows_tpm_and_share() -> None:
+    # 5.1: ample wide width — both t/m and % must appear
+    sub = _make_established_sub()
+    session_inout = sub.total_input + sub.output + 1000  # non-zero denominator
+    out = _r.subagent_row(sub, 200, session_inout=session_inout)
+    _, line2 = out.split('\n')
+    plain = strip_ansi(line2)
+    assert 't/m' in plain
+    assert '%' in plain
+
+
+def test_burn_cluster_atomic_drop_never_partial() -> None:
+    # 5.2: sweep widths from 101 to 200; at every width, either both or neither figure appears
+    sub = _make_established_sub()
+    session_inout = sub.total_input + sub.output + 5000
+    for w in range(101, 201):
+        out = _r.subagent_row(sub, w, session_inout=session_inout)
+        _, line2 = out.split('\n')
+        plain = strip_ansi(line2)
+        has_tpm = 't/m' in plain
+        has_pct = '%' in plain
+        assert has_tpm == has_pct, (
+            f'width={w}: partial cluster (has_tpm={has_tpm}, has_pct={has_pct})'
+        )
+
+
+def test_burn_cluster_narrow_row_unchanged() -> None:
+    # 5.3: width ≤ 100 — neither figure, single line, row unchanged
+    sub = _make_established_sub()
+    session_inout = sub.total_input + sub.output + 5000
+    for w in [80, 100]:
+        out = _r.subagent_row(sub, w, session_inout=session_inout)
+        assert '\n' not in out, f'width={w} produced two lines'
+        plain = strip_ansi(out)
+        assert 't/m' not in plain, f'width={w} showed t/m in narrow row'
+        assert '%' not in plain, f'width={w} showed % in narrow row'
