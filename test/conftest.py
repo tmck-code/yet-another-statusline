@@ -26,5 +26,9 @@ def strip_ansi_fixture() -> Callable[[str], str]:
 
 @pytest.fixture
 def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    # CLAUDE_DIR is a module-level constant frozen at import as HOME/'.claude'.
+    # Patching HOME alone leaves it pointing at the real ~/.claude, so source
+    # reads (token logs, subagents, theme, settings) would escape the sandbox.
     monkeypatch.setattr(sl, 'HOME', tmp_path)
+    monkeypatch.setattr(sl, 'CLAUDE_DIR', tmp_path / '.claude')
     return tmp_path
