@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from pathlib import Path
 
@@ -291,3 +292,47 @@ def test_burn_cluster_narrow_row_unchanged() -> None:
         plain = strip_ansi(out)
         assert 't/m' not in plain, f'width={w} showed t/m in narrow row'
         assert '%' not in plain, f'width={w} showed % in narrow row'
+
+
+# F. Single stat line + cost removal (burndown mockup match)
+
+def test_subagent_row_wide_no_cost() -> None:
+    sub = _make_established_sub()
+    out = _r.subagent_row(sub, 160, session_inout=sub.total_input + sub.output + 5000)
+    assert '$' not in strip_ansi(out)
+
+
+def test_subagent_row_narrow_no_cost() -> None:
+    assert '$' not in strip_ansi(_r.subagent_row(_make_sub(), 100))
+
+
+def test_subagent_row_wide_dur_and_model_on_continuation() -> None:
+    # duration + model relocate from the identity line to the stat cluster
+    sub = _make_established_sub(model='claude-sonnet-4-6', first_timestamp=time.time() - 90)
+    line1, line2 = _r.subagent_row(
+        sub, 160, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    p1, p2 = strip_ansi(line1), strip_ansi(line2)
+    assert 'sonnet' in p2 and 'sonnet' not in p1
+    assert '1m30s' in p2 and '1m30s' not in p1
+
+
+def test_subagent_row_wide_identity_is_just_type_and_desc() -> None:
+    line1, _ = _r.subagent_row(_make_sub(description='hello world'), 160).split('\n')
+    assert strip_ansi(line1).rstrip() == '▶  general-purpose · hello world'
+
+
+def test_subagent_row_wide_share_one_decimal() -> None:
+    sub = _make_established_sub()
+    _, line2 = _r.subagent_row(
+        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    m = re.search(r'(\d+\.\d+)%', strip_ansi(line2))
+    assert m is not None
+    assert len(m.group(1).split('.')[1]) == 1  # exactly one decimal place
+
+
+def test_subagent_row_wide_model_right_justified() -> None:
+    # 5-char model name (haiku) gains a leading space from rjust(6)
+    sub = _make_established_sub(model='claude-haiku-4-5', first_timestamp=time.time() - 90)
+    _, line2 = _r.subagent_row(
+        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    assert strip_ansi(line2).rstrip().endswith(' haiku')

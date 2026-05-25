@@ -55,10 +55,10 @@ The text colour painted on top of the model-pill background. Two slots per theme
 
 **Running Subagent**:
 A subagent whose transcript jsonl was written to within the last 20 seconds. Renders as a **row pair** at widths >100 cols:
-- Identity row: `▶ agent_type · description ... elapsed · model`
-- Continuation row: `└ <current-activity> ...   <t/m> t/m 󰠁 <share>% · <N>K · ↑output · $cost`
+- Identity row: `▶ agent_type · description` (fills the full width; elapsed and model live on the continuation row)
+- Continuation row: `└ <current-activity> ...   <t/m> t/m · <pie> <share>% ·  <N>K  ↑output · <elapsed> · <model>`
 
-The continuation row's right-hand cluster uses enforced static field widths so the `·` separators line up across rows. The `<t/m>`/`<share>%` pair drops atomically (both or neither) when throughput/share can't be computed; `<N>K · ↑output · $cost` always render.
+The continuation row's right-hand cluster uses enforced static field widths so the `·` separators line up across rows. The `<t/m>`/`<share>%` pair drops atomically (both or neither) when throughput/share can't be computed; the `<N>K  ↑output` group, `<elapsed>`, and `<model>` always render. Token and output figures are space-grouped (no `·` between them); model is right-justified to a 6-col field.
 
 At width ≤100 cols the pair collapses to a single row (description and tool args dropped).
 
@@ -70,10 +70,10 @@ Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired 
 _Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
 
 **Average t/m (per-subagent)**:
-Cumulative average token throughput for a running subagent, computed as `(total_input + output) / duration_minutes`. Displayed with the gauge glyph (`ICON_TOK_RATE`, nf-md gauge) in the wide subagent row (terminal width > 100). Omitted when the subagent has run for less than 3 seconds or has no valid `first_timestamp`.
+Cumulative average token throughput for a running subagent, computed as `(total_input + output) / duration_minutes`. Rendered as `<rate> t/m` in the wide subagent row (terminal width > 100) — the number in `TOK`, the ` t/m` label in `LABEL` grey, no leading glyph. Omitted when the subagent has run for less than 3 seconds or has no valid `first_timestamp`.
 
 **Session Share %**:
-This subagent's fraction of the whole session's token spend, computed as `sub_inout / (main_inout + Σ subagent_inout)`. Rendered as a fixed-width `NN.NN%` figure in the wide subagent continuation row, immediately after the t/m rate. The pie-chart glyph (`GLYPH_PIE`, nf-fa-pie_chart, U+F200) stands in for the `·` separator before it. Both glyph and figure are colour-mapped by magnitude via the fill gradient so the dominant agent glows hot. Omitted when the session denominator is 0.
+This subagent's fraction of the whole session's token spend, computed as `sub_inout / (main_inout + Σ subagent_inout)`. Rendered as a fixed-width `NN.N%` figure (one decimal) in the wide subagent continuation row, after the t/m rate. A `·` separator and the pie-chart glyph (`GLYPH_PIE`, nf-fa-pie_chart, U+F200) precede it. Both glyph and figure are colour-mapped by magnitude via the fill gradient so the dominant agent glows hot. Omitted when the session denominator is 0.
 
 ### Task tracking
 

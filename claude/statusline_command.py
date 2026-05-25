@@ -2088,15 +2088,6 @@ class Renderer:
         short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
-        cost        = TokenAccounting.session_cost(
-            Model(id=sub.model),
-            TranscriptUsage(
-                input_tokens            = sub.billed_in,
-                cache_read_input_tokens = sub.cache_read_in,
-                output_tokens           = sub.output,
-            ),
-        )
-        cost_s = f'{cost:.2f}'
 
         step     = rainbow_step()
         c_marker = rainbow_at(step, 12)
@@ -2105,16 +2096,9 @@ class Renderer:
         target_w = width - 4  # content width (2 for '│ ' left, 2 for ' │' right)
 
         if width > 100:
-            # --- identity line (▶) : duration · model ---
-            right1 = (
-                f'{self.CTX}{dur_s}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {model_clr}{short_model.ljust(6)}{self.R}'
-            )
-            right1_w = _visible_width(right1)
-
+            # --- identity line (▶) : agent type · description (full width) ---
             head1_w  = 3 + _visible_width(type_text) + 3  # '▶  ' + type + ' · '
-            desc_budget = max(0, target_w - head1_w - 1 - right1_w)
+            desc_budget = max(0, target_w - head1_w)
             desc_text   = sub.description or ''
             if _visible_width(desc_text) > desc_budget:
                 desc_text = (desc_text[:desc_budget - 1] + '…') if desc_budget > 0 else ''
@@ -2126,11 +2110,13 @@ class Renderer:
                 f'{self.CTX}{desc_text}{self.R}'
             )
             left1_w = head1_w + _visible_width(desc_text)
-            pad1    = max(1, target_w - left1_w - right1_w)
-            line1   = f'{left1}{" " * pad1}{right1}'
+            pad1    = max(1, target_w - left1_w)
+            line1   = f'{left1}{" " * pad1}'  # right side empty; pad keeps equal widths
 
             # --- continuation line (└) : burn-metric cluster ---
-            # Static field widths keep the · separators aligned across rows.
+            # All stats live here as ' · '-joined fields; duration and model
+            # relocate from the identity line. Static field widths keep the
+            # separators aligned across rows.
             tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, now)
             share = subagent_share(sub.total_input + sub.output, session_inout)
 
@@ -2138,24 +2124,23 @@ class Renderer:
             tok_field = fmt_tok(sub.total_input).rjust(5)
             out_plain = f'↑ {out_s}'
             out_pad   = ' ' * max(0, 6 - len(out_plain))
-            cost_str  = f'${cost_s}'
-            cost_pad  = ' ' * max(0, 6 - len(cost_str))
 
             frags: list[str] = []
+            # t/m and share % are an atomic pair: both appear or neither.
             if tpm is not None and share is not None:
                 pct       = share * 100
                 share_clr = self.gradient.gradient_color(share)
                 tpm_str   = f'{tpm:,d}'.rjust(5)
-                share_str = f'{f'{pct:4.2f}':>5s}%'
-                # pie glyph stands in for the · separator before the share %
-                frags.append(
-                    f'{self.TOK}{ICON_TOK_RATE} {tpm_str} t/m{self.R}'
-                    f' {share_clr}{GLYPH_PIE}{self.R} '
-                    f'{share_clr}{share_str}{self.R}'
-                )
-            frags.append(f'{ctx_clr}{tok_field}{self.R}')
-            frags.append(f'{out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}')
-            frags.append(f'{cost_pad}{self.COST}{cost_str}{self.R}')
+                share_str = f'{pct:.1f}%'.rjust(6)
+                frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
+                frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
+            # tok and ↑out are one space-grouped field (no · between them).
+            frags.append(
+                f'{ctx_clr}{tok_field}{self.R}'
+                f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
+            )
+            frags.append(f'{self.CTX}{dur_s}{self.R}')
+            frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
             right2 = sep.join(frags)
 
             activity   = self.subagent_activity(sub.last_activity)
@@ -2182,7 +2167,6 @@ class Renderer:
 
             right_n = (
                 f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
-                f'  {self.COST}${cost_s}{self.R}'
                 f'  {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
                 f'  {self.CTX}{dur_s}{self.R}'
             )
