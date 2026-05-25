@@ -40,7 +40,8 @@ class BarChars:
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 MIN_WIDTH    = 40
-MAX_WIDTH    = 140
+DEFAULT_MAX_WIDTH = 140
+MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
