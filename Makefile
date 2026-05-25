@@ -1,14 +1,12 @@
-STATUSLINE_SRC := $(CURDIR)/claude/statusline_command.py
-THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
-MON_SRC        := $(CURDIR)/claude/mon.py
-INSTALL_DIR	   := $(HOME)/.claude
+STATUSLINE_SRC    := $(CURDIR)/claude/statusline_command.py
+THEMES_SRC        := $(CURDIR)/claude/statusline/themes.py
+MON_SRC           := $(CURDIR)/claude/mon.py
+CLAUDE_CONFIG_DIR ?= $(HOME)/.claude
 
 install:
-	@mkdir -p "$(INSTALL_DIR)/statusline"
-	@ln -sf $(STATUSLINE_SRC) "$(INSTALL_DIR)/statusline_command.py" || true
-	@ln -sf $(THEMES_SRC)     "$(INSTALL_DIR)/statusline/themes.py" || true
-	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
-	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
+	@mkdir -p "$(CLAUDE_CONFIG_DIR)/statusline"
+	@ln -sfv $(STATUSLINE_SRC) "$(CLAUDE_CONFIG_DIR)/statusline_command.py" || true
+	@ln -sfv $(THEMES_SRC) "$(CLAUDE_CONFIG_DIR)/statusline/themes.py" || true
 
 demo:
 	@python3 claude/statusline/demo.py
@@ -17,14 +15,7 @@ demo/img:
 	@python3 claude/statusline/demo.py --snapshots demo/
 
 mon/install:
-	@for dir in $(INSTALL_DIRS); do \
-		if ! test -d "$$dir"; then \
-			echo "directory $$dir does not exist, skipping"; \
-			continue; \
-		fi; \
-		ln -sf $(MON_SRC) "$$dir/mon.py"; \
-		echo "installed mon -> $$dir"; \
-	done
+	@ln -sfv $(MON_SRC) "$(CLAUDE_CONFIG_DIR)/mon.py" || true
 
 mon/run:
 	uv run python claude/mon.py
