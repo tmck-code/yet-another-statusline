@@ -1,5 +1,4 @@
 import re
-from typing import Callable
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 

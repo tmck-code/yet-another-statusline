@@ -12,11 +12,9 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude.mon.discovery import discover
 from claude.mon.layout import aggregate_day_cost, aggregate_rate_limits, format_header
 from claude.mon.lifecycle import classify
 

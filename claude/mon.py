@@ -8,7 +8,6 @@ import select
 import shutil
 import signal
 import sys
-import time
 import traceback
 from datetime import datetime
 from pathlib import Path
