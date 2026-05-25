@@ -44,9 +44,13 @@ def test_render_different_widths_produce_different_layouts():
     assert narrow != wide
 
 
-def test_render_matches_cli_subprocess(tmp_path, monkeypatch):
+def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     import os
-    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    # tmp_home patches both HOME and CLAUDE_DIR for the in-process render; the
+    # subprocess must read the same (empty) CLAUDE_DIR or its token/cost/sparkline
+    # rows diverge from the real ~/.claude logs. The CLI caps width at MAX_WIDTH
+    # (raw_tw - 6), so feed COLUMNS = MAX_WIDTH + 6 and render the API at the cap.
+    claude_dir = tmp_home / '.claude'
 
     info = _load_example()
 
@@ -55,10 +59,15 @@ def test_render_matches_cli_subprocess(tmp_path, monkeypatch):
         input=json.dumps(info),
         capture_output=True,
         text=True,
-        env={**os.environ, 'COLUMNS': '166', 'HOME': str(tmp_path)},
+        env={
+            **os.environ,
+            'COLUMNS':           str(sl.MAX_WIDTH + 6),
+            'HOME':              str(tmp_home),
+            'CLAUDE_CONFIG_DIR': str(claude_dir),
+        },
     )
     result_cli = proc.stdout
 
-    result_api = sl.render(info, 160)
+    result_api = sl.render(info, sl.MAX_WIDTH)
 
     assert result_api == result_cli.rstrip('\n')

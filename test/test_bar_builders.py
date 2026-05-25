@@ -18,11 +18,13 @@ def test_gradient_bar_visible_width() -> None:
 
 
 def test_gradient_bar_mid_glyph_has_no_background() -> None:
-    # The MID leading-edge glyph used to sit on a coloured BG to fake a pill cap.
-    # The fill→empty seam is now blended by fading the leading empty chars, so
-    # gradient_bar must not emit any BG SGR.
+    # Filled cells are painted as space-on-BG for gapless coverage, but the MID
+    # leading-edge cap glyph must carry no background: it's emitted after a BG
+    # reset (\x1b[49m), so everything from that reset on is BG-free.
     result = _r.gradient_bar(5, 30)
-    assert '\x1b[48;' not in result
+    after_reset = result.split('\x1b[49m', 1)[1]
+    assert sl.BarChars.MID in after_reset
+    assert '\x1b[48;' not in after_reset
 
 
 def test_empty_section_fades_leading_chars() -> None:

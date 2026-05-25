@@ -246,7 +246,7 @@ class TestModelRightSectionCompactBurndown:
         rate = RateLimits(five_hour=RateBucket(used_percentage=60.0, resets_at=0))
         rate_text, _right, _w = self._r.model_right_section_compact('Sonnet 4.6', rate, max_right_width=40)
         stripped = strip_ansi(rate_text)
-        assert sl.GLYPH_FAST not in stripped
+        assert sl.GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
         assert '·' not in stripped
 

@@ -24,8 +24,8 @@ def test_path_git_dirty_with_elapsed() -> None:
     git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=1)
     out = r.path_git('~/proj', git, '12m')
     stripped = strip_ansi(out)
-    assert '●3' in stripped
-    assert '*1' in stripped
+    assert '*3' in stripped   # modified
+    assert '•1' in stripped   # untracked
     assert '[12m]' in stripped
 
 
@@ -67,7 +67,7 @@ class TestPathGitFlags:
         stripped = strip_ansi(out)
         assert 'abc1234' not in stripped
         assert '/' not in stripped.split('main')[1]
-        assert '●1' in stripped
+        assert '*1' in stripped   # modified
         assert '[3m]' in stripped
 
     def test_show_elapsed_false_omits_tail(self) -> None:
