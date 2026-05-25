@@ -1309,16 +1309,6 @@ def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
     return f'[38;2;{r};{g};{b}m'
 
 
-def pill_border_seq(col: int, pill_start: int, pill_end: int,
-                    anchor: tuple[int, int, int], shift: tuple[int, int, int],
-                    pct: int) -> str:
-    """FG + matching BG for pill half-block border chars (eliminates gap artefacts)."""
-    fg = pill_gradient_fg(col, pill_start, pill_end, anchor, shift, pct)
-    bg = fg.replace('[38;2;', '[48;2;', 1)
-    return fg + bg
-
-
-
 class GradientEngine:
     FADE        = 0.06
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
