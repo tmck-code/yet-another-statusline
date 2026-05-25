@@ -48,3 +48,20 @@ make demo
 # screenshot demo - writes to demo/
 make demo/img
 ```
+
+## Codex Rate-Limit Gauge
+
+A third row beneath the Claude cost rows shows your **Codex rate-limit window consumption** (rate limits, not dollars — Codex Pro is flat-rate).
+
+```
+  󰞬 5h ▆░░░░░░░ 12%  │  7d ▆▆░░░░░░ 28%  │  pro
+```
+
+- Reads from `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`
+- Override the sessions root with `YAS_CODEX_SESSIONS_DIR`
+- Shows the **5-hour** and **7-day** window consumption percentages
+- Color thresholds: `< 60%` green · `60–85%` yellow · `> 85%` red
+- If the latest rollout is older than 1 hour, a `(stale Xh)` indicator appears
+- Narrows gracefully: medium width shows both percentages without bars; narrow shows only the 5h window
+- If no Codex session data is found, renders `no codex data` in dim grey
+
