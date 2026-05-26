@@ -10,6 +10,14 @@ install:
 	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
 	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
 
+pr-info:
+	@uname -a
+	@claude --version 2>/dev/null || echo "claude: not installed"
+	@echo "TERM=$$TERM TERM_PROGRAM=$$TERM_PROGRAM SHELL=$$SHELL COLORTERM=$$COLORTERM"
+	@echo "LANG=$$LANG LC_ALL=$$LC_ALL"
+	@python3 -V
+	@uv --version 2>/dev/null || echo "uv: not installed"
+
 demo:
 	@python3 claude/statusline/demo.py
 
@@ -29,4 +37,4 @@ mon/install:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install demo demo/img mon/install mon/run
+.PHONY: install pr-info demo demo/img mon/install mon/run
