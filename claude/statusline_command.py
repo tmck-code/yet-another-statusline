@@ -2900,11 +2900,16 @@ def main() -> None:
     info  = json.loads(sys.stdin.read())
     theme = resolve_theme(theme_name)
 
-    # Write payload so the multi-session observer can index it.
+    # Write payload so the multi-session observer can index it. Keyed by
+    # session_id and overwritten in place, so the dir holds one file per
+    # session rather than one per render tick. The observer already collapses
+    # to the newest payload per session (mon/discovery.index_payloads_by_session),
+    # so the old timestamped filenames only ever accumulated dead weight.
     try:
         out_dir = CLAUDE_DIR / 'statusline-output'
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f'statusline.{int(time.time())}.json').write_text(json.dumps(info))
+        session_id = _as_str(info.get('session_id')) or 'unknown'
+        (out_dir / f'statusline.{session_id}.json').write_text(json.dumps(info))
     except OSError:
         pass
 
