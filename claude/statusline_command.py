@@ -158,6 +158,8 @@ CLR_ALERT      = '\033[38;5;167m'
 # chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
 # terminal.
 ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
+ICON_CODEX    = '\U000f19e3'  # nf-md-clock-time-eight-outline (Codex rate-limit row)
+ICON_CLAUDE_QUOTA = '\U000f96e4'  # nf-md-chart-donut (Claude quota gauge row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
@@ -498,6 +500,159 @@ class RateLimits:
         return cls(
             five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
             seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
+        )
+
+
+@dataclass
+class CodexRateLimits:
+    """Rate-limit state read from ~/.codex/sessions rollout files.
+
+    All fields are None when no Codex rollout data is available.
+    ``primary``   = 5-hour window
+    ``secondary`` = 7-day window (10080 min)
+    """
+
+    primary_pct:         float | None = None
+    secondary_pct:       float | None = None
+    primary_resets_at:   int   | None = None
+    secondary_resets_at: int   | None = None
+    plan_type:           str   | None = None
+    data_age_seconds:    float | None = None
+
+    # Stale threshold: if the newest token_count event is older than this, we
+    # surface a "(stale Xh)" indicator next to the plan label.
+    STALE_SECONDS: int = 3600
+
+    def is_stale(self) -> bool:
+        if self.data_age_seconds is None:
+            return False
+        return self.data_age_seconds > self.STALE_SECONDS
+
+    @classmethod
+    def load(cls, sessions_root: Path | None = None) -> CodexRateLimits:
+        """Load the most recent token_count event from Codex rollout files.
+
+        Args:
+            sessions_root: Override the default ``~/.codex/sessions`` root.
+                           Falls back to the ``YAS_CODEX_SESSIONS_DIR`` env
+                           var, then to the XDG default.
+        """
+        if sessions_root is None:
+            env_dir = os.environ.get('YAS_CODEX_SESSIONS_DIR')
+            if env_dir:
+                sessions_root = Path(env_dir)
+            else:
+                sessions_root = HOME / '.codex' / 'sessions'
+
+        rollout = cls._find_latest_rollout(sessions_root)
+        if rollout is None:
+            return cls()
+
+        data_age = time.time() - rollout.stat().st_mtime
+        event    = cls._last_token_count(rollout)
+        if event is None:
+            return cls()
+
+        rl = event.get('rate_limits') or {}
+        primary   = rl.get('primary')   or {}
+        secondary = rl.get('secondary') or {}
+        return cls(
+            primary_pct         = float(primary.get('used_percent', 0)),
+            secondary_pct       = float(secondary.get('used_percent', 0)),
+            primary_resets_at   = primary.get('resets_at'),
+            secondary_resets_at = secondary.get('resets_at'),
+            plan_type           = rl.get('plan_type'),
+            data_age_seconds    = data_age,
+        )
+
+    @staticmethod
+    def _find_latest_rollout(root: Path) -> Path | None:
+        """Return the most recently modified rollout-*.jsonl under root."""
+        if not root.is_dir():
+            return None
+        candidates = sorted(root.glob('*/*/[0-9][0-9]/rollout-*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not candidates:
+            # Also try direct rollout-*.jsonl at root (flat layout)
+            candidates = sorted(root.glob('rollout-*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _last_token_count(rollout: Path) -> dict | None:
+        """Reverse-scan ``rollout`` and return the last token_count payload."""
+        try:
+            lines = rollout.read_bytes().splitlines()
+        except OSError:
+            return None
+        for raw in reversed(lines):
+            if b'token_count' not in raw:
+                continue
+            try:
+                d = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if d.get('type') == 'event_msg':
+                p = d.get('payload') or {}
+                if p.get('type') == 'token_count':
+                    return p
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Claude subscription quota approximation
+# ---------------------------------------------------------------------------
+
+# Plan ceilings are heuristic estimates based on Anthropic's "5x / 20x of Pro"
+# framing. Anthropic does not publish exact token counts for Max plans.
+# Override per-field via YAS_CLAUDE_5H_CAP_TOKENS / YAS_CLAUDE_WEEKLY_CAP_TOKENS.
+PLAN_CEILINGS: dict[str, dict[str, int]] = {
+    'pro':   {'cap_5h_tokens':  1_500_000,   'cap_weekly_tokens':  18_000_000},
+    'max5':  {'cap_5h_tokens':  7_500_000,   'cap_weekly_tokens':  90_000_000},
+    'max20': {'cap_5h_tokens': 30_000_000,   'cap_weekly_tokens': 360_000_000},
+}
+
+
+@dataclass
+class ClaudeQuota:
+    """Approximate Claude subscription quota state.
+
+    Token counts are derived from the local transcript and token log — Claude
+    does not expose live quota data the way Codex does.  All values are
+    best-effort approximations; the operator should tune ceilings via env vars
+    if the defaults diverge from observed behaviour.
+
+    ``pct_5h``     = session_tokens / cap_5h_tokens × 100  (proxy for 5h window)
+    ``pct_weekly`` = day_tokens / cap_weekly_tokens × 100   (proxy for rolling week)
+    """
+
+    session_tokens:   int
+    day_tokens:       int
+    plan:             str
+    cap_5h_tokens:    int
+    cap_weekly_tokens: int
+    pct_5h:           float
+    pct_weekly:       float
+
+    @classmethod
+    def load(cls, plan: str, session_tokens: int, day_tokens: int) -> 'ClaudeQuota':
+        """Build a ClaudeQuota from plan name + token counts.
+
+        Env-var overrides:
+          YAS_CLAUDE_5H_CAP_TOKENS     — override the plan's 5-hour ceiling
+          YAS_CLAUDE_WEEKLY_CAP_TOKENS — override the plan's weekly ceiling
+        """
+        defaults = PLAN_CEILINGS.get(plan, PLAN_CEILINGS['max20'])
+        cap_5h = int(os.environ.get('YAS_CLAUDE_5H_CAP_TOKENS', defaults['cap_5h_tokens']))
+        cap_weekly = int(os.environ.get('YAS_CLAUDE_WEEKLY_CAP_TOKENS', defaults['cap_weekly_tokens']))
+        pct_5h     = min(session_tokens / cap_5h * 100,     100.0) if cap_5h     > 0 else 0.0
+        pct_weekly = min(day_tokens    / cap_weekly * 100, 100.0) if cap_weekly > 0 else 0.0
+        return cls(
+            session_tokens=session_tokens,
+            day_tokens=day_tokens,
+            plan=plan,
+            cap_5h_tokens=cap_5h,
+            cap_weekly_tokens=cap_weekly,
+            pct_5h=pct_5h,
+            pct_weekly=pct_weekly,
         )
 
 
@@ -1637,6 +1792,19 @@ class BorderRenderer:
         return f'{left}│{self.R}{lead}{content}{pad_str}{right}│{self.R}'
 
 
+
+def _effective_soft_limit(ctx: 'ContextWindow') -> int:
+    """Soft-limit threshold scaled to the model's actual context window.
+
+    SOFT_LIMIT is the auto-compact warning zone for legacy 200K Claude models.
+    For 1M-context models, scale the soft limit to ~75% of the actual window so
+    the bar fills proportionally instead of overflowing at 15% real usage.
+    Falls back to the legacy constant when context_window_size is unknown.
+    """
+    if ctx.context_window_size > 0:
+        return max(SOFT_LIMIT, int(ctx.context_window_size * 0.75))
+    return SOFT_LIMIT
+
 class Renderer:
     def __init__(self, bg_shift: str = 'warm', theme: Theme | None = None) -> None:
         self.bg_shift = bg_shift if bg_shift in ('warm', 'cool') else 'warm'
@@ -2353,10 +2521,11 @@ class Renderer:
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        soft_limit   = _effective_soft_limit(ctx)
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a = BOLD + self.risk_zone_color(total_tokens)
             secondary = ''
             if ctx.context_window_size > 0:
@@ -2384,10 +2553,11 @@ class Renderer:
 
     def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        soft_limit   = _effective_soft_limit(ctx)
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a      = BOLD + self.risk_zone_color(total_tokens)
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
@@ -2512,6 +2682,149 @@ class Renderer:
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
 
+    # ------------------------------------------------------------------
+    # Codex rate-limit gauge (3rd statusline row)
+    # ------------------------------------------------------------------
+
+    def codex_pct_colour(self, pct: float) -> str:
+        """Color for a Codex rate-limit percentage.
+
+        Thresholds differ from Claude's fill_colour (70/90) because
+        Codex Pro is flat-rate — hitting 85%+ of a window is operationally
+        more significant than a dollar cost approaching a soft limit.
+        """
+        if pct >= 85.0:
+            return self.alert
+        if pct >= 60.0:
+            return self.warn
+        return self.safe
+
+    def _codex_pct_bar(self, pct: float, bar_w: int = 8) -> str:
+        """A short filled/empty bar for a Codex window percentage."""
+        filled = max(0, min(bar_w, round(pct / 100 * bar_w)))
+        empty  = bar_w - filled
+        clr    = self.codex_pct_colour(pct)
+        return f'{clr}{BarChars.HEAVY * filled}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+
+    def codex_rate_row(self, rl: CodexRateLimits, width: int = 100) -> str:
+        """Render the Codex rate-limit gauge row.
+
+        Width modes:
+          wide   (>80) : icon  5h bar NN%  |  7d bar NN%  |  plan [stale Xh]
+          medium (<=80): icon  5h NN%  .  7d NN%
+          narrow (<=55): icon  5h NN%
+        """
+        # No-data state
+        if rl.primary_pct is None:
+            return f' {self.LABEL}{ICON_CODEX}  no codex data{self.R}'
+
+        primary_pct   = rl.primary_pct
+        secondary_pct = rl.secondary_pct if rl.secondary_pct is not None else 0.0
+        plan          = (rl.plan_type or '').lower()
+
+        p_clr = self.codex_pct_colour(primary_pct)
+        s_clr = self.codex_pct_colour(secondary_pct)
+
+        icon_str = f'{self.LABEL}{ICON_CODEX}{self.R}'
+
+        if width <= NARROW_WIDTH:
+            # Narrow: icon + 5h pct only
+            return f' {icon_str} {self.LABEL}5h{self.R} {p_clr}{primary_pct:.0f}%{self.R}'
+
+        if width <= MEDIUM_WIDTH:
+            # Medium: icon + 5h pct  .  7d pct
+            return (
+                f' {icon_str}'
+                f' {self.LABEL}5h{self.R} {p_clr}{primary_pct:.0f}%{self.R}'
+                f' {self.LABEL}\xb7{self.R}'
+                f' {self.LABEL}7d{self.R} {s_clr}{secondary_pct:.0f}%{self.R}'
+            )
+
+        # Wide: bars + plan label + optional stale indicator
+        p_bar = self._codex_pct_bar(primary_pct)
+        s_bar = self._codex_pct_bar(secondary_pct)
+
+        stale_str = ''
+        if rl.is_stale() and rl.data_age_seconds is not None:
+            stale_h = int(rl.data_age_seconds // 3600)
+            stale_m = int((rl.data_age_seconds % 3600) // 60)
+            stale_label = f'{stale_h}h' if stale_h else f'{stale_m}m'
+            stale_str = f' {self.COMMIT}(stale {stale_label}){self.R}'
+
+        sep = f'  {self.LABEL}│{self.R}  '
+
+        return (
+            f' {icon_str}'
+            f' {self.LABEL}5h{self.R} {p_bar} {p_clr}{primary_pct:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}7d{self.R} {s_bar} {s_clr}{secondary_pct:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}{plan}{self.R}'
+            f'{stale_str}'
+        )
+
+
+    # ------------------------------------------------------------------
+    # Claude subscription quota gauge
+    # ------------------------------------------------------------------
+
+    def claude_quota_pct_colour(self, pct: float) -> str:
+        """Color for a Claude quota percentage (same thresholds as Codex)."""
+        if pct >= 85.0:
+            return self.alert
+        if pct >= 60.0:
+            return self.warn
+        return self.safe
+
+    def _claude_quota_bar(self, pct: float, bar_w: int = 8) -> str:
+        """A short filled/empty bar for a Claude quota percentage."""
+        filled = max(0, min(bar_w, round(pct / 100 * bar_w)))
+        empty  = bar_w - filled
+        clr    = self.claude_quota_pct_colour(pct)
+        return f'{clr}{BarChars.HEAVY * filled}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+
+    def claude_quota_row(self, quota: ClaudeQuota, width: int = 100) -> str:
+        """Render the Claude subscription quota gauge row.
+
+        Width modes:
+          wide   (>80) : icon  5h bar NN%  |  7d bar NN%  |  plan_label
+          medium (<=80): icon  5h NN%  ·  7d NN%
+          narrow (<=55): icon  5h NN%
+        """
+        pct_5h     = quota.pct_5h
+        pct_weekly = quota.pct_weekly
+        plan_label = f'{quota.plan}x' if quota.plan in ('max5', 'max20') else quota.plan
+
+        h_clr = self.claude_quota_pct_colour(pct_5h)
+        w_clr = self.claude_quota_pct_colour(pct_weekly)
+        icon_str = f'{self.LABEL}{ICON_CLAUDE_QUOTA}{self.R}'
+
+        if width <= NARROW_WIDTH:
+            return f' {icon_str} {self.LABEL}5h{self.R} {h_clr}{pct_5h:.0f}%{self.R}'
+
+        if width <= MEDIUM_WIDTH:
+            return (
+                f' {icon_str}'
+                f' {self.LABEL}5h{self.R} {h_clr}{pct_5h:.0f}%{self.R}'
+                f' {self.LABEL}\xb7{self.R}'
+                f' {self.LABEL}7d{self.R} {w_clr}{pct_weekly:.0f}%{self.R}'
+            )
+
+        # Wide: bars + plan label
+        h_bar = self._claude_quota_bar(pct_5h)
+        w_bar = self._claude_quota_bar(pct_weekly)
+        sep   = f'  {self.LABEL}│{self.R}  '
+
+        return (
+            f' {icon_str}'
+            f' {self.LABEL}5h{self.R} {h_bar} {h_clr}{pct_5h:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}7d{self.R} {w_bar} {w_clr}{pct_weekly:.0f}%{self.R}'
+            f'{sep}'
+            f'{self.LABEL}{plan_label}{self.R}'
+        )
+
+
 @dataclass
 class RowSpec:
     kind: str  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
@@ -2537,7 +2850,8 @@ class LayoutSpec:
 def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -2584,7 +2898,8 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -2643,7 +2958,8 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    soft_limit   = _effective_soft_limit(ctx)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
@@ -2666,6 +2982,16 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     )
     tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
+    codex_rl      = CodexRateLimits.load()
+
+    # Claude quota mode: YAS_CLAUDE_MODE=quota replaces cost rows with gauge
+    _claude_mode = os.environ.get('YAS_CLAUDE_MODE', 'cost').strip().lower()
+    _claude_plan = os.environ.get('YAS_CLAUDE_PLAN', 'max20').strip().lower()
+    claude_quota  = ClaudeQuota.load(
+        plan=_claude_plan,
+        session_tokens=usage.billed_in + usage.cache_read + usage.out,
+        day_tokens=token_log.day_in + token_log.day_cache_read + token_log.day_out,
+    ) if _claude_mode == 'quota' else None
 
     git          = GitInfo.from_cwd(session.cwd)
     helper_text, right_text, right_w = r.model_right_section(
@@ -2721,8 +3047,17 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
     tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
     rows.append(RowSpec('separator_dim', downs=tokens_downs))
-    for lt in line_tokens:
-        rows.append(RowSpec('content', content=lt))
+    if claude_quota is not None:
+        # Quota mode: replace the two cost rows + codex row with a single quota gauge
+        rows.append(RowSpec('content', content=r.claude_quota_row(claude_quota, width)))
+    else:
+        # Cost mode (default): render token/cost rows as usual
+        for lt in line_tokens:
+            rows.append(RowSpec('content', content=lt))
+
+    # Codex rate-limit gauge row (always shown when Codex data is available)
+    codex_row = r.codex_rate_row(codex_rl, width)
+    rows.append(RowSpec('content', content=codex_row))
 
     # First post-tokens separator threads `ups` back into the tokens vseps and
     # is drawn as the heavy "seam" marking the static→dynamic split. Only the
