@@ -112,9 +112,13 @@ def test_resolve_theme_unknown_name_falls_through(
 # Byte-identity snapshot — claude-dark × 3 layouts
 #
 # The rendered statusline encodes (a) the rate-limit countdown derived from
-# `datetime.now()` vs the fixture's `resets_at`, and (b) the rainbow phase
-# derived from `time.time()`. Both must be frozen so the snapshot is
-# deterministic across runs.
+# `datetime.now()` vs the fixture's `resets_at`, (b) the rainbow phase
+# derived from `time.time()`, and (c) the day-token/cost totals the wide
+# layout reads from `CLAUDE_DIR/statusline-tokens.log`. (a) and (b) are
+# frozen by the `frozen` fixture; (c) is isolated by the `tmp_home` fixture,
+# which points CLAUDE_DIR at an empty tmp dir so day totals resolve to 0
+# (and the developer's real token log is never read or written). Without it
+# the wide snapshot drifts on any machine with usage logged on FROZEN's date.
 
 FROZEN_EPOCH = 1776800000  # arbitrary fixed point before the fixture's resets_at
 FROZEN_DT    = None        # initialised lazily inside _freeze
@@ -159,7 +163,7 @@ def _render(width: int, theme: Theme) -> str:
     ('medium', 74),
     ('wide',   120),
 ])
-def test_claude_dark_byte_identity(layout: str, width: int, frozen) -> None:  # type: ignore[no-untyped-def]
+def test_claude_dark_byte_identity(layout: str, width: int, frozen, tmp_home) -> None:  # type: ignore[no-untyped-def]
     fixture = FIXTURES / f'claude_dark_{layout}.ansi'
     actual  = _render(width, sl.CLAUDE_DARK)
     if not fixture.exists():
