@@ -29,11 +29,17 @@ the template structure — read it from the repo so the two never drift.
    failures and ask the user whether to fix first or proceed. Optionally also run `uv run ruff
    check` and `uv run mypy .` and note results.
 
-6. **Screenshots.** You cannot attach images via `gh`. Remind the user that for any rendering
+6. **Benchmark.** Run `make bench` (times this branch vs `main` via a throwaway git worktree).
+   If `hyperfine` is not on PATH, `bench.py` prints an install hint and falls back to a Python
+   timer — before letting it fall back, offer to install hyperfine (`apt`/`brew`/`cargo`) and ask
+   the user; only fall back if they decline. Paste the paste-ready table into the Benchmark
+   block. Tick "N/A — no performance-relevant change" instead only for docs/config-only PRs.
+
+7. **Screenshots.** You cannot attach images via `gh`. Remind the user that for any rendering
    change they should drag before/after images into the draft's web UI before marking it ready.
    For rendering changes, `make demo/img` can produce snapshots to use.
 
-7. **Confirm, then create the draft.** Show the fully assembled body. After the user confirms,
+8. **Confirm, then create the draft.** Show the fully assembled body. After the user confirms,
    run `gh pr create --draft` with that body. Print the PR URL and tell the user to add
    screenshots and click "Ready for review" when done.
 

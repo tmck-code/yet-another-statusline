@@ -25,6 +25,17 @@
 
 - [ ] N/A — no visible change
 
+## Benchmark
+
+<!-- `make bench` times the statusline command on this branch vs `main` (git worktree,
+     hyperfine if installed, Python fallback otherwise) and prints a paste-ready table.
+     Paste it below. -->
+
+```
+```
+
+- [ ] N/A — no performance-relevant change
+
 ## System info
 
 <!-- Run `make pr-info` and paste the output between the fences below. -->

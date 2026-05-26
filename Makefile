@@ -10,6 +10,9 @@ install:
 	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
 	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
 
+bench:
+	@uv run python ops/bench.py $(BENCH_ARGS)
+
 pr-info:
 	@uname -a
 	@claude --version 2>/dev/null || echo "claude: not installed"
@@ -37,4 +40,4 @@ mon/install:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install pr-info demo demo/img mon/install mon/run
+.PHONY: install bench pr-info demo demo/img mon/install mon/run
