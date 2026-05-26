@@ -80,17 +80,28 @@ def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
 
     info = _load_example()
 
+    # Build an env the subprocess can't escape the sandbox through. Inheriting
+    # os.environ wholesale lets the host leak in:
+    #   - TMUX_PANE / TMUX make terminal_width() query the real tmux pane and
+    #     ignore COLUMNS, so the subprocess renders at the pane width, not MAX_WIDTH.
+    #   - YAS_FULL_WIDTH switches main() to the uncapped (raw_tw - 6) branch.
+    # Strip both so the subprocess deterministically caps at MAX_WIDTH via COLUMNS,
+    # and pin YAS_MAX_WIDTH to the in-process sl.MAX_WIDTH so the cap matches exactly.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('TMUX_PANE', 'TMUX', 'YAS_FULL_WIDTH')}
+    env.update({
+        'COLUMNS':           str(sl.MAX_WIDTH + 6),
+        'YAS_MAX_WIDTH':     str(sl.MAX_WIDTH),
+        'HOME':              str(tmp_home),
+        'CLAUDE_CONFIG_DIR': str(claude_dir),
+    })
+
     proc = subprocess.run(
         [sys.executable, str(_SCRIPT)],
         input=json.dumps(info),
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            'COLUMNS':           str(sl.MAX_WIDTH + 6),
-            'HOME':              str(tmp_home),
-            'CLAUDE_CONFIG_DIR': str(claude_dir),
-        },
+        env=env,
     )
     result_cli = proc.stdout
 
