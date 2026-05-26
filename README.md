@@ -33,6 +33,50 @@ The statusline also renders differently according to available width
 
 ---
 
+## Configuration
+
+The statusline is configured through CLI arguments and environment variables, plus a couple of optional files under your Claude config dir (`~/.claude` by default).
+
+### CLI arguments
+
+Pass these in the `statusLine.command` of your `~/.claude/settings.json`:
+
+| arg | values | default | description |
+|-----|--------|---------|-------------|
+| `--theme NAME` | `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha` | `claude-dark` | colour theme |
+| `--bg-shift DIR` | `warm`, `cool` | `warm` | direction of the background gradient shift |
+
+Both also accept the `--theme=NAME` / `--bg-shift=DIR` form.
+
+### Environment variables
+
+| var | default | description |
+|-----|---------|-------------|
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | base dir for config/state files (theme file, width file, token-rate log, output payloads) |
+| `CLAUDE_STATUSLINE_THEME` | _(unset)_ | theme name; overrides the config file, overridden by `--theme` |
+| `STATUSLINE_TOKEN_WINDOW` | `60` | seconds; rolling window used to compute the token throughput rate |
+| `COLUMNS` | _(unset)_ | terminal-width fallback when tmux / width-file detection fail |
+
+### Theme resolution
+
+The theme is chosen by the first of these that names a known theme:
+
+1. `--theme NAME` CLI arg
+2. `CLAUDE_STATUSLINE_THEME` env var
+3. `~/.claude/statusline-theme` file (contents = theme name)
+4. built-in default (`claude-dark`)
+
+### Terminal width
+
+Width is detected by the first source that returns a positive value:
+
+1. `tmux display-message -p '#{pane_width}'`
+2. `~/.claude/terminal-width` file
+3. `COLUMNS` env var
+4. `shutil.get_terminal_size()` / `/dev/tty` ioctl
+
+---
+
 ## Commands
 
 To demo/test:
