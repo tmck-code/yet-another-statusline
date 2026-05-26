@@ -1,11 +1,3 @@
-MON_SRC           := $(CURDIR)/claude/mon.py
-CLAUDE_CONFIG_DIR ?= $(HOME)/.claude
-
-install:
-	@mkdir -p "$(CLAUDE_CONFIG_DIR)/statusline"
-	@ln -sfv $(STATUSLINE_SRC) "$(CLAUDE_CONFIG_DIR)/statusline_command.py" || true
-	@ln -sfv $(THEMES_SRC) "$(CLAUDE_CONFIG_DIR)/statusline/themes.py" || true
-
 hooks:
 	@if [ "$$(git config --local --get core.hooksPath)" = ".github/hooks" ]; then \
 		echo "pre-commit hooks already active (core.hooksPath=.github/hooks)"; \
@@ -41,10 +33,7 @@ test:
 statusline/test:
 	@uv run python claude/statusline/demo.py
 
-mon/install:
-	@ln -sfv $(MON_SRC) "$(CLAUDE_CONFIG_DIR)/mon.py" || true
-
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install hooks bench pr-info demo demo/img test statusline/test mon/install mon/run
+.PHONY: hooks bench pr-info demo demo/img test statusline/test mon/run
