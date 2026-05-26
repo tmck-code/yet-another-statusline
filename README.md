@@ -4,17 +4,64 @@
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
-To install (note: currently requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
+## Requirements
 
-```shell
-# to install to ~/.claude/
-make install
+- Python 3.10+
+- [Nerd Font](https://www.nerdfonts.com/font-downloads) (for icons)
 
-# to install to another dir
-CLAUDE_CONFIG_DIR=~/.claude_blah/ make install
+## Install
+
+### Via Claude Code plugin (recommended)
+
+```bash
+claude plugin marketplace add tmck-code/yet-another-statusline
+claude plugin install yas@yet-another-statusline
+claude -p "/yas:init"
 ```
 
-This symlinks the files into your claude user dir, allowing you to easily update them via a `git pull`
+`/yas:init` wires `statusLine.command` into `~/.claude/settings.json`. Reload Claude Code after it completes.
+
+**Upgrade:**
+```bash
+claude plugin install yas@yet-another-statusline
+claude -p "/yas:init"
+```
+
+`/yas:init` detects the new versioned path and rewrites it automatically.
+
+**Uninstall:**
+```bash
+claude -p "/yas:uninstall"
+claude plugin uninstall yas@yet-another-statusline
+```
+
+`claude plugin uninstall` only deletes the plugin cache — it leaves `statusLine.command`
+in `~/.claude/settings.json` pointing at the now-missing script, so the statusline keeps
+trying to run. Run `/yas:uninstall` **first** to remove that config (it backs up
+settings.json, and skips a custom non-yas statusLine) and clear the renderer's runtime
+logs. Reload Claude Code afterwards.
+
+### Via git clone (contributors / live-edit)
+
+Edits to the checkout take effect immediately — no reinstall step.
+
+```bash
+git clone https://github.com/tmck-code/yet-another-statusline
+cd yet-another-statusline
+```
+
+Wire `statusLine.command` in `~/.claude/settings.json` to point at the checkout:
+```json
+"statusLine": {
+  "async": true,
+  "command": "python3 \"/path/to/yet-another-statusline/claude/statusline_command.py\"",
+  "type": "command"
+}
+```
+
+> **Note:** if you also have the plugin installed, `claude plugin install` will overwrite
+> `statusLine.command` back to the plugin cache path. Either uninstall the plugin or bump
+> the version in `.claude-plugin/plugin.json` before reinstalling to keep your local path.
 
 ## Demo
 
@@ -83,14 +130,12 @@ Width is detected by the first source that returns a positive value:
 
 ## Commands
 
-To demo/test:
-
 ```bash
-# animated demo
-make demo
-
-# screenshot demo - writes to demo/
-make demo/img
+make test            # run pytest suite
+make demo            # animated demo at current terminal width
+make statusline/test # same as demo — use during development
+make demo/img        # render snapshots into demo/
+make mon/run         # launch multi-session monitor TUI
 ```
 
 ## Contributing

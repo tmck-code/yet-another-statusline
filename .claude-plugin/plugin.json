@@ -1,0 +1,18 @@
+{
+  "author": {
+    "name": "tmck-code",
+    "url": "https://github.com/tmck-code"
+  },
+  "description": "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more",
+  "keywords": [
+    "statusline",
+    "tokens",
+    "context",
+    "subagents",
+    "burndown"
+  ],
+  "license": "BSD-3-Clause",
+  "name": "yas",
+  "repository": "https://github.com/tmck-code/yet-another-statusline",
+  "version": "0.2.0"
+}

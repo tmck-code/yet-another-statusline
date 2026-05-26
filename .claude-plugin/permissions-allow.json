@@ -1,0 +1,14 @@
+[
+  "Bash(cp:*)",
+  "Bash(cut:*)",
+  "Bash(date:*)",
+  "Bash(dirname:*)",
+  "Bash(find:*)",
+  "Bash(grep:*)",
+  "Bash(head:*)",
+  "Bash(jq:*)",
+  "Bash(printf:*)",
+  "Bash(sort:*)",
+  "Bash(which:*)",
+  "Bash(xargs:*)"
+]

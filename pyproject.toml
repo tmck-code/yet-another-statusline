@@ -1,10 +1,10 @@
 [project]
 name = "yet-another-statusline"
 version = "0.2.0"
-description = "A Claude Code statusline that monitors as much as possible"
+description = "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more"
 readme = "README.md"
 
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 
 dependencies = []
 
@@ -43,7 +43,7 @@ exclude = [
 
 line-length = 140
 indent-width = 4
-target-version = "py312"
+target-version = "py310"
 
 
 [tool.ruff.lint]

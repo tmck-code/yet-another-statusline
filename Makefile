@@ -1,5 +1,3 @@
-STATUSLINE_SRC    := $(CURDIR)/claude/statusline_command.py
-THEMES_SRC        := $(CURDIR)/claude/statusline/themes.py
 MON_SRC           := $(CURDIR)/claude/mon.py
 CLAUDE_CONFIG_DIR ?= $(HOME)/.claude
 
@@ -32,10 +30,16 @@ pr-info:
 	@uv --version 2>/dev/null || echo "uv: not installed"
 
 demo:
-	@python3 claude/statusline/demo.py
+	@uv run python3 claude/statusline/demo.py
 
 demo/img:
-	@python3 claude/statusline/demo.py --snapshots demo/
+	@uv run python3 claude/statusline/demo.py --snapshots demo/
+
+test:
+	@uv run pytest -q
+
+statusline/test:
+	@uv run python claude/statusline/demo.py
 
 mon/install:
 	@ln -sfv $(MON_SRC) "$(CLAUDE_CONFIG_DIR)/mon.py" || true
@@ -43,4 +47,4 @@ mon/install:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install hooks bench pr-info demo demo/img mon/install mon/run
+.PHONY: install hooks bench pr-info demo demo/img test statusline/test mon/install mon/run
