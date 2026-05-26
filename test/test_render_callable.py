@@ -44,6 +44,33 @@ def test_render_different_widths_produce_different_layouts():
     assert narrow != wide
 
 
+def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
+    import io
+    info = _load_example()
+    fake_tw = 200  # wider than MAX_WIDTH so capping is observable
+
+    monkeypatch.setattr(sl, 'terminal_width', lambda: fake_tw)
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+
+    def _first_line_width(env_extra):
+        for k, v in env_extra.items():
+            monkeypatch.setenv(k, v)
+        buf = io.StringIO()
+        monkeypatch.setattr(sl.sys, 'stdout', buf)
+        monkeypatch.setattr(sl.sys, 'stdin', io.StringIO(sl.json.dumps(info)))
+        sl.main()
+        out = buf.getvalue()
+        monkeypatch.delenv('YAS_FULL_WIDTH', raising=False)
+        first_line = out.splitlines()[0] if out else ''
+        return sl._visible_width(first_line)
+
+    uncapped_w = _first_line_width({'YAS_FULL_WIDTH': '1'})
+    default_w  = _first_line_width({})
+
+    assert uncapped_w == fake_tw,      f'YAS_FULL_WIDTH: expected {fake_tw}, got {uncapped_w}'
+    assert default_w  == sl.MAX_WIDTH, f'default: expected {sl.MAX_WIDTH}, got {default_w}'
+
+
 def test_render_matches_cli_subprocess(tmp_path, monkeypatch):
     import os
     monkeypatch.setattr(sl, 'HOME', tmp_path)

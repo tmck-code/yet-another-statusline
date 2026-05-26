@@ -2859,7 +2859,10 @@ def main() -> None:
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
         return
-    width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
+    if os.environ.get('YAS_FULL_WIDTH'):
+        width = max(MIN_WIDTH, raw_tw-6)
+    else:
+        width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
 
     sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
 
