@@ -2790,51 +2790,28 @@ class Renderer:
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
-
-        if total_tokens >= SOFT_LIMIT:
-            a = BOLD + self.risk_zone_color(total_tokens)
-            secondary = ''
-            if ctx.context_window_size > 0:
-                pct_model = total_tokens / ctx.context_window_size * 100
-                secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
-            bar_w  = max(4, available - _visible_width(prefix) - 3)
-            filled = int(min(fill_ratio, 1.0) * bar_w)
-            empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f'{a}{self.R} {prefix}{bar}'
-
-        bar_clr = self.risk_zone_color(total_tokens)
-        secondary = ''
-        if ctx.context_window_size > 0:
-            pct_model = total_tokens / ctx.context_window_size * 100
-            secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
-        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
+        # Real context-window fill, 0-100% -- never the old tokens/150K
+        # "pressure" number (which could read e.g. 524%). Fall back to the soft
+        # limit as the scale only when the model's window size is unknown.
+        scale      = ctx.context_window_size if ctx.context_window_size > 0 else SOFT_LIMIT
+        fill_ratio = min(total_tokens / scale, 1.0) if scale > 0 else 0.0
+        pct        = fill_ratio * 100
+        clr        = self.fill_colour(pct)
+        prefix = f'{clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R} {clr}{BOLD}{pct:.0f}%{self.R} '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
         bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
-        return f'{bar_clr}{self.R} {prefix}{bar}'
+        return f'{clr}{self.R} {prefix}{bar}'
 
 
     def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
-
-        if total_tokens >= SOFT_LIMIT:
-            a      = BOLD + self.risk_zone_color(total_tokens)
-            prefix = f'{a}{pct_soft:.0f}%{self.R} '
-            bar_w  = max(4, available - _visible_width(prefix) - 3)
-            filled = int(min(fill_ratio, 1.0) * bar_w)
-            empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f' {prefix}{bar}'
-
-        bar_clr = self.risk_zone_color(total_tokens)
-        prefix  = f'{bar_clr}{BOLD}{pct_soft:.0f}%{self.R} '
+        scale      = ctx.context_window_size if ctx.context_window_size > 0 else SOFT_LIMIT
+        fill_ratio = min(total_tokens / scale, 1.0) if scale > 0 else 0.0
+        pct        = fill_ratio * 100
+        clr        = self.fill_colour(pct)
+        prefix  = f'{clr}{BOLD}{pct:.0f}%{self.R} '
         bar_w   = max(4, available - _visible_width(prefix) - 3)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
