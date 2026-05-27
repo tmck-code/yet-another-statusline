@@ -60,6 +60,7 @@ Both also accept the `--theme=NAME` / `--bg-shift=DIR` form.
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | base dir for config/state files (theme file, width file, token-rate log, output payloads) |
 | `CLAUDE_STATUSLINE_THEME` | _(unset)_ | theme name; overrides the config file, overridden by `--theme` |
 | `STATUSLINE_TOKEN_WINDOW` | `60` | seconds; rolling window used to compute the token throughput rate |
+| `YAS_SOFT_LIMIT` | `150000` | tokens; threshold used for the context-fill bar and percentage display. Bump this for 1M-context models (e.g. `1000000` for Opus 4.7 1M / Sonnet 4.6 1M) to keep the displayed `%` ≤ 100. |
 | `COLUMNS` | _(unset)_ | terminal-width fallback when tmux / width-file detection fail |
 
 ### Theme resolution

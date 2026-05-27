@@ -51,7 +51,7 @@ DEFAULT_MAX_WIDTH = 140
 MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
-SOFT_LIMIT = 150_000
+SOFT_LIMIT = int(os.environ.get('YAS_SOFT_LIMIT') or 150_000)
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 FIVE_HOUR_MINUTES        = 300
