@@ -1,4 +1,5 @@
 """Tests for GitInfo._find_repo, _read_head, and from_cwd."""
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -170,3 +171,70 @@ def test_resolve_gitdir_malformed_file_returns_empty(tmp_path: Path) -> None:
     assert gd == ''
     # _read_head('') is empty, so from_cwd stays blank rather than crashing.
     assert sl.GitInfo._read_head(gd) == ('', '')
+
+
+# --- P5: per-session git-status (dirty) cache --------------------------------
+
+def _dirty_spy(calls: dict) -> object:
+    def _dirty(repo: str) -> tuple[int, int, int, int]:
+        calls['n'] += 1
+        return (1, 2, 3, 4)
+    return _dirty
+
+
+def test_dirty_cache_hit_then_ttl_expiry(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 1                       # miss -> ran git, cached
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 1                       # hit -> no git
+
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0 + sl.GIT_CACHE_TTL + 1)
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 2                       # expired -> ran git again
+
+
+def test_dirty_cache_cwd_mismatch_recomputes(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+    sl.GitInfo._dirty_cached('/repo', '/repo', 's1')
+    sl.GitInfo._dirty_cached('/repo', '/elsewhere', 's1')   # same session, different cwd
+    assert calls['n'] == 2
+
+
+def test_dirty_cache_disabled_without_session(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    sl.GitInfo._dirty_cached('/repo', '/repo', '')
+    sl.GitInfo._dirty_cached('/repo', '/repo', '')
+    assert calls['n'] == 2                       # no caching without a session id
+    assert not (tmp_home / '.claude' / 'statusline-git').exists()
+
+
+def test_from_cwd_branch_live_dirty_cached(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = tmp_home / 'repo'
+    gitdir = _make_git_dir(base, branch='main')
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+    cache = tmp_home / '.claude' / 'statusline-git' / 's1.json'
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({'v': 1, 'cwd': str(base), 'ts': 1000.0,
+                                 'modified': 5, 'untracked': 0, 'deleted': 0, 'renamed': 0}))
+
+    def _no_git(*a: object, **k: object) -> None:
+        raise AssertionError('git spawned despite a fresh dirty cache')
+    monkeypatch.setattr(sl.subprocess, 'run', _no_git)
+
+    g = sl.GitInfo.from_cwd(str(base), 's1')
+    assert g.branch == 'main' and g.modified == 5
+
+    # Switch branch in HEAD: branch must update immediately; dirty stays cached.
+    (gitdir / 'refs' / 'heads' / 'feature').mkdir(parents=True, exist_ok=True)
+    (gitdir / 'refs' / 'heads' / 'feature' / 'x').write_text('abc1234\n')
+    (gitdir / 'HEAD').write_text('ref: refs/heads/feature/x\n')
+    g2 = sl.GitInfo.from_cwd(str(base), 's1')
+    assert g2.branch == 'feature/x'   # live
+    assert g2.modified == 5            # cached

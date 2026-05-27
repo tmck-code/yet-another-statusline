@@ -53,6 +53,10 @@ MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
+try:
+    GIT_CACHE_TTL = float(os.environ.get('YAS_GIT_CACHE_TTL') or '4')  # seconds; per-session git-status freshness window
+except ValueError:
+    GIT_CACHE_TTL = 4.0
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 FIVE_HOUR_MINUTES        = 300
@@ -900,12 +904,12 @@ class GitInfo:
     renamed: int = 0
 
     @classmethod
-    def from_cwd(cls, cwd: str) -> GitInfo:
+    def from_cwd(cls, cwd: str, session_id: str = '') -> GitInfo:
         repo, gitdir   = cls._find_repo(cwd)
-        branch, commit = cls._read_head(gitdir)
+        branch, commit = cls._read_head(gitdir)   # always live, so a branch switch shows immediately
         modified = untracked = deleted = renamed = 0
         if branch:
-            modified, untracked, deleted, renamed = cls._dirty(repo)
+            modified, untracked, deleted, renamed = cls._dirty_cached(repo, cwd, session_id)
         return cls(
             branch    = branch,
             commit    = commit,
@@ -914,6 +918,39 @@ class GitInfo:
             deleted   = deleted,
             renamed   = renamed,
         )
+
+    @classmethod
+    def _dirty_cached(cls, repo: str, cwd: str, session_id: str) -> tuple[int, int, int, int]:
+        '''Cache the expensive `git status` dirty counts per session for
+        GIT_CACHE_TTL seconds (the official statusline docs recommend exactly
+        this). Only the counts are cached — branch/commit are re-read every
+        render. Disabled without a session id, which keeps the cache out of the
+        tmp_path-only git tests and out of any non-session caller.'''
+        if not session_id:
+            return cls._dirty(repo)
+        cache_path = CLAUDE_DIR / 'statusline-git' / f'{session_id}.json'
+        now = time.time()
+        try:
+            raw = cache_path.read_text()
+        except OSError:
+            raw = ''
+        if raw:
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                d = None
+            if isinstance(d, dict):
+                ts = d.get('ts')
+                if (d.get('cwd') == cwd and isinstance(ts, (int, float))
+                        and 0 <= now - ts <= GIT_CACHE_TTL):
+                    return (_as_int(d.get('modified')), _as_int(d.get('untracked')),
+                            _as_int(d.get('deleted')), _as_int(d.get('renamed')))
+        modified, untracked, deleted, renamed = cls._dirty(repo)
+        _atomic_write_text(cache_path, json.dumps({
+            'v': 1, 'cwd': cwd, 'ts': now,
+            'modified': modified, 'untracked': untracked, 'deleted': deleted, 'renamed': renamed,
+        }))
+        return modified, untracked, deleted, renamed
 
     @staticmethod
     def _find_repo(cwd: str) -> tuple[str, str]:
@@ -2990,7 +3027,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
-    git          = GitInfo.from_cwd(session.cwd)
+    git          = GitInfo.from_cwd(session.cwd, session.session_id)
     line_context = r.context_line_compact(ctx, width - 3)
 
     max_right    = max(8, width // 2)
@@ -3065,7 +3102,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
-    git          = GitInfo.from_cwd(session.cwd)
+    git          = GitInfo.from_cwd(session.cwd, session.session_id)
     helper_text, right_text, right_w = r.model_right_section(
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
