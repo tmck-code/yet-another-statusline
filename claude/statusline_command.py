@@ -2451,16 +2451,42 @@ class Renderer:
             right_text, right_w = _make_right(model_name[:budget] + '…')
         return rate_text, right_text, right_w
 
-    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
+    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str, width: int = 0) -> str:
         step = rainbow_step()
         c_skills = rainbow_at(step, 3)
         c_plugins = rainbow_at(step, 6)
-        extras = []
+        segs: list[tuple[str, str, str]] = []   # (colour, glyph, names)
         if skills_count > 0:
-            extras.append(f'{c_skills}{BOLD}{GLYPH_SKILLS}  {self.R}{self.SKILLS}{skills_names}{self.R}')
+            segs.append((c_skills, GLYPH_SKILLS, skills_names))
         if plugin_names:
-            extras.append(f'{c_plugins}{BOLD}{GLYPH_PLUGINS}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
-        return f' {self.LABEL}|{self.R} '.join(extras)
+            segs.append((c_plugins, GLYPH_PLUGINS, plugin_names))
+        if not segs:
+            return ''
+        # Budget the visible content to the box like the sibling rows (width-4),
+        # truncating the comma-lists with '…' so the row never overflows. With
+        # width==0 (or when it already fits) the output is unchanged.
+        if width > 0:
+            fixed = 3 * len(segs) + 3 * (len(segs) - 1)   # glyph+'  ' per seg, ' | ' joiners
+            names_budget = max(0, (width - 4) - fixed)
+            widths = [_visible_width(n) for _, _, n in segs]
+            if sum(widths) > names_budget:
+                total     = sum(widths) or 1
+                remaining = names_budget
+                fitted: list[tuple[str, str, str]] = []
+                for i, (clr, glyph, names) in enumerate(segs):
+                    share = remaining if i == len(segs) - 1 else names_budget * widths[i] // total
+                    if share <= 0:
+                        names = ''
+                    elif _visible_width(names) > share:
+                        names = names[:max(0, share - 1)] + '…'
+                    remaining -= _visible_width(names)
+                    fitted.append((clr, glyph, names))
+                segs = fitted
+        parts = [
+            f'{clr}{BOLD}{glyph}  {self.R}{self.SKILLS}{names}{self.R}'
+            for clr, glyph, names in segs
+        ]
+        return f' {self.LABEL}|{self.R} '.join(parts)
 
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
@@ -3059,7 +3085,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         sess_cost, day_cost, tok_rate,
         session.session_id, width, fill,
     )
-    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, width)
     changes      = OpenSpec.from_cwd(session.cwd).changes
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
