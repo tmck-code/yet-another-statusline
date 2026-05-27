@@ -61,34 +61,37 @@ def base_worktree(ref: str) -> Iterator[Path]:
 
 
 @contextlib.contextmanager
-def realistic_scenario(n_lines: int) -> Iterator[tuple[bytes, dict[str, str]]]:
-    '''Yield (stdin_bytes, env) for a realistic render: a temp CLAUDE_CONFIG_DIR
-    holding an `n_lines` transcript under projects/ (so the PR's incremental
-    tailing engages) plus a session JSON pointing at it. The base ref ignores
-    the dir and just scans transcript_path, so both are timed on the same
-    transcript. Warmup runs prime the PR's incremental state, so the measured
-    PR runs reflect steady-state (tail-only) cost.'''
-    tmp = Path(tempfile.mkdtemp(prefix='yas-bench-real-'))
+def scenario(n_lines: int) -> Iterator[tuple[bytes | None, dict[str, str]]]:
+    '''Yield (stdin_bytes_or_None, env) for a benchmark run. ALWAYS points
+    CLAUDE_CONFIG_DIR at a throwaway temp dir, so the benchmark never reads or
+    writes the real ~/.claude (token/rate logs, payloads, scan/git state). With
+    n_lines>0 it also generates an `n_lines` transcript under projects/ — so the
+    PR's incremental tailing engages — plus a matching session JSON; otherwise
+    the legacy 1.2KB fixture (stdin_bytes=None -> caller reads INPUT_JSON) is used.'''
+    tmp = Path(tempfile.mkdtemp(prefix='yas-bench-'))
     try:
-        sid  = 'bench-session'
-        proj = tmp / 'projects' / 'bench-slug'
-        proj.mkdir(parents=True)
-        transcript = proj / f'{sid}.jsonl'
-        rows = [
-            json.dumps({'type': 'assistant', 'message': {
-                'id': f'm{i}', 'role': 'assistant',
-                'usage': {'input_tokens': 100, 'cache_creation_input_tokens': 0,
-                          'cache_read_input_tokens': 50, 'output_tokens': 20}}})
-            for i in range(n_lines)
-        ]
-        transcript.write_text('\n'.join(rows) + '\n')
-        info = json.loads(INPUT_JSON.read_text())
-        info['session_id'] = sid
-        info['transcript_path'] = str(transcript)
         env = dict(os.environ)
         env['CLAUDE_CONFIG_DIR'] = str(tmp)
-        print(f'{DIM}realistic transcript: {n_lines} lines, {transcript.stat().st_size} bytes{RESET}', file=sys.stderr)
-        yield json.dumps(info).encode(), env
+        input_data: bytes | None = None
+        if n_lines > 0:
+            sid  = 'bench-session'
+            proj = tmp / 'projects' / 'bench-slug'
+            proj.mkdir(parents=True)
+            transcript = proj / f'{sid}.jsonl'
+            rows = [
+                json.dumps({'type': 'assistant', 'message': {
+                    'id': f'm{i}', 'role': 'assistant',
+                    'usage': {'input_tokens': 100, 'cache_creation_input_tokens': 0,
+                              'cache_read_input_tokens': 50, 'output_tokens': 20}}})
+                for i in range(n_lines)
+            ]
+            transcript.write_text('\n'.join(rows) + '\n')
+            info = json.loads(INPUT_JSON.read_text())
+            info['session_id'] = sid
+            info['transcript_path'] = str(transcript)
+            input_data = json.dumps(info).encode()
+            print(f'{DIM}realistic transcript: {n_lines} lines, {transcript.stat().st_size} bytes{RESET}', file=sys.stderr)
+        yield input_data, env
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -98,7 +101,8 @@ def shell_invocation(script: Path) -> str:
     return f'python3 {shlex.quote(str(script))} < {shlex.quote(str(INPUT_JSON))}'
 
 
-def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int) -> int:
+def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int,
+                  env: dict[str, str] | None = None) -> int:
     'Delegate to hyperfine and echo its paste-ready markdown table.'
     markdown = Path(tempfile.mkstemp(prefix='yas-bench-', suffix='.md')[1])
     try:
@@ -112,6 +116,7 @@ def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: i
                 '--export-markdown', str(markdown),
             ],
             check = True,
+            env   = env,
         )
         print(f'\n{BOLD}Paste-ready:{RESET}\n')
         print(markdown.read_text().strip())
@@ -213,15 +218,12 @@ def main() -> int:
         print(f'{YELLOW}{HYPERFINE_HINT}{RESET}\n', file=sys.stderr)
 
     try:
-        with base_worktree(base) as tree:
+        with base_worktree(base) as tree, scenario(tlines) as (input_data, env):
             base_script = tree / STATUSLINE
             head_script = REPO_ROOT / STATUSLINE
             if use_hyperfine:
-                return run_hyperfine(base_script, head_script, base, runs, warmup)
-            if tlines > 0:
-                with realistic_scenario(tlines) as (input_data, env):
-                    return run_python(base_script, head_script, base, runs, warmup, input_data, env)
-            return run_python(base_script, head_script, base, runs, warmup)
+                return run_hyperfine(base_script, head_script, base, runs, warmup, env)
+            return run_python(base_script, head_script, base, runs, warmup, input_data, env)
     except subprocess.CalledProcessError as exc:
         print(f'benchmark failed: {shlex.join(exc.cmd)} exited {exc.returncode}', file=sys.stderr)
         return 1
