@@ -168,28 +168,37 @@ CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
 
-# Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
-# chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
-# terminal.
-ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
-ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
-GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
-GLYPH_THINKING = '\U000f1a53' # nf-md-brain
-GLYPH_BURN_FAST = '\uef76'  # nf-cod-zap (shown when the burn rate is too fast)
-GLYPH_BURN_SLOW = '\uf490'  # nf-oct-flame (shown when the burn rate is _not_ too fast)
-GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
-GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
-GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
-GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
-GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
-GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
-GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
-GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
-GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
-GLYPH_CONTINUATION = '└'    # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (└)
-GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
-GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
-GLYPH_PIE          = '\uf200'  # nf-fa-pie_chart     (subagent session share)
+# Glyphs. Default to clean, universal Unicode that renders in any monospace
+# font; set YAS_NERD_FONT=1 for the original Nerd Font Private-Use glyphs
+# (which need a Nerd Font, otherwise they show as '?'). Both alternatives
+# are one cell wide, so the layout is identical either way.
+_NERD_FONT = os.environ.get('YAS_NERD_FONT') not in (None, '', '0')
+
+
+def _glyph(clean: str, nerd: str) -> str:
+    return nerd if _NERD_FONT else clean
+
+
+ICON_COST          = _glyph('$', '\uefc8')           # $        cost row
+ICON_TOK_RATE      = _glyph('~', '\U000f18a7')       # ~        t/m rate label
+GLYPH_MODEL        = _glyph('\u25c6', '\U000f08b9') # diamond  model
+GLYPH_THINKING     = _glyph('\u2726', '\U000f1a53') # star     thinking
+GLYPH_BURN_FAST    = _glyph('\u00bb', '\uef76')     # >>       burn rate too fast
+GLYPH_BURN_SLOW    = _glyph('\u00b7', '\uf490')     # middot   burn rate ok
+GLYPH_FOLDER       = _glyph('\u25cf', '\uef85')     # disc     path row
+GLYPH_BRANCH       = _glyph('\u21b3', '\ue0a0')     # hook     path -> branch
+GLYPH_SUBAGENT     = _glyph('\u25b8', '\uf135')     # triangle subagent list
+GLYPH_SUBAGENT_ROW = '\u25b6'                        # per-row subagent marker
+GLYPH_TASKS        = _glyph('\u2713', '\U000f0755') # check    task row
+GLYPH_SKILLS       = _glyph('\u25c7', '\U000f07df') # diamond  skills label
+GLYPH_PLUGINS      = _glyph('\u25c8', '\uf1e6')     # diamond  plugins label
+GLYPH_HELPER       = _glyph('\u2605', '\uf4cd')     # star     5h rate-limit helper
+GLYPH_TRASH        = _glyph('\u2717', '\U000f0a7a') # x        git deleted count
+GLYPH_RENAMED      = _glyph('\u2192', '\U000f1031') # arrow    git renamed count
+GLYPH_CONTINUATION = '\u2514'                        # box up-right (universal)
+GLYPH_REPLYING     = _glyph('\u2026', '\U000f0189') # ellipsis replying state
+GLYPH_HOURGLASS    = _glyph('\u25f7', '\uf253')     # arc      subagent context size
+GLYPH_PIE          = _glyph('\u25d4', '\uf200')     # pie      subagent session share
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -2245,7 +2254,7 @@ class Renderer:
 
         return (
             f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}{GLYPH_BRANCH}{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{commit_part}{dirty}{tail}'
         )
@@ -2253,7 +2262,7 @@ class Renderer:
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
             f'{self.ICON_PATH}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}{GLYPH_BRANCH}{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
         )
 
