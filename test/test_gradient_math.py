@@ -7,22 +7,22 @@ _r = sl.Renderer()
 
 
 def test_gradient_rgb_at_zero() -> None:
-    assert _r.gradient_rgb(0.0) == (60, 200, 100)
+    assert _r.gradient_rgb(0.0) == (200, 200, 200)
 
 
 
 def test_gradient_rgb_at_one() -> None:
-    assert _r.gradient_rgb(1.0) == (215, 55, 55)
+    assert _r.gradient_rgb(1.0) == (245, 245, 245)
 
 
 def test_gradient_rgb_clamps_above_one() -> None:
-    assert _r.gradient_rgb(1.5) == (215, 55, 55)
+    assert _r.gradient_rgb(1.5) == (245, 245, 245)
 
 
 
 def test_gradient_rgb_dim() -> None:
-    # int(60 * 0.5)=30, int(200 * 0.5)=100, int(100 * 0.5)=50
-    assert _r.gradient_rgb(0.0, dim=0.5) == (30, 100, 50)
+    # monochrome: int(200 * 0.5)=100 for every channel
+    assert _r.gradient_rgb(0.0, dim=0.5) == (100, 100, 100)
 
 
 

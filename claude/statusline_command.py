@@ -41,7 +41,7 @@ CLAUDE_DARK: Theme           = themes.CLAUDE_DARK
 class BarChars:
     FILLED = '█'
     HEAVY  = '▆'
-    MID    = ''
+    MID    = '▌'
     EMPTY  = '░'
 
 
@@ -214,17 +214,6 @@ TOOL_ARG_KEY: dict[str, str] = {
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
 
-# Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
-# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
-# peak cell pairs with a "fall" char on the next cell to form a /\ shape.
-SPARK_RISE_SMALL  = '\U0001fb48'  # 🭈 small rise (bot row, idx 1–3)
-SPARK_FALL_SMALL  = '\U0001fb3d'  # 🬽 small fall (bot row, idx 1–3)
-SPARK_RISE_MED    = '\U0001fb4a'  # 🭊 medium rise (bot row, idx 4–7)
-SPARK_FALL_MED    = '\U0001fb3f'  # 🬿 medium fall (bot row, idx 4–7)
-SPARK_RISE_TALL   = '\U0001fb45'  # 🭅 tall rise (bot row, idx 8+)
-SPARK_FALL_TALL   = '\U0001fb50'  # 🭐 tall fall (bot row, idx 8+)
-SPARK_RISE_TOP    = '\U0001fb4b'  # 🭋 top-row rise (idx 9+)
-SPARK_FALL_TOP    = '\U0001fb40'  # 🭀 top-row fall (idx 9+)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block
@@ -1702,11 +1691,11 @@ def fmt_dur(seconds: float) -> str:
     return f'{s // 3600}h{(s % 3600) // 60:02d}m'
 
 
-RAINBOW_PALETTE = (
-    196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
-    46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
-    21, 57, 93, 129, 165, 201, 200, 199, 198, 197,
-)
+# Monochrome: the former time-cycling rainbow accent (on the thinking / 5h-helper
+# / skills / plugins / marker glyphs) is now a single calm static grey — no hue,
+# no per-second animation. Length is preserved so rainbow_step()'s modulo and the
+# existing index-wrap tests are unaffected; every entry resolves to the same grey.
+RAINBOW_PALETTE = (250,) * 30
 
 
 def rainbow_step() -> int:
@@ -1899,28 +1888,6 @@ class GradientEngine:
             return ' ', self.SPARK_CHARS[idx - 1]
         return self.SPARK_CHARS[idx - 9], '█'
 
-    def _spark_rise(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_RISE_SMALL
-        if idx <= 7:
-            return ' ', SPARK_RISE_MED
-        if idx <= 8:
-            return ' ', SPARK_RISE_TALL
-        return SPARK_RISE_TOP, SPARK_RISE_TALL
-
-    def _spark_fall(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_FALL_SMALL
-        if idx <= 7:
-            return ' ', SPARK_FALL_MED
-        if idx <= 8:
-            return ' ', SPARK_FALL_TALL
-        return SPARK_FALL_TOP, SPARK_FALL_TALL
-
     def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
         if not history:
             return '', ''
@@ -1933,16 +1900,8 @@ class GradientEngine:
         top_parts = []
         bot_parts = []
         for i, idx in enumerate(indices):
-            prev_idx = indices[i - 1] if i > 0 else 0
-            if idx > prev_idx:
-                top_ch, bot_ch = self._spark_rise(idx)
-                tint_idx       = idx
-            elif prev_idx > idx:
-                top_ch, bot_ch = self._spark_fall(prev_idx)
-                tint_idx       = prev_idx
-            else:
-                top_ch, bot_ch = self._spark_flat(idx)
-                tint_idx       = idx
+            top_ch, bot_ch = self._spark_flat(idx)
+            tint_idx       = idx
             ratio     = tint_idx / 16.0
             ratio_bot = ratio * 0.5
             ratio_top = 0.5 + ratio * 0.5
@@ -2683,8 +2642,8 @@ class Renderer:
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> tuple[list[str], tuple[int, int], int]:
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
-        in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
-        out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
+        in_icon  = (_glyph('↓', '\U0001f847') if in_active  else '↓') + ' '  # 🡇+space or ↓+space (both 2 cols)
+        out_icon = (_glyph('↑', '\U0001f845') if out_active else '↑') + ' '  # 🡅+space or ↑+space (both 2 cols)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
         day_in_s     = fmt_tok(day_in).rjust(self.IN_W)

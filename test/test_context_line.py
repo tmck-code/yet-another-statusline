@@ -6,7 +6,7 @@ from helper import strip_ansi
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
 ContextWindow = sl.ContextWindow
-CLR_ALERT = sl.CLR_ALERT
+CLR_ALERT = sl.Renderer().alert   # theme's alert colour (monochrome: brightest white)
 SOFT_LIMIT = sl.SOFT_LIMIT
 
 

@@ -80,10 +80,12 @@ class TestBurndownTrend:
         out = self._trend(50.0 + delta, 150)
         assert self._r.gradient.gradient_color(0.5 + delta / 50.0) in out
 
-    def test_under_burn_greener_than_over_burn(self) -> None:
+    def test_over_burn_brighter_than_under_burn(self) -> None:
+        # Monochrome: burn pressure is read from brightness, not hue. Over-burn
+        # maps to a higher gradient position → a brighter (more alarming) grey.
         under = self._r.gradient.gradient_rgb(0.5 + (-20.0) / 50.0)
         over = self._r.gradient.gradient_rgb(0.5 + 20.0 / 50.0)
-        assert under[1] > over[1]  # under-burn keeps more green channel
+        assert over[1] > under[1]  # over-burn is brighter
 
 
 class TestHelperBurndownIntegration:
