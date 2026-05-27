@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -15,27 +14,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
+# This script runs as a top-level file (not inside a package), so put its own
+# directory on sys.path to make the `statusline` subpackage importable — the
+# same approach mon.py uses. This is what lets the renderer be split into
+# submodules (statusline/*.py) that import one another normally.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Load the themes module via importlib because this script runs as a top-level
-# file (not inside a package). The same shim is used by test/conftest.py.
-# TYPE_CHECKING lets mypy resolve the types via a normal import path while the
-# importlib load handles the runtime side.
-if TYPE_CHECKING:
-    from statusline.themes import ModelColors, Theme
-
-_THEMES_PATH = Path(__file__).resolve().parent / 'statusline' / 'themes.py'
-_themes_spec = importlib.util.spec_from_file_location('statusline_themes', _THEMES_PATH)
-assert _themes_spec is not None and _themes_spec.loader is not None
-themes = importlib.util.module_from_spec(_themes_spec)
-sys.modules['statusline_themes'] = themes
-_themes_spec.loader.exec_module(themes)
-if not TYPE_CHECKING:
-    Theme       = themes.Theme
-    ModelColors = themes.ModelColors
-THEMES:     dict[str, Theme] = themes.THEMES
-CLAUDE_DARK: Theme           = themes.CLAUDE_DARK
+from statusline.themes import CLAUDE_DARK, THEMES, Theme  # noqa: E402
 
 
 class BarChars:
