@@ -2,6 +2,7 @@
 'Claude Code statusLine command (Python port).'
 
 from __future__ import annotations
+import hashlib
 import importlib.util
 import json
 import os
@@ -319,15 +320,46 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
     return ''.join(prefix) + '…' + ''.join(suffix)
 
 
+_MODEL_VER_RE   = re.compile(r'(\d+)[.\-](\d{1,2})(?!\d)')
+_MODEL_MAJOR_RE = re.compile(r'(\d+)')
+
+
+def _model_version(name: str) -> tuple[int, int] | None:
+    'Extract (major, minor) from a model id or display name: "claude-opus-4-7"/"Opus 4.7" -> (4, 7); "Opus 4" -> (4, 0).'
+    m = _MODEL_VER_RE.search(name)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m2 = _MODEL_MAJOR_RE.search(name)
+    if m2:
+        return int(m2.group(1)), 0
+    return None
+
+
 class TokenAccounting:
     @staticmethod
     def rates_for(model_name: str) -> tuple[float, float]:
+        '''Input/output USD per million tokens, keyed by model family + version.
+
+        Verified against the official pricing page (platform.claude.com,
+        2026-05-27). UPDATE this table AND test_model_cost_rates.py whenever the
+        model catalog or pricing changes. Unversioned names resolve to the
+        current (latest) rate of their family. NOTE: the displayed session cost
+        prefers the host's cost.total_cost_usd (see session_cost_display); this
+        table is the fallback estimate and the basis for the cross-session day cost.
+        '''
         m = model_name.lower()
+        ver = _model_version(m)
         if 'opus' in m:
-            return 15.00, 75.00
+            if ver is not None and ver < (4, 5):
+                return 15.00, 75.00   # Opus 4.1 / 4 / 3.x (legacy & deprecated)
+            return 5.00, 25.00        # Opus 4.5 / 4.6 / 4.7+
         if 'haiku' in m:
-            return 0.80, 4.00
-        return 3.00, 15.00
+            if ver is not None and ver < (4, 5):
+                return 0.80, 4.00     # Haiku 3.5 and earlier (retired)
+            return 1.00, 5.00         # Haiku 4.5+
+        if 'sonnet' in m:
+            return 3.00, 15.00        # all current Sonnet
+        return 3.00, 15.00            # unknown model -> Sonnet-class default
 
     @staticmethod
     def session_cost(model: Model, usage: TranscriptUsage) -> float:
@@ -344,9 +376,15 @@ class TokenAccounting:
 
     @staticmethod
     def day_cost(model: Model, token_log: TokenLog) -> float:
-        rate_in, rate_out = TokenAccounting.rates_for(
-            model.display_name or model.id
-        )
+        # Price each model's day tokens at its own rate. Rows with no recorded
+        # model (legacy v1 rows) fall back to the current session's model.
+        if token_log.by_model:
+            total = 0.0
+            for mid, (din, dcache, dout) in token_log.by_model.items():
+                rate_in, rate_out = TokenAccounting.rates_for(mid) if mid else model.cost_rates
+                total += din * rate_in + dcache * rate_in * 0.1 + dout * rate_out
+            return total / 1_000_000
+        rate_in, rate_out = TokenAccounting.rates_for(model.display_name or model.id)
         cost = (
             token_log.day_in * rate_in
             + token_log.day_cache_read * rate_in * 0.1
@@ -373,6 +411,22 @@ def _as_str(v: object, default: str = '') -> str:
     if isinstance(v, str):
         return v
     return default
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    '''Best-effort atomic write: write to a sibling temp file, then os.replace
+    (atomic on POSIX and Windows) onto the target so a reader or a cancelled
+    render never sees a half-written file. Swallows OSError — these are
+    telemetry/cache files, and a failed write simply means the next render
+    recomputes. The PID-suffixed temp name avoids concurrent-render collisions.'''
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 class Model(NamedTuple):
@@ -644,45 +698,92 @@ def compute_day_cost(model: Model, token_log: TokenLog) -> float:
     return TokenAccounting.day_cost(model, token_log)
 
 
+def session_cost_display(session: SessionInfo, usage: TranscriptUsage) -> float:
+    '''Session cost to display. Prefer Claude Code's own running estimate
+    (cost.total_cost_usd): it is model-version-aware and already reflects pricing
+    modifiers (e.g. Fast mode 6x, data residency) that the local rate-table
+    estimate cannot see. Fall back to the local estimate only when the host
+    value is missing/zero (e.g. before the first API response).'''
+    host = session.cost.total_cost_usd
+    if host > 0:
+        return host
+    return compute_session_cost(session.model, usage)
+
+
+def _model_log_key(model: Model) -> str:
+    'Space-free model key for the token log (a space would break the field-delimited row).'
+    return (model.id or model.display_name).replace(' ', '-')
+
+
 @dataclass
 class TokenLog:
     day_in: int = 0
     day_cache_read: int = 0
     day_out: int = 0
+    # Per-model day totals (model_key -> (in, cache_read, out)) so day cost can
+    # price each model separately. Excluded from equality so a hand-built
+    # TokenLog(day_in=..., ...) in tests still compares equal.
+    by_model: dict[str, tuple[int, int, int]] = field(default_factory=dict, compare=False)
 
     @classmethod
-    def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> TokenLog:
+    def update(cls, session_id: str, today: str, total_in: int, cache_read: int,
+               total_out: int, model_id: str = '') -> TokenLog:
         log = CLAUDE_DIR / 'statusline-tokens.log'
-        lines = []
+        old_lines: list[str] = []
         if log.exists():
-            for ln in log.read_text().splitlines():
-                parts = ln.split()
-                if len(parts) >= 2 and parts[1] == session_id:
-                    continue
-                lines.append(ln)
-        if session_id and (total_in > 0 or cache_read > 0 or total_out > 0):
-            lines.append(f'{today} {session_id} {total_in} {cache_read} {total_out}')
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text('\n'.join(lines) + '\n')
+            try:
+                old_lines = log.read_text().splitlines()
+            except OSError:
+                old_lines = []
+        # A v2 row appends a space-free model id; an empty model keeps the legacy
+        # 5-field shape (and on-disk format) byte-for-byte unchanged.
+        new_row = f'{today} {session_id} {total_in} {cache_read} {total_out}'
+        if model_id:
+            new_row += f' {model_id}'
+        has_tokens = bool(session_id) and (total_in > 0 or cache_read > 0 or total_out > 0)
+        # Replace this session's row in place (preserves order, so an unchanged
+        # render produces identical content and skips the write — churn fix).
+        new_lines: list[str] = []
+        replaced = False
+        for ln in old_lines:
+            parts = ln.split()
+            if len(parts) >= 2 and parts[1] == session_id:
+                replaced = True
+                if has_tokens:
+                    new_lines.append(new_row)
+            else:
+                new_lines.append(ln)
+        if has_tokens and not replaced:
+            new_lines.append(new_row)
+        if new_lines != old_lines:
+            _atomic_write_text(log, '\n'.join(new_lines) + '\n')
+        return cls._rollup(new_lines, today)
+
+    @staticmethod
+    def _rollup(lines: list[str], today: str) -> TokenLog:
         day_in = day_cache_read = day_out = 0
+        by_model: dict[str, tuple[int, int, int]] = {}
         for ln in lines:
             parts = ln.split()
             if len(parts) < 4 or parts[0] != today:
                 continue
+            r_in = r_cache = r_out = 0
+            r_model = ''
             try:
-                if len(parts) == 6:
-                    day_in += int(parts[2])
-                    day_out += int(parts[3])
-                elif len(parts) >= 5:
-                    day_in += int(parts[2])
-                    day_cache_read += int(parts[3])
-                    day_out += int(parts[4])
-                else:
-                    day_in += int(parts[2])
-                    day_out += int(parts[3])
+                if len(parts) >= 6:
+                    r_in, r_cache, r_out, r_model = int(parts[2]), int(parts[3]), int(parts[4]), parts[5]
+                elif len(parts) == 5:
+                    r_in, r_cache, r_out = int(parts[2]), int(parts[3]), int(parts[4])
+                else:  # 4-field legacy: date sid in out
+                    r_in, r_out = int(parts[2]), int(parts[3])
             except ValueError:
-                pass
-        return cls(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out)
+                continue
+            day_in += r_in
+            day_cache_read += r_cache
+            day_out += r_out
+            prev = by_model.get(r_model, (0, 0, 0))
+            by_model[r_model] = (prev[0] + r_in, prev[1] + r_cache, prev[2] + r_out)
+        return TokenLog(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out, by_model=by_model)
 
 
 
@@ -712,11 +813,7 @@ class TokenRate:
                     continue
                 rows.append((ts, parts[1], ti, to))
         rows.append((now, session_id, total_in, total_out))
-        try:
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text('\n'.join(f'{ts:.3f} {sid} {ti} {to}' for ts, sid, ti, to in rows) + '\n')
-        except OSError:
-            pass
+        _atomic_write_text(log, '\n'.join(f'{ts:.3f} {sid} {ti} {to}' for ts, sid, ti, to in rows) + '\n')
         samples = [(ts, ti, to) for ts, sid, ti, to in rows if sid == session_id and now - ts <= cls.WINDOW]
         if len(samples) < 2:
             return 0
@@ -822,18 +919,41 @@ class GitInfo:
     def _find_repo(cwd: str) -> tuple[str, str]:
         curr = Path(cwd) if cwd else None
         while curr:
-            if (curr / '.git').exists():
-                return str(curr), str(curr / '.git')
+            dotgit = curr / '.git'
+            if dotgit.exists():
+                return str(curr), GitInfo._resolve_gitdir(dotgit)
             if curr == curr.parent:
                 break
             curr = curr.parent
         return '', ''
 
     @staticmethod
+    def _resolve_gitdir(dotgit: Path) -> str:
+        '''Resolve a `.git` entry to the real git directory. `.git` is a
+        directory in a normal clone, but a *file* containing `gitdir: <path>`
+        in a linked worktree or submodule. Returns '' if unresolvable.'''
+        if dotgit.is_dir():
+            return str(dotgit)
+        try:
+            text = dotgit.read_text().strip()
+        except OSError:
+            return ''
+        if text.startswith('gitdir:'):
+            pointer = Path(text[len('gitdir:'):].strip())
+            if not pointer.is_absolute():
+                pointer = dotgit.parent / pointer
+            try:
+                return str(pointer.resolve())
+            except OSError:
+                return str(pointer)
+        return ''
+
+    @staticmethod
     def _read_head(gitdir: str) -> tuple[str, str]:
         if not gitdir:
             return '', ''
-        head_path = Path(gitdir) / 'HEAD'
+        gd = Path(gitdir)
+        head_path = gd / 'HEAD'
         if not head_path.is_file():
             return '', ''
         try:
@@ -842,25 +962,59 @@ class GitInfo:
             return '', ''
         branch = ''
         if head.startswith('ref:'):
-            branch = head.rsplit('/', 1)[-1]
+            target = head[4:].strip()
+            prefix = 'refs/heads/'
+            # Preserve the full branch namespace (e.g. 'feature/foo'); the old
+            # rsplit('/', 1) collapsed it to 'foo'.
+            branch = target[len(prefix):] if target.startswith(prefix) else target.rsplit('/', 1)[-1]
         elif head:
             branch = f'd:{head[:7]}'
         commit = ''
         if branch and not branch.startswith('d:'):
-            ref = Path(gitdir) / 'refs' / 'heads' / branch
-            if ref.is_file():
-                try:
-                    commit = ref.read_text().strip()[:9]
-                except OSError:
-                    pass
+            commit = GitInfo._read_commit(gd, branch)
         if not commit:
-            orig = Path(gitdir) / 'ORIG_HEAD'
+            orig = gd / 'ORIG_HEAD'
             if orig.is_file():
                 try:
                     commit = orig.read_text().strip()[:9]
                 except OSError:
                     pass
         return branch, commit
+
+    @staticmethod
+    def _read_commit(gitdir: Path, branch: str) -> str:
+        '''Resolve a branch's commit from a loose ref, the worktree common dir,
+        or packed-refs — covering normal repos, linked worktrees (whose refs
+        live in the common dir), and repos with packed refs.'''
+        commondir = gitdir
+        cd_file = gitdir / 'commondir'
+        if cd_file.is_file():
+            try:
+                cd = Path(cd_file.read_text().strip())
+                commondir = (cd if cd.is_absolute() else gitdir / cd).resolve()
+            except OSError:
+                commondir = gitdir
+        for base in (gitdir, commondir):
+            ref = base / 'refs' / 'heads' / branch
+            if ref.is_file():
+                try:
+                    return ref.read_text().strip()[:9]
+                except OSError:
+                    pass
+        packed = commondir / 'packed-refs'
+        if packed.is_file():
+            target = f'refs/heads/{branch}'
+            try:
+                for line in packed.read_text().splitlines():
+                    line = line.strip()
+                    if not line or line[0] in '#^':
+                        continue
+                    parts = line.split(' ', 1)
+                    if len(parts) == 2 and parts[1] == target:
+                        return parts[0][:9]
+            except OSError:
+                pass
+        return ''
 
     @staticmethod
     def _dirty(repo: str) -> tuple[int, int, int, int]:
@@ -905,33 +1059,7 @@ class LoadedSkills:
 
     @classmethod
     def from_transcript(cls, transcript_path: str) -> LoadedSkills:
-        if not transcript_path:
-            return cls()
-        p = Path(transcript_path)
-        if not p.is_file():
-            return cls()
-        skill_pat = re.compile(r'"name"\s*:\s*"Skill"[^}]*?"skill"\s*:\s*"([^"]+)"')
-        read_pat = re.compile(r'"name"\s*:\s*"Read"[^}]*?"file_path"\s*:\s*"([^"]+)"')
-        skill_path_pat = re.compile(r'/skills/([^/"]+)/SKILL\.md$')
-        seen: dict[str, None] = {}
-        try:
-            with p.open('r', errors='ignore') as fh:
-                for ln in fh:
-                    if '"Skill"' in ln:
-                        for m in skill_pat.finditer(ln):
-                            name = m.group(1)
-                            if name not in seen:
-                                seen[name] = None
-                    if '"Read"' in ln and 'SKILL.md' in ln:
-                        for m in read_pat.finditer(ln):
-                            sm = skill_path_pat.search(m.group(1))
-                            if sm:
-                                name = sm.group(1)
-                                if name not in seen:
-                                    seen[name] = None
-        except OSError:
-            return cls()
-        return cls(names=list(seen.keys()))
+        return _scan_transcript(transcript_path).loaded_skills()
 
 
 @dataclass
@@ -1090,58 +1218,7 @@ class TaskList:
 
     @classmethod
     def from_session(cls, transcript_path: str) -> TaskList:
-        if not transcript_path:
-            return cls()
-        path = Path(transcript_path)
-        if not path.is_file():
-            return cls()
-        by_id: dict[int, Task] = {}
-        next_id = 1
-        last_ts = 0.0
-        try:
-            with path.open('r', errors='ignore') as fh:
-                for ln in fh:
-                    if '"TaskCreate"' not in ln and '"TaskUpdate"' not in ln:
-                        continue
-                    try:
-                        d = json.loads(ln)
-                    except ValueError:
-                        continue
-                    ts = _parse_iso_to_epoch(d.get('timestamp', ''))
-                    content = d.get('message', {}).get('content', [])
-                    if not isinstance(content, list):
-                        continue
-                    for c in content:
-                        if not isinstance(c, dict) or c.get('type') != 'tool_use':
-                            continue
-                        name = c.get('name', '')
-                        inp  = c.get('input') or {}
-                        if name == 'TaskCreate':
-                            subj = inp.get('subject', '') or ''
-                            af   = inp.get('activeForm', '') or subj
-                            by_id[next_id] = Task(id=next_id, subject=subj, active_form=af, status='pending')
-                            next_id += 1
-                            if ts > last_ts: last_ts = ts
-                        elif name == 'TaskUpdate':
-                            try:
-                                tid = int(inp.get('taskId', '0'))
-                            except (TypeError, ValueError):
-                                continue
-                            t = by_id.get(tid)
-                            if not t:
-                                continue
-                            new_status = inp.get('status')
-                            if new_status in ('pending', 'in_progress', 'completed'):
-                                t.status = new_status
-                            if 'activeForm' in inp and inp['activeForm']:
-                                t.active_form = inp['activeForm']
-                            if 'subject' in inp and inp['subject']:
-                                t.subject = inp['subject']
-                            if ts > last_ts: last_ts = ts
-        except OSError:
-            return cls()
-        tasks = [by_id[k] for k in sorted(by_id.keys())]
-        return cls(tasks=tasks, last_event_ts=last_ts)
+        return _scan_transcript(transcript_path).task_list()
 
     @property
     def total(self) -> int:
@@ -1187,40 +1264,7 @@ class TranscriptUsage:
 
     @classmethod
     def from_transcript(cls, transcript_path: str) -> TranscriptUsage:
-        if not transcript_path:
-            return cls()
-        p = Path(transcript_path)
-        if not p.is_file():
-            return cls()
-        seen: set[str] = set()
-        ti = cc = cr = to = 0
-        try:
-            with p.open('r', errors='ignore') as fh:
-                for ln in fh:
-                    if '"usage"' not in ln or '"assistant"' not in ln:
-                        continue
-                    try:
-                        d = json.loads(ln)
-                    except (ValueError, TypeError):
-                        continue
-                    msg = d.get('message') or {}
-                    mid = msg.get('id')
-                    if not mid or mid in seen:
-                        continue
-                    seen.add(mid)
-                    u = msg.get('usage') or {}
-                    ti += u.get('input_tokens', 0) or 0
-                    cc += u.get('cache_creation_input_tokens', 0) or 0
-                    cr += u.get('cache_read_input_tokens', 0) or 0
-                    to += u.get('output_tokens', 0) or 0
-        except OSError:
-            return cls()
-        return cls(
-            input_tokens                = ti,
-            cache_creation_input_tokens = cc,
-            cache_read_input_tokens     = cr,
-            output_tokens               = to,
-        )
+        return _scan_transcript(transcript_path).transcript_usage()
 
     @property
     def billed_in(self) -> int:
@@ -1233,6 +1277,308 @@ class TranscriptUsage:
     @property
     def out(self) -> int:
         return self.output_tokens
+
+
+# Regexes for skill detection in a transcript line. Module-level so they are
+# compiled once per process instead of once per scan (the legacy code rebuilt
+# them on every call).
+_SKILL_PAT      = re.compile(r'"name"\s*:\s*"Skill"[^}]*?"skill"\s*:\s*"([^"]+)"')
+_READ_PAT       = re.compile(r'"name"\s*:\s*"Read"[^}]*?"file_path"\s*:\s*"([^"]+)"')
+_SKILL_PATH_PAT = re.compile(r'/skills/([^/"]+)/SKILL\.md$')
+
+
+@dataclass
+class TranscriptScan:
+    '''Single pass over a session transcript JSONL, producing the three
+    aggregates the renderer needs (loaded skills, task list, token usage) in
+    one read instead of three independent full-file scans.
+
+    Each line is decoded with json at most once, and only when a cheap
+    substring pre-check matches, exactly as the three legacy scanners did
+    individually. The projection methods rebuild the public LoadedSkills /
+    TaskList / TranscriptUsage dataclasses so existing callers and tests see
+    identical results.
+    '''
+    skill_names:                 dict[str, None] = field(default_factory=dict)
+    usage_seen:                  set[str]        = field(default_factory=set)
+    input_tokens:                int             = 0
+    cache_creation_input_tokens: int             = 0
+    cache_read_input_tokens:     int             = 0
+    output_tokens:               int             = 0
+    by_id:                       dict[int, Task] = field(default_factory=dict)
+    next_id:                     int             = 1
+    last_event_ts:               float           = 0.0
+
+    @classmethod
+    def scan_full(cls, transcript_path: str) -> TranscriptScan:
+        'Read the whole transcript from the start. Always correct; the fallback for incremental tailing.'
+        scan = cls()
+        if not transcript_path:
+            return scan
+        p = Path(transcript_path)
+        if not p.is_file():
+            return scan
+        try:
+            with p.open('rb') as fh:
+                data = fh.read()
+        except OSError:
+            return cls()
+        scan._process_bytes(data)
+        return scan
+
+    def _process_bytes(self, data: bytes) -> int:
+        '''Fold every complete (newline-terminated) line in `data` into the scan
+        and return the bytes consumed (up to and including the last newline). Any
+        unterminated trailing fragment is left unprocessed, so a mid-write final
+        line is never counted. Shared by the full and incremental paths so their
+        results are identical by construction.'''
+        consumed = data.rfind(b'\n') + 1
+        for raw in data[:consumed].split(b'\n'):
+            if raw:
+                self.process_line(raw.decode('utf-8', 'ignore'))
+        return consumed
+
+    def process_line(self, line: str) -> None:
+        'Fold a single transcript line into all three aggregates (skills, tasks, usage).'
+        if '"Skill"' in line:
+            for m in _SKILL_PAT.finditer(line):
+                self.skill_names.setdefault(m.group(1), None)
+        if '"Read"' in line and 'SKILL.md' in line:
+            for m in _READ_PAT.finditer(line):
+                sm = _SKILL_PATH_PAT.search(m.group(1))
+                if sm:
+                    self.skill_names.setdefault(sm.group(1), None)
+        need_usage = '"usage"' in line and '"assistant"' in line
+        need_task  = '"TaskCreate"' in line or '"TaskUpdate"' in line
+        if not (need_usage or need_task):
+            return
+        try:
+            d = json.loads(line)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(d, dict):
+            return
+        if need_usage:
+            self._apply_usage(d)
+        if need_task:
+            self._apply_tasks(d)
+
+    def _apply_usage(self, d: dict[str, object]) -> None:
+        msg = d.get('message')
+        if not isinstance(msg, dict):
+            return
+        mid = msg.get('id')
+        if not mid or mid in self.usage_seen:
+            return
+        self.usage_seen.add(mid)
+        u_raw = msg.get('usage')
+        u = u_raw if isinstance(u_raw, dict) else {}
+        self.input_tokens                += _as_int(u.get('input_tokens'))
+        self.cache_creation_input_tokens += _as_int(u.get('cache_creation_input_tokens'))
+        self.cache_read_input_tokens     += _as_int(u.get('cache_read_input_tokens'))
+        self.output_tokens               += _as_int(u.get('output_tokens'))
+
+    def _apply_tasks(self, d: dict[str, object]) -> None:
+        msg = d.get('message')
+        if not isinstance(msg, dict):
+            return
+        raw_ts = d.get('timestamp', '')
+        ts = _parse_iso_to_epoch(raw_ts) if isinstance(raw_ts, str) else 0.0
+        content = msg.get('content', [])
+        if not isinstance(content, list):
+            return
+        for c in content:
+            if not isinstance(c, dict) or c.get('type') != 'tool_use':
+                continue
+            name = c.get('name', '')
+            inp  = c.get('input') or {}
+            if not isinstance(inp, dict):
+                continue
+            if name == 'TaskCreate':
+                subj = inp.get('subject', '') or ''
+                af   = inp.get('activeForm', '') or subj
+                self.by_id[self.next_id] = Task(id=self.next_id, subject=subj, active_form=af, status='pending')
+                self.next_id += 1
+                if ts > self.last_event_ts:
+                    self.last_event_ts = ts
+            elif name == 'TaskUpdate':
+                try:
+                    tid = int(inp.get('taskId', '0'))
+                except (TypeError, ValueError):
+                    continue
+                t = self.by_id.get(tid)
+                if not t:
+                    continue
+                new_status = inp.get('status')
+                if new_status in ('pending', 'in_progress', 'completed'):
+                    t.status = new_status
+                if 'activeForm' in inp and inp['activeForm']:
+                    t.active_form = inp['activeForm']
+                if 'subject' in inp and inp['subject']:
+                    t.subject = inp['subject']
+                if ts > self.last_event_ts:
+                    self.last_event_ts = ts
+
+    def loaded_skills(self) -> LoadedSkills:
+        return LoadedSkills(names=list(self.skill_names))
+
+    def transcript_usage(self) -> TranscriptUsage:
+        return TranscriptUsage(
+            input_tokens                = self.input_tokens,
+            cache_creation_input_tokens = self.cache_creation_input_tokens,
+            cache_read_input_tokens     = self.cache_read_input_tokens,
+            output_tokens               = self.output_tokens,
+        )
+
+    def task_list(self) -> TaskList:
+        # Fresh Task objects so a cached scan can't be mutated through a projection.
+        tasks = [
+            Task(id=t.id, subject=t.subject, active_form=t.active_form, status=t.status)
+            for t in (self.by_id[k] for k in sorted(self.by_id))
+        ]
+        return TaskList(tasks=tasks, last_event_ts=self.last_event_ts)
+
+    def to_state(self) -> dict[str, object]:
+        'Serialize the accumulator for incremental-tailing persistence.'
+        return {
+            'skills':  list(self.skill_names),
+            'seen':    list(self.usage_seen),
+            'in':      self.input_tokens,
+            'cc':      self.cache_creation_input_tokens,
+            'cr':      self.cache_read_input_tokens,
+            'out':     self.output_tokens,
+            'tasks':   [{'id': t.id, 'subject': t.subject, 'active_form': t.active_form, 'status': t.status}
+                        for t in (self.by_id[k] for k in sorted(self.by_id))],
+            'next_id': self.next_id,
+            'last_ts': self.last_event_ts,
+        }
+
+    @classmethod
+    def from_state(cls, d: dict[str, object]) -> TranscriptScan:
+        'Rehydrate an accumulator persisted by to_state (defensive against malformed data).'
+        scan = cls()
+        skills = d.get('skills')
+        if isinstance(skills, list):
+            scan.skill_names = {s: None for s in skills if isinstance(s, str)}
+        seen = d.get('seen')
+        if isinstance(seen, list):
+            scan.usage_seen = {s for s in seen if isinstance(s, str)}
+        scan.input_tokens                = _as_int(d.get('in'))
+        scan.cache_creation_input_tokens = _as_int(d.get('cc'))
+        scan.cache_read_input_tokens     = _as_int(d.get('cr'))
+        scan.output_tokens               = _as_int(d.get('out'))
+        tasks = d.get('tasks')
+        if isinstance(tasks, list):
+            for t in tasks:
+                if isinstance(t, dict):
+                    tid = _as_int(t.get('id'))
+                    scan.by_id[tid] = Task(
+                        id          = tid,
+                        subject     = _as_str(t.get('subject')),
+                        active_form = _as_str(t.get('active_form')),
+                        status      = _as_str(t.get('status'), 'pending'),
+                    )
+        ni = d.get('next_id')
+        scan.next_id = ni if isinstance(ni, int) and ni >= 1 else (max(scan.by_id, default=0) + 1)
+        scan.last_event_ts = _as_float(d.get('last_ts'))
+        return scan
+
+
+# One-slot, file-identity-keyed cache so the three projections requested within a
+# single wide render share ONE scan. Keyed on (path, size, mtime_ns).
+_SCAN_CACHE: tuple[tuple[str, int, int], TranscriptScan] | None = None
+_SCAN_STATE_V = 1
+
+
+def _incremental_enabled(p: Path) -> bool:
+    '''Incremental tailing applies only to real Claude session transcripts (those
+    under CLAUDE_DIR/projects) — this keeps state writes out of arbitrary
+    directories and out of the tmp_path-only tests. YAS_NO_INCREMENTAL is a kill
+    switch that forces the always-correct full scan.'''
+    if os.environ.get('YAS_NO_INCREMENTAL'):
+        return False
+    try:
+        return p.resolve().is_relative_to((CLAUDE_DIR / 'projects').resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def _scan_state_path(p: Path) -> Path:
+    h = hashlib.sha1(str(p).encode('utf-8')).hexdigest()[:16]
+    return CLAUDE_DIR / 'statusline-scan' / f'{h}.json'
+
+
+def _resume_point(state_path: Path, p: Path, st: os.stat_result) -> tuple[TranscriptScan, int]:
+    '''(scan, start_offset) to resume from, or (empty, 0) to force a full re-scan
+    on any mismatch: missing/corrupt state, schema bump, path or inode change
+    (rotation/replacement), or an offset past EOF (truncation/shrink).'''
+    try:
+        d = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        return TranscriptScan(), 0
+    if (not isinstance(d, dict) or d.get('v') != _SCAN_STATE_V
+            or d.get('path') != str(p) or d.get('inode') != st.st_ino):
+        return TranscriptScan(), 0
+    offset = d.get('offset')
+    scan_d = d.get('scan')
+    if not isinstance(offset, int) or offset < 0 or offset > st.st_size or not isinstance(scan_d, dict):
+        return TranscriptScan(), 0
+    return TranscriptScan.from_state(scan_d), offset
+
+
+def _save_scan_state(state_path: Path, p: Path, st: os.stat_result, offset: int, scan: TranscriptScan) -> None:
+    _atomic_write_text(state_path, json.dumps({
+        'v':      _SCAN_STATE_V,
+        'path':   str(p),
+        'inode':  st.st_ino,
+        'offset': offset,
+        'scan':   scan.to_state(),
+    }))
+
+
+def _scan_with_state(p: Path, st: os.stat_result) -> TranscriptScan:
+    'Read only the bytes appended since the persisted offset; persist the advanced state.'
+    state_path = _scan_state_path(p)
+    scan, start = _resume_point(state_path, p, st)
+    new_offset = start
+    if start < st.st_size:
+        with p.open('rb') as fh:
+            fh.seek(start)
+            data = fh.read()
+        new_offset = start + scan._process_bytes(data)
+    if new_offset != start:
+        _save_scan_state(state_path, p, st, new_offset, scan)
+    return scan
+
+
+def _scan_transcript(transcript_path: str) -> TranscriptScan:
+    '''Cached single-pass scan shared by the three projection classmethods within
+    one render. For real session transcripts it tails incrementally (reading only
+    newly-appended bytes via a persisted accumulator); everything else, and any
+    anomaly, falls back to the always-correct full scan.'''
+    global _SCAN_CACHE
+    if not transcript_path:
+        return TranscriptScan()
+    p = Path(transcript_path)
+    if not p.is_file():
+        return TranscriptScan()
+    try:
+        st = p.stat()
+    except OSError:
+        return TranscriptScan()
+    key = (str(p), st.st_size, st.st_mtime_ns)
+    cached = _SCAN_CACHE
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    if _incremental_enabled(p):
+        try:
+            scan = _scan_with_state(p, st)
+        except Exception:
+            scan = TranscriptScan.scan_full(transcript_path)
+    else:
+        scan = TranscriptScan.scan_full(transcript_path)
+    _SCAN_CACHE = (key, scan)
+    return scan
 
 
 @dataclass
@@ -2707,9 +3053,9 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     usage         = TranscriptUsage.from_transcript(session.transcript_path)
     today         = datetime.now().strftime('%Y-%m-%d')
-    token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
+    token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out, _model_log_key(session.model))
     tok_rate      = TokenRate.update(session.session_id, usage.billed_in, usage.out)
-    sess_cost     = compute_session_cost(session.model, usage)
+    sess_cost     = session_cost_display(session, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
     session_inout = (
@@ -2905,13 +3251,8 @@ def main() -> None:
     # session rather than one per render tick. The observer already collapses
     # to the newest payload per session (mon/discovery.index_payloads_by_session),
     # so the old timestamped filenames only ever accumulated dead weight.
-    try:
-        out_dir = CLAUDE_DIR / 'statusline-output'
-        out_dir.mkdir(parents=True, exist_ok=True)
-        session_id = _as_str(info.get('session_id')) or 'unknown'
-        (out_dir / f'statusline.{session_id}.json').write_text(json.dumps(info))
-    except OSError:
-        pass
+    session_id = _as_str(info.get('session_id')) or 'unknown'
+    _atomic_write_text(CLAUDE_DIR / 'statusline-output' / f'statusline.{session_id}.json', json.dumps(info))
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:

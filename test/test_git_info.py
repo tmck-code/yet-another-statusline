@@ -102,3 +102,71 @@ def test_from_cwd_real_repo(tmp_path: Path) -> None:
     result = sl.GitInfo.from_cwd(str(tmp_path))
     assert result.modified == 1
     assert result.untracked == 1
+
+
+# --- G2: branch namespace preserved ------------------------------------------
+
+def test_read_head_preserves_branch_namespace(tmp_path: Path) -> None:
+    """A 'feature/foo' branch keeps its namespace instead of collapsing to 'foo'."""
+    gitdir = tmp_path / '.git'
+    (gitdir / 'refs' / 'heads' / 'feature').mkdir(parents=True)
+    (gitdir / 'HEAD').write_text('ref: refs/heads/feature/foo\n')
+    (gitdir / 'refs' / 'heads' / 'feature' / 'foo').write_text('deadbeef0000\n')
+
+    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    assert branch == 'feature/foo'
+    assert commit == 'deadbeef0'
+
+
+# --- G1: packed-refs commit lookup -------------------------------------------
+
+def test_read_head_packed_refs_commit(tmp_path: Path) -> None:
+    """Commit is resolved from packed-refs when there is no loose ref file."""
+    gitdir = tmp_path / '.git'
+    gitdir.mkdir()
+    (gitdir / 'HEAD').write_text('ref: refs/heads/main\n')
+    (gitdir / 'packed-refs').write_text(
+        '# pack-refs with: peeled fully-peeled sorted\n'
+        'cafebabe1234567890 refs/heads/main\n'
+    )
+
+    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    assert branch == 'main'
+    assert commit == 'cafebabe1'
+
+
+# --- G1: linked worktree (.git is a FILE pointing at the worktree gitdir) -----
+
+def test_find_repo_and_head_resolve_worktree(tmp_path: Path) -> None:
+    """A worktree's `.git` file resolves to its gitdir; HEAD + commit (via the
+    common dir) populate instead of going blank."""
+    main_gitdir = tmp_path / 'main' / '.git'
+    (main_gitdir / 'refs' / 'heads').mkdir(parents=True)
+    (main_gitdir / 'refs' / 'heads' / 'wtbranch').write_text('abc123def456\n')
+
+    wt_gitdir = main_gitdir / 'worktrees' / 'wt'
+    wt_gitdir.mkdir(parents=True)
+    (wt_gitdir / 'HEAD').write_text('ref: refs/heads/wtbranch\n')
+    (wt_gitdir / 'commondir').write_text('../..\n')  # -> main/.git
+
+    wt = tmp_path / 'wt'
+    wt.mkdir()
+    (wt / '.git').write_text(f'gitdir: {wt_gitdir}\n')
+
+    repo, gd = sl.GitInfo._find_repo(str(wt))
+    assert repo == str(wt)
+    assert gd == str(wt_gitdir.resolve())
+
+    branch, commit = sl.GitInfo._read_head(gd)
+    assert branch == 'wtbranch'
+    assert commit == 'abc123def'
+
+
+def test_resolve_gitdir_malformed_file_returns_empty(tmp_path: Path) -> None:
+    """A `.git` file without a gitdir: pointer resolves to '' (graceful)."""
+    (tmp_path / '.git').write_text('garbage\n')
+    repo, gd = sl.GitInfo._find_repo(str(tmp_path))
+    assert repo == str(tmp_path)
+    assert gd == ''
+    # _read_head('') is empty, so from_cwd stays blank rather than crashing.
+    assert sl.GitInfo._read_head(gd) == ('', '')

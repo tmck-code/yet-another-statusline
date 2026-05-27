@@ -1,6 +1,8 @@
 """Tests for TokenLog.update (disk I/O parser)."""
 from pathlib import Path
 
+import pytest
+
 import statusline_command as sl
 
 
@@ -70,3 +72,44 @@ def test_other_days_excluded_from_return_preserved_on_disk(tmp_home: Path) -> No
     content = log.read_text()
     assert YESTERDAY in content  # yesterday's row preserved
     assert 'old' in content
+
+
+def test_v2_stores_model_and_skips_unchanged(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """v2 rows carry a space-free model id; an unchanged re-update does not rewrite."""
+    writes = {'n': 0}
+    orig = sl._atomic_write_text
+
+    def _counting(p: Path, t: str) -> None:
+        writes['n'] += 1
+        orig(p, t)
+
+    monkeypatch.setattr(sl, '_atomic_write_text', _counting)
+
+    sl.TokenLog.update('s1', TODAY, 100, 50, 200, 'claude-opus-4-7')
+    assert writes['n'] == 1
+    assert _log_path(tmp_home).read_text().splitlines() == [f'{TODAY} s1 100 50 200 claude-opus-4-7']
+
+    # identical update -> no rewrite (write-only-on-change)
+    sl.TokenLog.update('s1', TODAY, 100, 50, 200, 'claude-opus-4-7')
+    assert writes['n'] == 1
+
+    # changed totals -> rewrite
+    sl.TokenLog.update('s1', TODAY, 100, 50, 300, 'claude-opus-4-7')
+    assert writes['n'] == 2
+
+
+def test_day_cost_prices_each_model_separately(tmp_home: Path) -> None:
+    """A day spanning two models prices each by its own rate, not one rate for all."""
+    sl.TokenLog.update('s1', TODAY, 1_000_000, 0, 1_000_000, 'claude-opus-4-7')        # $5 / $25
+    log = sl.TokenLog.update('s2', TODAY, 1_000_000, 0, 1_000_000, 'claude-sonnet-4-6')  # $3 / $15
+    # opus: 1*5 + 1*25 = 30 ; sonnet: 1*3 + 1*15 = 18 ; total 48 (current model irrelevant)
+    cost = sl.compute_day_cost(sl.Model(id='claude-haiku-4-5'), log)
+    assert cost == pytest.approx(48.0, abs=1e-9)
+
+
+def test_day_cost_legacy_rows_use_current_model(tmp_home: Path) -> None:
+    """Model-less (v1) rows fall back to the current session's model rate."""
+    log = sl.TokenLog.update('s1', TODAY, 1_000_000, 0, 1_000_000)  # no model id -> v1 row
+    # priced with the passed (current) model = Sonnet 3/15 -> 1*3 + 1*15 = 18
+    cost = sl.compute_day_cost(sl.Model(id='claude-sonnet-4-6'), log)
+    assert cost == pytest.approx(18.0, abs=1e-9)
