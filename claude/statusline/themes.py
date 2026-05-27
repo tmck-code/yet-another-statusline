@@ -148,11 +148,11 @@ CLAUDE_DARK = Theme(
     pill_fg_light = (235, 235, 235),
 
     grad_stops = (
-        (0.00, ( 40, 210,  80)),
-        (0.25, (240, 230,  20)),
-        (0.50, (255, 140,  20)),
-        (0.75, (220,  40,  50)),
-        (1.00, (170,  60, 210)),
+        # Calm "fuel-gauge" gradient: green (low) -> amber -> red (full).
+        # Replaces the old full-spectrum rainbow that ran green->...->purple.
+        (0.00, ( 60, 200, 100)),
+        (0.50, (235, 185,  50)),
+        (1.00, (215,  55,  55)),
     ),
     grey_rgb    = (108, 108, 108),
     spark_stops = (
