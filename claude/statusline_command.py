@@ -26,6 +26,7 @@ from statusline.themes import CLAUDE_DARK, THEMES, Theme  # noqa: E402
 from statusline.textutil import (  # noqa: E402  (re-exported; some are used only via the public surface)
     _is_wide, _middle_ellipsis, _visible_width, fmt_dur, fmt_tok, sparkline_width,  # noqa: F401
 )
+from statusline import config  # noqa: E402
 
 
 class BarChars:
@@ -35,8 +36,6 @@ class BarChars:
     EMPTY  = '░'
 
 
-HOME       = Path(os.path.expanduser('~'))
-CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 MIN_WIDTH    = 40
 DEFAULT_MAX_WIDTH = 140
 MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
@@ -102,7 +101,7 @@ def terminal_width() -> int:
     except (OSError, ValueError, KeyError):
         pass
     try:
-        w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
+        w = int((config.CLAUDE_DIR / 'terminal-width').read_text().strip())
         if w > 0:
             return w
     except (OSError, ValueError):
@@ -450,7 +449,7 @@ class Workspace:
     @property
     def plugins(self) -> str:
         seen: dict[str, None] = {}
-        candidates = [CLAUDE_DIR / 'settings.json']
+        candidates = [config.CLAUDE_DIR / 'settings.json']
         if self.project_dir:
             candidates.append(Path(self.project_dir) / '.claude' / 'settings.json')
         for sf in candidates:
@@ -572,7 +571,7 @@ class SessionInfo:
 
     @property
     def short_pwd(self) -> str:
-        home = str(HOME)
+        home = str(config.HOME)
         p = self.cwd
         if p.startswith(home):
             p = '~' + p[len(home):]
@@ -657,7 +656,7 @@ class TokenLog:
     @classmethod
     def update(cls, session_id: str, today: str, total_in: int, cache_read: int,
                total_out: int, model_id: str = '') -> TokenLog:
-        log = CLAUDE_DIR / 'statusline-tokens.log'
+        log = config.CLAUDE_DIR / 'statusline-tokens.log'
         old_lines: list[str] = []
         if log.exists():
             try:
@@ -724,7 +723,7 @@ class TokenRate:
     def update(cls, session_id: str, total_in: int, total_out: int) -> int:
         if not session_id:
             return 0
-        log = CLAUDE_DIR / 'statusline-token-rate.log'
+        log = config.CLAUDE_DIR / 'statusline-token-rate.log'
         now = time.time()
         rows: list[tuple[float, str, int, int]] = []
         if log.exists():
@@ -755,7 +754,7 @@ class TokenRate:
     def history(cls, session_id: str, n_buckets: int, window: float) -> list[int]:
         if n_buckets <= 0 or not session_id:
             return []
-        log = CLAUDE_DIR / 'statusline-token-rate.log'
+        log = config.CLAUDE_DIR / 'statusline-token-rate.log'
         now = time.time()
         samples: list[tuple[float, int, int]] = []
         if log.exists():
@@ -796,7 +795,7 @@ class TokenRate:
         """Return (in_active, out_active) — True if that count grew in the last `window` seconds."""
         if not session_id:
             return False, False
-        log = CLAUDE_DIR / 'statusline-token-rate.log'
+        log = config.CLAUDE_DIR / 'statusline-token-rate.log'
         if not log.exists():
             return False, False
         now = time.time()
@@ -853,7 +852,7 @@ class GitInfo:
         tmp_path-only git tests and out of any non-session caller.'''
         if not session_id:
             return cls._dirty(repo)
-        cache_path = CLAUDE_DIR / 'statusline-git' / f'{session_id}.json'
+        cache_path = config.CLAUDE_DIR / 'statusline-git' / f'{session_id}.json'
         now = time.time()
         try:
             raw = cache_path.read_text()
@@ -1056,7 +1055,7 @@ class RunningSubagents:
         # Unix; on Windows paths start with a drive letter (no leading '-'
         # in CC's dir name) so the f-string prefix gave a wrong path.
         project_slug = re.sub(r'[^A-Za-z0-9]', '-', project_dir)
-        subagents_dir = CLAUDE_DIR / 'projects' / project_slug / session_id / 'subagents'
+        subagents_dir = config.CLAUDE_DIR / 'projects' / project_slug / session_id / 'subagents'
         if not subagents_dir.is_dir():
             return cls()
         now = time.time()
@@ -1454,20 +1453,20 @@ _SCAN_STATE_V = 1
 
 def _incremental_enabled(p: Path) -> bool:
     '''Incremental tailing applies only to real Claude session transcripts (those
-    under CLAUDE_DIR/projects) — this keeps state writes out of arbitrary
+    under config.CLAUDE_DIR/projects) — this keeps state writes out of arbitrary
     directories and out of the tmp_path-only tests. YAS_NO_INCREMENTAL is a kill
     switch that forces the always-correct full scan.'''
     if os.environ.get('YAS_NO_INCREMENTAL'):
         return False
     try:
-        return p.resolve().is_relative_to((CLAUDE_DIR / 'projects').resolve())
+        return p.resolve().is_relative_to((config.CLAUDE_DIR / 'projects').resolve())
     except (OSError, ValueError):
         return False
 
 
 def _scan_state_path(p: Path) -> Path:
     h = hashlib.sha1(str(p).encode('utf-8')).hexdigest()[:16]
-    return CLAUDE_DIR / 'statusline-scan' / f'{h}.json'
+    return config.CLAUDE_DIR / 'statusline-scan' / f'{h}.json'
 
 
 def _resume_point(state_path: Path, p: Path, st: os.stat_result) -> tuple[TranscriptScan, int]:
@@ -3092,7 +3091,7 @@ def resolve_theme(cli_name: str | None) -> Theme:
     if env in THEMES:
         return THEMES[env]
     try:
-        cfg = (CLAUDE_DIR / 'statusline-theme').read_text().strip()
+        cfg = (config.CLAUDE_DIR / 'statusline-theme').read_text().strip()
         if cfg in THEMES:
             return THEMES[cfg]
     except OSError:
@@ -3151,7 +3150,7 @@ def main() -> None:
     # to the newest payload per session (mon/discovery.index_payloads_by_session),
     # so the old timestamped filenames only ever accumulated dead weight.
     session_id = _as_str(info.get('session_id')) or 'unknown'
-    _atomic_write_text(CLAUDE_DIR / 'statusline-output' / f'statusline.{session_id}.json', json.dumps(info))
+    _atomic_write_text(config.CLAUDE_DIR / 'statusline-output' / f'statusline.{session_id}.json', json.dumps(info))
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:

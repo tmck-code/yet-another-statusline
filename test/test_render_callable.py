@@ -49,7 +49,7 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
     fake_tw = 200  # wider than MAX_WIDTH so capping is observable
 
     monkeypatch.setattr(sl, 'terminal_width', lambda: fake_tw)
-    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    monkeypatch.setattr(sl.config, 'HOME', tmp_path)
 
     def _first_line_width(env_extra):
         for k, v in env_extra.items():

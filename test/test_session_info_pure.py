@@ -8,22 +8,18 @@ import statusline_command as sl
 
 class TestShortPwd:
     def test_home_prefix_collapsed(self, tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sl, 'HOME', tmp_home)
         info = sl.SessionInfo(cwd=str(tmp_home) + '/dev/proj/sub')
         assert info.short_pwd == '~/d/p/sub'
 
     def test_absolute_non_home(self, tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sl, 'HOME', tmp_home)
         info = sl.SessionInfo(cwd='/etc/systemd/network')
         assert info.short_pwd == '/e/s/network'
 
     def test_bare_home(self, tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sl, 'HOME', tmp_home)
         info = sl.SessionInfo(cwd=str(tmp_home))
         assert info.short_pwd == '~'
 
     def test_root_path(self, tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sl, 'HOME', tmp_home)
         info = sl.SessionInfo(cwd='/')
         assert info.short_pwd == '/'
 
