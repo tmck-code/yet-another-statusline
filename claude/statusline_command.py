@@ -24,6 +24,7 @@ from statusline.themes import CLAUDE_DARK, THEMES, Theme  # noqa: E402,F401
 from statusline.textutil import _atomic_write_text, _is_wide, _middle_ellipsis, _visible_width, fmt_dur, fmt_tok, sparkline_width  # noqa: E402,F401
 from statusline import clock, config, transcript  # noqa: E402,F401
 from statusline.git import GIT_CACHE_TTL, GitInfo  # noqa: E402,F401
+from statusline.openspec import OpenSpec  # noqa: E402,F401
 from statusline.transcript import (  # noqa: E402,F401
     LoadedSkills, RunningSubagent, RunningSubagents, Task, TaskList, TranscriptScan,
     TranscriptUsage, _SCAN_CACHE, _SCAN_STATE_V, _incremental_enabled,
@@ -249,45 +250,6 @@ class Pill:
         return pill_gradient_fg(col - self.start, 0, self.end - self.start, self.anchor, self.shift, self.pct)
 
 
-
-
-@dataclass
-class OpenSpec:
-    changes: list[tuple[str, int, int]] = field(default_factory=list)
-
-    @classmethod
-    def from_cwd(cls, cwd: str) -> OpenSpec:
-        root = cls._find_root(cwd)
-        if not root:
-            return cls()
-        out: list[tuple[str, int, int]] = []
-        open_re = re.compile(r'^\s*- \[ \]')
-        done_re = re.compile(r'^\s*- \[x\]')
-        for tasks in sorted(Path(root).rglob('tasks.md')):
-            if '/archive/' in str(tasks):
-                continue
-            try:
-                text = tasks.read_text()
-            except OSError:
-                continue
-            t = sum(1 for ln in text.splitlines() if open_re.match(ln))
-            d = sum(1 for ln in text.splitlines() if done_re.match(ln))
-            total = t + d
-            if total == 0:
-                continue
-            out.append((tasks.parent.name, d, total))
-        return cls(changes=out)
-
-    @staticmethod
-    def _find_root(cwd: str) -> str:
-        curr = Path(cwd) if cwd else None
-        while curr:
-            if (curr / 'openspec').is_dir():
-                return str(curr / 'openspec')
-            if curr == curr.parent:
-                break
-            curr = curr.parent
-        return ''
 
 
 # Monochrome: the former time-cycling rainbow accent (on the thinking / 5h-helper
