@@ -68,7 +68,10 @@ def _proj(scan: sl.TranscriptScan) -> object:
 
 
 def _scan(path: Path) -> sl.TranscriptScan:
-    sl._SCAN_CACHE = None  # bypass the within-render in-process cache
+    # _SCAN_CACHE is a module-global mutated inside transcript._scan_transcript;
+    # assigning to sl._SCAN_CACHE would rebind only sl's namespace (after the
+    # Phase-2 split) — the real cache lives in the transcript module.
+    sl.transcript._SCAN_CACHE = None
     return sl._scan_transcript(str(path))
 
 
@@ -171,5 +174,5 @@ def test_transcript_outside_projects_writes_no_state(tmp_path: Path) -> None:
     t = tmp_path / 'loose.jsonl'   # not under CLAUDE_DIR/projects
     t.write_text(_usage('a', 10) + '\n')
     assert not sl._incremental_enabled(t)
-    sl._SCAN_CACHE = None
+    sl.transcript._SCAN_CACHE = None
     assert sl._scan_transcript(str(t)).transcript_usage().input_tokens == 10

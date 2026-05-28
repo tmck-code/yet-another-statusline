@@ -25,7 +25,7 @@ from statusline import config
 
 if TYPE_CHECKING:
     from statusline.accounting import TokenLog
-    from statusline_command import TranscriptUsage
+    from statusline.transcript import TranscriptUsage
 
 
 _MODEL_VER_RE   = re.compile(r'(\d+)[.\-](\d{1,2})(?!\d)')

@@ -33,7 +33,7 @@ from statusline.models import Model, SessionInfo, TokenAccounting
 from statusline.textutil import _atomic_write_text
 
 if TYPE_CHECKING:
-    from statusline_command import TranscriptUsage
+    from statusline.transcript import TranscriptUsage
 
 
 def elapsed_from_transcript(transcript_path: str) -> str:
