@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING, NamedTuple
 from statusline import config
 
 if TYPE_CHECKING:
-    from statusline_command import TokenLog, TranscriptUsage
+    from statusline.accounting import TokenLog
+    from statusline_command import TranscriptUsage
 
 
 _MODEL_VER_RE   = re.compile(r'(\d+)[.\-](\d{1,2})(?!\d)')

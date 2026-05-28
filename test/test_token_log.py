@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import statusline_command as sl
+from statusline import accounting
 
 
 TODAY = '2026-05-19'
@@ -77,13 +78,15 @@ def test_other_days_excluded_from_return_preserved_on_disk(tmp_home: Path) -> No
 def test_v2_stores_model_and_skips_unchanged(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """v2 rows carry a space-free model id; an unchanged re-update does not rewrite."""
     writes = {'n': 0}
-    orig = sl._atomic_write_text
+    # TokenLog.update lives in `accounting` now and calls `_atomic_write_text`
+    # via its own import binding — patching sl's binding wouldn't reach it.
+    orig = accounting._atomic_write_text
 
     def _counting(p: Path, t: str) -> None:
         writes['n'] += 1
         orig(p, t)
 
-    monkeypatch.setattr(sl, '_atomic_write_text', _counting)
+    monkeypatch.setattr(accounting, '_atomic_write_text', _counting)
 
     sl.TokenLog.update('s1', TODAY, 100, 50, 200, 'claude-opus-4-7')
     assert writes['n'] == 1

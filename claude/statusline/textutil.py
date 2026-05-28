@@ -6,9 +6,27 @@ data-collection core can share them without importing the monolith.
 """
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    '''Best-effort atomic write: write to a sibling temp file, then os.replace
+    (atomic on POSIX and Windows) onto the target so a reader or a cancelled
+    render never sees a half-written file. Swallows OSError — these are
+    telemetry/cache files, and a failed write simply means the next render
+    recomputes. The PID-suffixed temp name avoids concurrent-render collisions.'''
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 def _is_wide(ch: str) -> bool:
