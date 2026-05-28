@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from statusline.themes import CLAUDE_DARK, THEMES, Theme  # noqa: E402,F401
 from statusline.textutil import _is_wide, _middle_ellipsis, _visible_width, fmt_dur, fmt_tok, sparkline_width  # noqa: E402,F401
-from statusline import config  # noqa: E402
+from statusline import clock, config  # noqa: E402
 from statusline.models import Cost, ContextWindow, CurrentUsage, Effort, Model, OutputStyle, RateBucket, RateLimits, SessionInfo, Thinking, TokenAccounting, Workspace, _as_float, _as_int, _as_str, _model_version, model_key  # noqa: E402,F401
 
 
@@ -1849,7 +1849,7 @@ class Renderer:
         try:
             if rate_limits.five_hour.resets_at:
                 resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
-                delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+                delta = resets_at - clock.now().astimezone().replace(microsecond=0)
                 if delta.total_seconds() > 0:
                     total_s = int(delta.total_seconds())
                     h, rem  = divmod(total_s, 3600)
@@ -1954,7 +1954,7 @@ class Renderer:
         try:
             if rate_limits.five_hour.resets_at:
                 resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
-                delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+                delta = resets_at - clock.now().astimezone().replace(microsecond=0)
                 if delta.total_seconds() > 0:
                     trend = self.burndown_trend(
                         float(pct),
@@ -2447,7 +2447,7 @@ class Renderer:
                     return '∞'
                 return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
-            delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+            delta = resets_at - clock.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
                     return '∞'
@@ -2603,7 +2603,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     skills        = LoadedSkills.from_transcript(session.transcript_path)
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     usage         = TranscriptUsage.from_transcript(session.transcript_path)
-    today         = datetime.now().strftime('%Y-%m-%d')
+    today         = clock.now().strftime('%Y-%m-%d')
     token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out, _model_log_key(session.model))
     tok_rate      = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     sess_cost     = session_cost_display(session, usage)
