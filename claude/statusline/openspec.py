@@ -24,8 +24,18 @@ class OpenSpec:
         out: list[tuple[str, int, int]] = []
         open_re = re.compile(r'^\s*- \[ \]')
         done_re = re.compile(r'^\s*- \[x\]')
-        for tasks in sorted(Path(root).rglob('tasks.md')):
-            if '/archive/' in str(tasks):
+        root_path = Path(root)
+        for tasks in sorted(root_path.rglob('tasks.md')):
+            # Skip archived change-sets. Match on the path COMPONENTS relative to
+            # the openspec root, not a '/archive/' substring of the full path:
+            # the substring form is broken on Windows ('\\archive\\') and would
+            # also false-match a project living under some unrelated '/archive/'
+            # ancestor dir (Audit OS-ARCHIVE / prior P6).
+            try:
+                rel_parts = tasks.relative_to(root_path).parts
+            except ValueError:
+                rel_parts = tasks.parts
+            if 'archive' in rel_parts:
                 continue
             try:
                 text = tasks.read_text()

@@ -52,6 +52,31 @@ def test_archived_changes_excluded(tmp_path: Path) -> None:
     assert result.changes == []
 
 
+def test_project_under_archive_ancestor_still_detected(tmp_path: Path) -> None:
+    """Audit OS-ARCHIVE: the old '/archive/' substring filter wrongly excluded an
+    ENTIRE project that merely lived under a dir named 'archive'. The anchored
+    relative_to(root).parts check only skips archive/ INSIDE the openspec root."""
+    changes_dir = tmp_path / 'archive' / 'myproject' / 'openspec' / 'changes' / 'add-foo'
+    changes_dir.mkdir(parents=True)
+    (changes_dir / 'tasks.md').write_text('- [x] a\n- [ ] b\n')
+
+    result = sl.OpenSpec.from_cwd(str(tmp_path / 'archive' / 'myproject'))
+    assert result.changes == [('add-foo', 1, 2)]
+
+
+def test_active_and_archived_mixed(tmp_path: Path) -> None:
+    """An active change and an archived one under the same root: only the active."""
+    active = tmp_path / 'openspec' / 'changes' / 'add-foo'
+    active.mkdir(parents=True)
+    (active / 'tasks.md').write_text('- [x] a\n- [ ] b\n')
+    archived = tmp_path / 'openspec' / 'changes' / 'archive' / 'old'
+    archived.mkdir(parents=True)
+    (archived / 'tasks.md').write_text('- [x] a\n- [x] b\n')
+
+    result = sl.OpenSpec.from_cwd(str(tmp_path))
+    assert result.changes == [('add-foo', 1, 2)]
+
+
 
 def test_empty_tasks_excluded(tmp_path: Path) -> None:
     """A tasks.md with no checkbox lines is excluded from results."""
