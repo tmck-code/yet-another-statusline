@@ -1,10 +1,36 @@
+import re
+
 import statusline_command as sl
+from helper import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
 ContextWindow = sl.ContextWindow
-CLR_ALERT = sl.CLR_ALERT
+CLR_ALERT = sl.Renderer().alert   # theme's alert colour (monochrome: brightest white)
 SOFT_LIMIT = sl.SOFT_LIMIT
+
+
+def _pcts(s: str) -> list[int]:
+    return [int(m) for m in re.findall(r'(\d+)%', strip_ansi(s))]
+
+
+def test_context_line_shows_real_window_fill_not_soft_pressure() -> None:
+    # Regression for the 524% bug: a large context must read as the real window
+    # fill (786.7K / 1M = 79%), never tokens/150K.
+    r = Renderer()
+    ctx = ContextWindow(total_input_tokens=786_700, total_output_tokens=0, context_window_size=1_000_000)
+    out = r.context_line(ctx, 120)
+    pcts = _pcts(out)
+    assert pcts and max(pcts) <= 100, strip_ansi(out)
+    assert '79%' in strip_ansi(out), strip_ansi(out)
+
+
+def test_context_line_caps_at_100_when_over_window() -> None:
+    r = Renderer()
+    ctx = ContextWindow(total_input_tokens=1_200_000, total_output_tokens=0, context_window_size=1_000_000)
+    out = r.context_line(ctx, 120)
+    assert _pcts(out) and max(_pcts(out)) == 100
+    assert CLR_ALERT in out   # a full window renders red
 
 
 def test_context_line_under_soft_limit() -> None:

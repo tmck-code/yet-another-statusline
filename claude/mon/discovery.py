@@ -70,10 +70,25 @@ def index_payloads_by_session(
 def discover(
     include_after: timedelta,
     now: datetime,
+    projects_root: Path | None = None,
+    payloads_root: Path | None = None,
 ) -> list[ActiveSession]:
-    """Return ActiveSession list for sessions with both an active jsonl and a payload."""
-    active_jsonls = find_active_jsonls(include_after, now)
-    payload_index = index_payloads_by_session()
+    """Return ActiveSession list for sessions with both an active jsonl and a payload.
+
+    Roots are resolved from statusline.config.CLAUDE_DIR at call time (honouring
+    CLAUDE_CONFIG_DIR), not from import-time Path.home() defaults — the renderer
+    writes payloads under config.CLAUDE_DIR, so a CLAUDE_CONFIG_DIR user's
+    sessions would otherwise be invisible to `mon` (Audit MON-1). Resolving via
+    the config singleton's attribute (not os.environ) keeps the test sandbox's
+    monkeypatched CLAUDE_DIR in effect. Explicit roots override (used by tests).
+    """
+    from statusline import config
+    if projects_root is None:
+        projects_root = config.CLAUDE_DIR / 'projects'
+    if payloads_root is None:
+        payloads_root = config.CLAUDE_DIR / 'statusline-output'
+    active_jsonls = find_active_jsonls(include_after, now, projects_root)
+    payload_index = index_payloads_by_session(payloads_root)
 
     sessions = []
     for jsonl_path, jsonl_mtime in active_jsonls:

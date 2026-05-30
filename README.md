@@ -6,7 +6,7 @@ _Most common form is displaying these stats, which include the loaded plugins & 
 
 ## Install/Update
 
-Via Claude Code plugin (Requires Python 3.10+, and a [Nerd Font](https://www.nerdfonts.com/font-downloads) to render the icons)
+Via Claude Code plugin (requires Python 3.10+). Icons use clean Unicode symbols that render in any monospace font — no special font needed. For the original Nerd Font icons, set `YAS_NERD_FONT=1` (requires a [Nerd Font](https://www.nerdfonts.com/font-downloads)).
 
 ```bash
 # add the marketplace
@@ -61,6 +61,7 @@ Both also accept the `--theme=NAME` / `--bg-shift=DIR` form.
 | `CLAUDE_STATUSLINE_THEME` | _(unset)_ | theme name; overrides the config file, overridden by `--theme` |
 | `STATUSLINE_TOKEN_WINDOW` | `60` | seconds; rolling window used to compute the token throughput rate |
 | `COLUMNS` | _(unset)_ | terminal-width fallback when tmux / width-file detection fail |
+| `YAS_NERD_FONT` | _(unset)_ | set to `1` for the original Nerd Font glyphs (needs a Nerd Font); default is universal Unicode symbols |
 
 ### Theme resolution
 

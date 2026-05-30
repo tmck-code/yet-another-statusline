@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
+import os
 import shlex
 import shutil
 import statistics
@@ -58,12 +60,49 @@ def base_worktree(ref: str) -> Iterator[Path]:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+@contextlib.contextmanager
+def scenario(n_lines: int) -> Iterator[tuple[bytes | None, dict[str, str]]]:
+    '''Yield (stdin_bytes_or_None, env) for a benchmark run. ALWAYS points
+    CLAUDE_CONFIG_DIR at a throwaway temp dir, so the benchmark never reads or
+    writes the real ~/.claude (token/rate logs, payloads, scan/git state). With
+    n_lines>0 it also generates an `n_lines` transcript under projects/ — so the
+    PR's incremental tailing engages — plus a matching session JSON; otherwise
+    the legacy 1.2KB fixture (stdin_bytes=None -> caller reads INPUT_JSON) is used.'''
+    tmp = Path(tempfile.mkdtemp(prefix='yas-bench-'))
+    try:
+        env = dict(os.environ)
+        env['CLAUDE_CONFIG_DIR'] = str(tmp)
+        input_data: bytes | None = None
+        if n_lines > 0:
+            sid  = 'bench-session'
+            proj = tmp / 'projects' / 'bench-slug'
+            proj.mkdir(parents=True)
+            transcript = proj / f'{sid}.jsonl'
+            rows = [
+                json.dumps({'type': 'assistant', 'message': {
+                    'id': f'm{i}', 'role': 'assistant',
+                    'usage': {'input_tokens': 100, 'cache_creation_input_tokens': 0,
+                              'cache_read_input_tokens': 50, 'output_tokens': 20}}})
+                for i in range(n_lines)
+            ]
+            transcript.write_text('\n'.join(rows) + '\n')
+            info = json.loads(INPUT_JSON.read_text())
+            info['session_id'] = sid
+            info['transcript_path'] = str(transcript)
+            input_data = json.dumps(info).encode()
+            print(f'{DIM}realistic transcript: {n_lines} lines, {transcript.stat().st_size} bytes{RESET}', file=sys.stderr)
+        yield input_data, env
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def shell_invocation(script: Path) -> str:
     'A `python3 <script> < <input>` string, quoted so spaces in paths survive.'
     return f'python3 {shlex.quote(str(script))} < {shlex.quote(str(INPUT_JSON))}'
 
 
-def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int) -> int:
+def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int,
+                  env: dict[str, str] | None = None) -> int:
     'Delegate to hyperfine and echo its paste-ready markdown table.'
     markdown = Path(tempfile.mkstemp(prefix='yas-bench-', suffix='.md')[1])
     try:
@@ -77,6 +116,7 @@ def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: i
                 '--export-markdown', str(markdown),
             ],
             check = True,
+            env   = env,
         )
         print(f'\n{BOLD}Paste-ready:{RESET}\n')
         print(markdown.read_text().strip())
@@ -94,18 +134,19 @@ class Stats:
     min_ms:   float
 
     @classmethod
-    def measure(cls, script: Path, runs: int, warmup: int) -> Stats:
+    def measure(cls, script: Path, runs: int, warmup: int,
+                input_data: bytes | None = None, env: dict[str, str] | None = None) -> Stats:
         'Time `runs` subprocess invocations after `warmup` throwaway runs.'
         from time import perf_counter
 
-        data = INPUT_JSON.read_bytes()
+        data = input_data if input_data is not None else INPUT_JSON.read_bytes()
         argv = ['python3', str(script)]
         for _ in range(warmup):
-            subprocess.run(argv, input=data, capture_output=True, check=True)
+            subprocess.run(argv, input=data, capture_output=True, check=True, env=env)
         samples: list[float] = []
         for _ in range(runs):
             start = perf_counter()
-            subprocess.run(argv, input=data, capture_output=True, check=True)
+            subprocess.run(argv, input=data, capture_output=True, check=True, env=env)
             samples.append((perf_counter() - start) * 1000)
         return cls(
             mean_ms  = statistics.mean(samples),
@@ -126,12 +167,13 @@ def comparison(base_label: str, base: Stats, head: Stats) -> str:
     return f'{BOLD}{slower_label} ran {ratio:.2f} ± {ratio * rel:.2f} times slower than {faster_label}{RESET}'
 
 
-def run_python(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int) -> int:
+def run_python(base_script: Path, head_script: Path, base_label: str, runs: int, warmup: int,
+               input_data: bytes | None = None, env: dict[str, str] | None = None) -> int:
     'Time both commands with the stdlib fallback and print a markdown table.'
     print(f'{DIM}timing {base_label}…{RESET}', file=sys.stderr)
-    base = Stats.measure(base_script, runs, warmup)
+    base = Stats.measure(base_script, runs, warmup, input_data, env)
     print(f'{DIM}timing PR…{RESET}', file=sys.stderr)
-    head = Stats.measure(head_script, runs, warmup)
+    head = Stats.measure(head_script, runs, warmup, input_data, env)
     rows = [
         '| Command | Mean [ms] | Min [ms] |',
         '|:--------|----------:|---------:|',
@@ -151,6 +193,9 @@ def parse_args() -> argparse.Namespace:
                         help='timer to use; auto picks hyperfine when available (default: auto)')
     parser.add_argument('--runs',   type=int, default=50, help='measured runs per command (default: 50)')
     parser.add_argument('--warmup', type=int, default=3, help='warmup runs per command (default: 3)')
+    parser.add_argument('--transcript-lines', type=int, default=0,
+                        help='bench against a generated N-line transcript under a temp CLAUDE_CONFIG_DIR '
+                             '(default: 0 = legacy 1.2KB fixture, which does not exercise transcript scanning)')
     return parser.parse_args()
 
 
@@ -165,17 +210,20 @@ def main() -> int:
         print(f'input fixture missing: {INPUT_JSON}', file=sys.stderr)
         return 1
 
+    tlines: int = args.transcript_lines
     use_hyperfine = timer == 'hyperfine' or (timer == 'auto' and shutil.which('hyperfine') is not None)
-    if not use_hyperfine and timer != 'python':
+    if tlines > 0:
+        use_hyperfine = False  # the realistic scenario needs a custom stdin + env; use the python timer
+    if not use_hyperfine and timer != 'python' and tlines == 0:
         print(f'{YELLOW}{HYPERFINE_HINT}{RESET}\n', file=sys.stderr)
 
     try:
-        with base_worktree(base) as tree:
+        with base_worktree(base) as tree, scenario(tlines) as (input_data, env):
             base_script = tree / STATUSLINE
             head_script = REPO_ROOT / STATUSLINE
             if use_hyperfine:
-                return run_hyperfine(base_script, head_script, base, runs, warmup)
-            return run_python(base_script, head_script, base, runs, warmup)
+                return run_hyperfine(base_script, head_script, base, runs, warmup, env)
+            return run_python(base_script, head_script, base, runs, warmup, input_data, env)
     except subprocess.CalledProcessError as exc:
         print(f'benchmark failed: {shlex.join(exc.cmd)} exited {exc.returncode}', file=sys.stderr)
         return 1

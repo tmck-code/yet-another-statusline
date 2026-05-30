@@ -1,4 +1,5 @@
 """Tests for TokenRate.update and TokenRate.history (disk I/O parsers)."""
+import time
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,10 @@ def _write_row(path: Path, ts: float, session_id: str, total_in: int, total_out:
 
 def setup_rate(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> Path:
     """Patch time and constants to deterministic values; return log path."""
-    monkeypatch.setattr(sl, 'time', FakeTime)
+    # Patch time.time on the shared stdlib module so every module (statusline_command
+    # and accounting) sees the fake — replacing sl's local `time` binding only
+    # affects sl, not accounting's own `import time`.
+    monkeypatch.setattr(time, 'time', FakeTime.time)
     monkeypatch.setattr(sl.TokenRate, 'WINDOW', 60.0)
     monkeypatch.setattr(sl.TokenRate, 'KEEP', 300.0)
     return _log_path(tmp_home)
@@ -202,7 +206,10 @@ def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyP
 
 
 def test_recently_active_no_log(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    monkeypatch.setattr(sl, 'time', FakeTime)
+    # Patch time.time on the shared stdlib module so every module (statusline_command
+    # and accounting) sees the fake — replacing sl's local `time` binding only
+    # affects sl, not accounting's own `import time`.
+    monkeypatch.setattr(time, 'time', FakeTime.time)
     in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
     assert not in_a and not out_a
 

@@ -85,62 +85,68 @@ class Theme:
 CLAUDE_DARK = Theme(
     name        = 'claude-dark',
 
+    # High-contrast MONOCHROME (grayscale): primary content bright (250–255),
+    # secondary mid (244–248), structure dark (238–240). No hue — level/urgency
+    # is read from brightness + fill amount, not colour.
     border      = fg256(244),
     border_off  = fg256(242),
-    pwd         = fg256(75),
-    branch      = fg256(114),
+    pwd         = fg256(252),
+    branch      = fg256(248),
     commit      = fg256(244),
     session     = fg256(244),
-    skills      = fg256(222),
+    skills      = fg256(250),
     time        = fg256(244),
-    tok         = fg256(116),
+    tok         = fg256(252),
     tok_dim     = fg256(244),
-    tok_day     = fg256(109),
+    tok_day     = fg256(246),
     tok_day_dim = fg256(240),
-    cost        = fg256(210),
-    bar_fill    = fg256(114),
+    cost        = fg256(252),
+    bar_fill    = fg256(252),
     bar_empty   = fg256(238),
-    dim_green   = fg256(77),
+    dim_green   = fg256(246),
     label       = fg256(244),
-    ctx         = fg256(216),
-    ctx_dim     = fg256(248),
+    ctx         = fg256(252),
+    ctx_dim     = fg256(246),
     white_brt   = fg256(15),
-    arrow       = fg256(46),
-    dirty       = fg256(214),
-    icon_path   = fg256(117),
-    tok_icon    = fg256(11),
-    model       = fg256(183),
+    arrow       = fg256(248),
+    dirty       = fg256(253),
+    icon_path   = fg256(250),
+    tok_icon    = fg256(250),
+    model       = fg256(252),
 
-    safe        = fg256(114),
-    warn        = fg256(214),
-    alert       = fg256(167),
-    yellow      = fg256(226),
-    tok_arrow   = fg256(226),
+    safe        = fg256(245),   # context/cost fill: calm mid-grey when low
+    warn        = fg256(250),   # brighter as it fills
+    alert       = fg256(231),   # near-full → brightest white (reserved for alert)
+    yellow      = fg256(252),
+    tok_arrow   = fg256(252),
 
+    # Monochrome pills: all light-grey (dark text flips on via per-cell luminance);
+    # model identity is read from the pill *text*, not colour. Subtle brightness
+    # spread keeps the four tiers faintly distinguishable.
     models = {
         'opus':   ModelColors(
-            anchor     = (255, 255,   0),
-            warm_shift = (255, 165,   0),
-            cool_shift = (180, 230,  60),
-            label      = fg256(226),
+            anchor     = (205, 205, 205),
+            warm_shift = (230, 230, 230),
+            cool_shift = (180, 180, 180),
+            label      = fg256(252),
         ),
         'sonnet': ModelColors(
-            anchor     = (135, 215, 135),
-            warm_shift = ( 44, 208, 168),
-            cool_shift = ( 44, 140,  80),
-            label      = fg256(114),
+            anchor     = (190, 190, 190),
+            warm_shift = (215, 215, 215),
+            cool_shift = (165, 165, 165),
+            label      = fg256(250),
         ),
         'haiku':  ModelColors(
-            anchor     = ( 95, 175, 255),
-            warm_shift = (123, 230, 255),
-            cool_shift = ( 74, 110, 224),
-            label      = fg256(75),
+            anchor     = (175, 175, 175),
+            warm_shift = (200, 200, 200),
+            cool_shift = (150, 150, 150),
+            label      = fg256(248),
         ),
         'other':  ModelColors(
-            anchor     = (215, 175, 255),
-            warm_shift = (240, 165, 224),
-            cool_shift = (138, 111, 214),
-            label      = fg256(183),
+            anchor     = (160, 160, 160),
+            warm_shift = (185, 185, 185),
+            cool_shift = (140, 140, 140),
+            label      = fg256(246),
         ),
     },
 
@@ -148,33 +154,35 @@ CLAUDE_DARK = Theme(
     pill_fg_light = (235, 235, 235),
 
     grad_stops = (
-        (0.00, ( 40, 210,  80)),
-        (0.25, (240, 230,  20)),
-        (0.50, (255, 140,  20)),
-        (0.75, (220,  40,  50)),
-        (1.00, (170,  60, 210)),
+        # Monochrome bar: a subtle light-grey ramp (no hue). Fill *amount* carries
+        # the signal; the gradient just gives the blocks a faint high-contrast sheen.
+        (0.00, (200, 200, 200)),
+        (1.00, (245, 245, 245)),
     ),
     grey_rgb    = (108, 108, 108),
     spark_stops = (
-        (0.00, (179,  46,  32)),
-        (0.50, (200,  55,  40)),
-        (1.00, (204,  65,  51)),
+        # Rate sparkline: dim→bright grey ramp (taller = brighter).
+        (0.00, ( 96,  96,  96)),
+        (0.50, (168, 168, 168)),
+        (1.00, (240, 240, 240)),
     ),
     spec_gradients = (
-        (( 20,  60, 200), ( 20, 180, 240), (100, 240, 255)),  # Ocean
-        ((200,  80,  10), (245,  30, 100), (255, 160,  80)),  # Sunset
-        (( 10, 120,  40), ( 80, 210,  20), (200, 255,  60)),  # Forest
-        (( 80,  20, 200), (160,  60, 255), (220, 160, 255)),  # Lavender
-        ((160,  20,  10), (240, 120,  10), (255, 220,  30)),  # Ember
-        (( 20,  80, 160), ( 60, 180, 240), (210, 240, 255)),  # Arctic
-        ((120,  50,  10), (200, 120,  20), (255, 200,  80)),  # Copper
-        ((160,  10,  50), (240,  60, 130), (255, 180, 210)),  # Rose
-        (( 10, 110,  90), ( 20, 210, 150), (120, 255, 200)),  # Mint
-        (( 50,  10, 160), (180,  20, 220), (255, 100, 240)),  # Nebula
-        ((140,  10, 180), ( 40, 100, 255), ( 20, 220, 200)),  # Aurora
-        ((200, 160,  10), (240,  80,  20), (180,  20,  80)),  # Volcano
+        # Monochrome: subagent spectrum bars as grey ramps (subtle brightness
+        # spread for per-row distinction; no hue).
+        (( 96,  96,  96), (150, 150, 150), (220, 220, 220)),
+        ((112, 112, 112), (168, 168, 168), (236, 236, 236)),
+        (( 80,  80,  80), (136, 136, 136), (208, 208, 208)),
+        ((120, 120, 120), (176, 176, 176), (244, 244, 244)),
+        (( 72,  72,  72), (128, 128, 128), (200, 200, 200)),
+        ((104, 104, 104), (160, 160, 160), (228, 228, 228)),
+        (( 88,  88,  88), (144, 144, 144), (216, 216, 216)),
+        ((128, 128, 128), (184, 184, 184), (248, 248, 248)),
+        (( 64,  64,  64), (120, 120, 120), (192, 192, 192)),
+        ((112, 112, 112), (172, 172, 172), (240, 240, 240)),
+        (( 96,  96,  96), (152, 152, 152), (224, 224, 224)),
+        ((120, 120, 120), (180, 180, 180), (236, 236, 236)),
     ),
-    spec_empty_ansi = fg256(233),
+    spec_empty_ansi = fg256(236),
 )
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import statusline_command as sl
+from statusline import clock
 
 THEMES   = sl.THEMES
 Theme    = sl.Theme
@@ -142,7 +143,11 @@ class _FrozenDatetime:
 @pytest.fixture
 def frozen(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(sl.time, 'time', lambda: float(FROZEN_EPOCH))
-    monkeypatch.setattr(sl, 'datetime', _FrozenDatetime)
+    # `clock.now` is the canonical wall-clock singleton — patching it here means
+    # every module across the package (statusline_command and future submodules
+    # like accounting/transcript) sees the frozen time, without per-module
+    # patches. `datetime.fromtimestamp` is deterministic so it isn't patched.
+    monkeypatch.setattr(clock, 'now', _FrozenDatetime.now)
     yield
 
 

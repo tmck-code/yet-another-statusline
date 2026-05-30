@@ -1,4 +1,5 @@
 """Tests for GitInfo._find_repo, _read_head, and from_cwd."""
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -102,3 +103,138 @@ def test_from_cwd_real_repo(tmp_path: Path) -> None:
     result = sl.GitInfo.from_cwd(str(tmp_path))
     assert result.modified == 1
     assert result.untracked == 1
+
+
+# --- G2: branch namespace preserved ------------------------------------------
+
+def test_read_head_preserves_branch_namespace(tmp_path: Path) -> None:
+    """A 'feature/foo' branch keeps its namespace instead of collapsing to 'foo'."""
+    gitdir = tmp_path / '.git'
+    (gitdir / 'refs' / 'heads' / 'feature').mkdir(parents=True)
+    (gitdir / 'HEAD').write_text('ref: refs/heads/feature/foo\n')
+    (gitdir / 'refs' / 'heads' / 'feature' / 'foo').write_text('deadbeef0000\n')
+
+    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    assert branch == 'feature/foo'
+    assert commit == 'deadbeef0'
+
+
+# --- G1: packed-refs commit lookup -------------------------------------------
+
+def test_read_head_packed_refs_commit(tmp_path: Path) -> None:
+    """Commit is resolved from packed-refs when there is no loose ref file."""
+    gitdir = tmp_path / '.git'
+    gitdir.mkdir()
+    (gitdir / 'HEAD').write_text('ref: refs/heads/main\n')
+    (gitdir / 'packed-refs').write_text(
+        '# pack-refs with: peeled fully-peeled sorted\n'
+        'cafebabe1234567890 refs/heads/main\n'
+    )
+
+    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    assert branch == 'main'
+    assert commit == 'cafebabe1'
+
+
+# --- G1: linked worktree (.git is a FILE pointing at the worktree gitdir) -----
+
+def test_find_repo_and_head_resolve_worktree(tmp_path: Path) -> None:
+    """A worktree's `.git` file resolves to its gitdir; HEAD + commit (via the
+    common dir) populate instead of going blank."""
+    main_gitdir = tmp_path / 'main' / '.git'
+    (main_gitdir / 'refs' / 'heads').mkdir(parents=True)
+    (main_gitdir / 'refs' / 'heads' / 'wtbranch').write_text('abc123def456\n')
+
+    wt_gitdir = main_gitdir / 'worktrees' / 'wt'
+    wt_gitdir.mkdir(parents=True)
+    (wt_gitdir / 'HEAD').write_text('ref: refs/heads/wtbranch\n')
+    (wt_gitdir / 'commondir').write_text('../..\n')  # -> main/.git
+
+    wt = tmp_path / 'wt'
+    wt.mkdir()
+    (wt / '.git').write_text(f'gitdir: {wt_gitdir}\n')
+
+    repo, gd = sl.GitInfo._find_repo(str(wt))
+    assert repo == str(wt)
+    assert gd == str(wt_gitdir.resolve())
+
+    branch, commit = sl.GitInfo._read_head(gd)
+    assert branch == 'wtbranch'
+    assert commit == 'abc123def'
+
+
+def test_resolve_gitdir_malformed_file_returns_empty(tmp_path: Path) -> None:
+    """A `.git` file without a gitdir: pointer resolves to '' (graceful)."""
+    (tmp_path / '.git').write_text('garbage\n')
+    repo, gd = sl.GitInfo._find_repo(str(tmp_path))
+    assert repo == str(tmp_path)
+    assert gd == ''
+    # _read_head('') is empty, so from_cwd stays blank rather than crashing.
+    assert sl.GitInfo._read_head(gd) == ('', '')
+
+
+# --- P5: per-session git-status (dirty) cache --------------------------------
+
+def _dirty_spy(calls: dict) -> object:
+    def _dirty(repo: str) -> tuple[int, int, int, int]:
+        calls['n'] += 1
+        return (1, 2, 3, 4)
+    return _dirty
+
+
+def test_dirty_cache_hit_then_ttl_expiry(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 1                       # miss -> ran git, cached
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 1                       # hit -> no git
+
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0 + sl.GIT_CACHE_TTL + 1)
+    assert sl.GitInfo._dirty_cached('/repo', '/repo', 's1') == (1, 2, 3, 4)
+    assert calls['n'] == 2                       # expired -> ran git again
+
+
+def test_dirty_cache_cwd_mismatch_recomputes(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+    sl.GitInfo._dirty_cached('/repo', '/repo', 's1')
+    sl.GitInfo._dirty_cached('/repo', '/elsewhere', 's1')   # same session, different cwd
+    assert calls['n'] == 2
+
+
+def test_dirty_cache_disabled_without_session(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {'n': 0}
+    monkeypatch.setattr(sl.GitInfo, '_dirty', staticmethod(_dirty_spy(calls)))
+    sl.GitInfo._dirty_cached('/repo', '/repo', '')
+    sl.GitInfo._dirty_cached('/repo', '/repo', '')
+    assert calls['n'] == 2                       # no caching without a session id
+    assert not (tmp_home / '.claude' / 'statusline-git').exists()
+
+
+def test_from_cwd_branch_live_dirty_cached(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = tmp_home / 'repo'
+    gitdir = _make_git_dir(base, branch='main')
+    monkeypatch.setattr(sl.time, 'time', lambda: 1000.0)
+    cache = tmp_home / '.claude' / 'statusline-git' / 's1.json'
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({'v': 1, 'cwd': str(base), 'ts': 1000.0,
+                                 'modified': 5, 'untracked': 0, 'deleted': 0, 'renamed': 0}))
+
+    def _no_git(*a: object, **k: object) -> None:
+        raise AssertionError('git spawned despite a fresh dirty cache')
+    monkeypatch.setattr(sl.subprocess, 'run', _no_git)
+
+    g = sl.GitInfo.from_cwd(str(base), 's1')
+    assert g.branch == 'main' and g.modified == 5
+
+    # Switch branch in HEAD: branch must update immediately; dirty stays cached.
+    (gitdir / 'refs' / 'heads' / 'feature').mkdir(parents=True, exist_ok=True)
+    (gitdir / 'refs' / 'heads' / 'feature' / 'x').write_text('abc1234\n')
+    (gitdir / 'HEAD').write_text('ref: refs/heads/feature/x\n')
+    g2 = sl.GitInfo.from_cwd(str(base), 's1')
+    assert g2.branch == 'feature/x'   # live
+    assert g2.modified == 5            # cached

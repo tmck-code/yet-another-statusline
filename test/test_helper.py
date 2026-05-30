@@ -3,6 +3,7 @@ from datetime import datetime, timezone, tzinfo
 import pytest
 
 import statusline_command as sl
+from statusline import clock
 from helper import strip_ansi
 
 _visible_width = sl._visible_width
@@ -80,10 +81,12 @@ class TestBurndownTrend:
         out = self._trend(50.0 + delta, 150)
         assert self._r.gradient.gradient_color(0.5 + delta / 50.0) in out
 
-    def test_under_burn_greener_than_over_burn(self) -> None:
+    def test_over_burn_brighter_than_under_burn(self) -> None:
+        # Monochrome: burn pressure is read from brightness, not hue. Over-burn
+        # maps to a higher gradient position → a brighter (more alarming) grey.
         under = self._r.gradient.gradient_rgb(0.5 + (-20.0) / 50.0)
         over = self._r.gradient.gradient_rgb(0.5 + 20.0 / 50.0)
-        assert under[1] > over[1]  # under-burn keeps more green channel
+        assert over[1] > under[1]  # over-burn is brighter
 
 
 class TestHelperBurndownIntegration:
@@ -101,7 +104,7 @@ class TestHelperBurndownIntegration:
                     return fixed.astimezone(tz)
                 return fixed
 
-        monkeypatch.setattr(sl, 'datetime', _FakeDatetime)
+        monkeypatch.setattr(clock, 'now', _FakeDatetime.now)
         monkeypatch.setattr(sl.time, 'time', lambda: _NOW)
 
     def test_pre_warmup_no_trend(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,7 +174,7 @@ def test_helper_reset_in_future(monkeypatch: pytest.MonkeyPatch) -> None:
                 return fixed_now.astimezone(tz)
             return fixed_now
 
-    monkeypatch.setattr(sl, 'datetime', _FakeDatetime)
+    monkeypatch.setattr(clock, 'now', _FakeDatetime.now)
 
     future_ts = int(fixed_now.timestamp()) + 3600
     r = Renderer()

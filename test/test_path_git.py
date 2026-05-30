@@ -14,7 +14,7 @@ def test_path_git_clean_no_elapsed() -> None:
     assert '~/proj' in stripped
     assert 'main' in stripped
     assert 'abc1234' in stripped
-    assert '●' not in stripped
+    assert '•' not in stripped
     assert '*' not in stripped
     assert '[' not in stripped
 
@@ -45,7 +45,7 @@ def test_path_git_compact_no_commit_no_dirty() -> None:
     assert '~/proj' in stripped
     assert 'main' in stripped
     assert 'abc1234' not in stripped
-    assert '●' not in stripped
+    assert '•' not in stripped
     assert '*' not in stripped
 
 
@@ -83,7 +83,7 @@ class TestPathGitFlags:
         git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=2)
         out = r.path_git('~/proj', git, '5m', show_dirty=False)
         stripped = strip_ansi(out)
-        assert '●' not in stripped
+        assert '•' not in stripped
         assert '*' not in stripped
         assert 'abc1234' in stripped
         assert '[5m]' in stripped
@@ -133,7 +133,7 @@ class TestFitPath:
         target_w = _visible_width(clean)
         result = r.fit_path('~/p', git, '2m', target_w)
         assert _visible_width(result) <= target_w
-        assert '●' not in strip_ansi(result)
+        assert '•' not in strip_ansi(result)
 
     def test_compact_when_all_path_git_overflow(self) -> None:
         r = Renderer()

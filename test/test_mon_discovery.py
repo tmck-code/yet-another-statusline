@@ -268,17 +268,9 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
-
-        # run
-        result = discover(timedelta(minutes=10), now)
+        # run — inject roots directly (discover resolves from config.CLAUDE_DIR
+        # otherwise; explicit roots are the supported test seam since MON-1).
+        result = discover(timedelta(minutes=10), now, projects_root=projects, payloads_root=payloads)
 
         # expected
         assert len(result) == 1
@@ -300,17 +292,9 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
-
-        # run
-        result = discover(timedelta(minutes=10), now)
+        # run — inject roots directly (discover resolves from config.CLAUDE_DIR
+        # otherwise; explicit roots are the supported test seam since MON-1).
+        result = discover(timedelta(minutes=10), now, projects_root=projects, payloads_root=payloads)
 
         # expected
         expected: list = []
@@ -334,17 +318,9 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
-
-        # run
-        result = discover(timedelta(minutes=10), now)
+        # run — inject roots directly (discover resolves from config.CLAUDE_DIR
+        # otherwise; explicit roots are the supported test seam since MON-1).
+        result = discover(timedelta(minutes=10), now, projects_root=projects, payloads_root=payloads)
 
         # expected
         expected: list = []
@@ -380,17 +356,9 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
-
-        # run
-        result = discover(timedelta(minutes=10), now)
+        # run — inject roots directly (discover resolves from config.CLAUDE_DIR
+        # otherwise; explicit roots are the supported test seam since MON-1).
+        result = discover(timedelta(minutes=10), now, projects_root=projects, payloads_root=payloads)
 
         # expected sort: (/alpha, sess-a), (/alpha, sess-m), (/beta, sess-z)
         expected_ids = ['sess-a', 'sess-m', 'sess-z']
@@ -416,17 +384,9 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
-
-        # run
-        result = discover(timedelta(minutes=10), now)
+        # run — inject roots directly (discover resolves from config.CLAUDE_DIR
+        # otherwise; explicit roots are the supported test seam since MON-1).
+        result = discover(timedelta(minutes=10), now, projects_root=projects, payloads_root=payloads)
         s = result[0]
 
         # expected jsonl_mtime roughly now - 300
@@ -438,3 +398,27 @@ class TestDiscover:
         assert abs(s.jsonl_mtime - expected_jsonl_mtime_approx) < 2.0
         assert isinstance(s.jsonl_path, Path)
         assert isinstance(s.payload_mtime, float)
+
+    def test_discover_resolves_roots_from_config_claude_dir(
+        self, tmp_home: Path
+    ) -> None:
+        """MON-1: with NO root kwargs, discover() must resolve projects/ and
+        statusline-output/ from config.CLAUDE_DIR (which tmp_home patches),
+        honouring CLAUDE_CONFIG_DIR. Previously it hardcoded ~/.claude, so any
+        custom-config-dir user saw zero sessions. The renderer writes payloads
+        under config.CLAUDE_DIR, so mon must read from the same place."""
+        from statusline import config
+        now = datetime(2024, 6, 1, 10, 0, 0)
+        base = config.CLAUDE_DIR
+        projects = base / 'projects'
+        payloads = base / 'statusline-output'
+        projects.mkdir(parents=True)
+        payloads.mkdir(parents=True)
+        jsonl = _write_jsonl(projects, 'proj-a', 'sess-cfg')
+        _set_mtime(jsonl, now.timestamp() - 60)
+        _write_payload(payloads, 'sess-cfg', {'session_id': 'sess-cfg', 'cwd': '/x'})
+
+        # No projects_root / payloads_root — must fall back to config.CLAUDE_DIR.
+        result = discover(timedelta(minutes=10), now)
+
+        assert [s.session_id for s in result] == ['sess-cfg']

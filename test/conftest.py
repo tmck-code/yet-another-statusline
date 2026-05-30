@@ -18,7 +18,6 @@ if 'statusline_command' not in sys.modules:
     sys.modules['statusline_command'] = _mod
     _spec.loader.exec_module(_mod)
 
-import statusline_command as sl  # noqa: E402
 
 
 def _hooks_active() -> bool:
@@ -49,9 +48,11 @@ def strip_ansi_fixture() -> Callable[[str], str]:
 
 @pytest.fixture
 def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    # CLAUDE_DIR is a module-level constant frozen at import as HOME/'.claude'.
-    # Patching HOME alone leaves it pointing at the real ~/.claude, so source
-    # reads (token logs, subagents, theme, settings) would escape the sandbox.
-    monkeypatch.setattr(sl, 'HOME', tmp_path)
-    monkeypatch.setattr(sl, 'CLAUDE_DIR', tmp_path / '.claude')
+    # HOME / CLAUDE_DIR live in statusline.config (the canonical single source
+    # so every reader across every module sees the patched value via dynamic
+    # `config.X` attribute access). Patching `sl.X` would only reach refs that
+    # bound the name at import — none do now.
+    from statusline import config
+    monkeypatch.setattr(config, 'HOME', tmp_path)
+    monkeypatch.setattr(config, 'CLAUDE_DIR', tmp_path / '.claude')
     return tmp_path
