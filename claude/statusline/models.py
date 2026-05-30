@@ -270,12 +270,17 @@ class ContextWindow:
         used_pct = d.get('used_percentage')
         rem_pct  = d.get('remaining_percentage')
         return cls(
-            total_input_tokens   = _as_int(d.get('total_input_tokens', 0)),
-            total_output_tokens  = _as_int(d.get('total_output_tokens', 0)),
-            context_window_size  = _as_int(d.get('context_window_size', 0)),
+            # Floor at 0: a stray negative count (host glitch / post-/compact
+            # transient) must never produce a negative fill or overflow the bar
+            # (Audit CTX-NEG). NaN/Inf are already rejected by _as_int.
+            total_input_tokens   = max(0, _as_int(d.get('total_input_tokens', 0))),
+            total_output_tokens  = max(0, _as_int(d.get('total_output_tokens', 0))),
+            context_window_size  = max(0, _as_int(d.get('context_window_size', 0))),
             current_usage        = cu,
-            used_percentage      = float(used_pct) if isinstance(used_pct, (int, float)) else None,
-            remaining_percentage = float(rem_pct)  if isinstance(rem_pct,  (int, float)) else None,
+            # Finite-guard the pre-calc percentages: json.loads accepts NaN/Inf,
+            # which would poison the bar's clamp math (min/max propagate NaN).
+            used_percentage      = float(used_pct) if isinstance(used_pct, (int, float)) and math.isfinite(used_pct) else None,
+            remaining_percentage = float(rem_pct)  if isinstance(rem_pct,  (int, float)) and math.isfinite(rem_pct)  else None,
         )
 
 

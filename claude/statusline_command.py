@@ -1338,15 +1338,14 @@ class Renderer:
         return ''.join(parts)
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
-        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        # Real context-window fill, 0-100% -- never the old tokens/150K
-        # "pressure" number (which could read e.g. 524%). Fall back to the soft
-        # limit as the scale only when the model's window size is unknown.
-        scale      = ctx.context_window_size if ctx.context_window_size > 0 else SOFT_LIMIT
-        fill_ratio = min(total_tokens / scale, 1.0) if scale > 0 else 0.0
-        pct        = fill_ratio * 100
+        # Input-only fill, preferring the host's pre-calculated used_percentage so
+        # the headline agrees with Claude Code's /context (Audit DATA-1/DATA-2).
+        # The token count shown matches: total_input_tokens (which already
+        # includes cache), NOT input+output.
+        fill_ratio, pct = context_fill(ctx)
+        shown_tokens    = max(0, ctx.total_input_tokens)
         clr        = self.fill_colour(pct)
-        prefix = f'{clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R} {clr}{BOLD}{pct:.0f}%{self.R} '
+        prefix = f'{clr}{self.R}{self.DIM_GREEN}{fmt_tok(shown_tokens)}{self.R} {clr}{BOLD}{pct:.0f}%{self.R} '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -1355,10 +1354,7 @@ class Renderer:
 
 
     def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
-        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        scale      = ctx.context_window_size if ctx.context_window_size > 0 else SOFT_LIMIT
-        fill_ratio = min(total_tokens / scale, 1.0) if scale > 0 else 0.0
-        pct        = fill_ratio * 100
+        fill_ratio, pct = context_fill(ctx)  # input-only, prefers used_percentage (Audit DATA-1)
         clr        = self.fill_colour(pct)
         prefix  = f'{clr}{BOLD}{pct:.0f}%{self.R} '
         bar_w   = max(4, available - _visible_width(prefix) - 3)
@@ -1497,10 +1493,28 @@ class LayoutSpec:
     rows: list[RowSpec] = field(default_factory=list)
 
 
+def context_fill(ctx: ContextWindow) -> tuple[float, float]:
+    '''Context-window fill as (ratio 0..1, percent 0..100), input-only.
+
+    Prefers the host's pre-calculated context_window.used_percentage — it is
+    authoritative, input-only, and matches Claude Code's own /context readout.
+    Falls back to an input-only manual calc (total_input_tokens already includes
+    cache reads + writes; output_tokens is deliberately excluded, exactly as the
+    official used_percentage is) when the host value is null — which happens early
+    in a session and right after /compact. Clamped to [0, 100] so a stray
+    negative/over-range value can never overflow the bar or print a negative %.
+    '''
+    pct = ctx.used_percentage
+    if pct is None:
+        scale = ctx.context_window_size if ctx.context_window_size > 0 else SOFT_LIMIT
+        pct   = (100.0 * max(0, ctx.total_input_tokens) / scale) if scale > 0 else 0.0
+    pct = max(0.0, min(100.0, float(pct)))
+    return pct / 100.0, pct
+
+
 def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill, _      = context_fill(ctx)  # box border gradient tracks the same input-only fill as the context bar (Audit DATA-1)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -1546,8 +1560,7 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
 def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill, _      = context_fill(ctx)  # box border gradient tracks the same input-only fill as the context bar (Audit DATA-1)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -1605,8 +1618,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
 def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill, _      = context_fill(ctx)  # box border gradient tracks the same input-only fill as the context bar (Audit DATA-1)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
