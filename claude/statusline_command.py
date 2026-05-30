@@ -1661,7 +1661,11 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         + sum(s.total_input + s.output for s in subagents.subagents)
     )
     tasks         = TaskList.from_session(session.transcript_path)
-    elapsed       = elapsed_from_transcript(session.transcript_path)
+    # Session duration from the host's authoritative wall clock (cost.total_duration_ms,
+    # Audit DATA-5) — not the transcript file's mtime, which measured time-since-last-
+    # write (a staleness/idle metric), drifted between writes, and forced a stat() on
+    # the hot path. 0 (before the first API response) -> '' so the path tail stays hidden.
+    elapsed       = fmt_dur(session.cost.total_duration_ms / 1000) if session.cost.total_duration_ms > 0 else ''
 
     git          = GitInfo.from_cwd(session.cwd, session.session_id)
     helper_text, right_text, right_w = r.model_right_section(
