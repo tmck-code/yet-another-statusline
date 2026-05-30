@@ -12,6 +12,21 @@ from pathlib import Path
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
+# Untrusted-string sanitizer. Strips C0/C1 control bytes and DEL so attacker-
+# authored field values (git branch, model name, transcript/subagent content,
+# repo settings keys) cannot inject terminal escapes (OSC-52 clipboard write,
+# OSC-0/2 title spoof) or newline-based extra rows into the rendered statusline.
+# ESC (0x1b), BEL (0x07), CR/LF/TAB and the 8-bit C1 introducers all fall in
+# this class. Apply at the point a field is CAPTURED from an untrusted source,
+# never to the final rendered line (which legitimately carries the renderer's
+# own SGR colour codes).
+_CTRL_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+
+
+def _sanitize(s: str) -> str:
+    'Strip C0/C1 control characters and DEL from an untrusted string.'
+    return _CTRL_RE.sub('', s)
+
 
 def _atomic_write_text(path: Path, text: str) -> None:
     '''Best-effort atomic write: write to a sibling temp file, then os.replace

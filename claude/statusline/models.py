@@ -16,12 +16,13 @@ block lets mypy resolve them without a circular import.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from statusline import config
+from statusline.textutil import _sanitize
 
 if TYPE_CHECKING:
     from statusline.accounting import TokenLog
@@ -105,19 +106,22 @@ def _as_int(v: object, default: int = 0) -> int:
     if isinstance(v, int):
         return v
     if isinstance(v, float):
-        return int(v)
+        # json.loads accepts NaN/Infinity by default; int(nan) raises ValueError
+        # and int(inf) raises OverflowError, which would crash the whole render.
+        return int(v) if math.isfinite(v) else default
     return default
 
 
 def _as_float(v: object, default: float = 0.0) -> float:
     if isinstance(v, (int, float)):
-        return float(v)
+        f = float(v)
+        return f if math.isfinite(f) else default  # reject NaN/Infinity (see _as_int)
     return default
 
 
 def _as_str(v: object, default: str = '') -> str:
     if isinstance(v, str):
-        return v
+        return _sanitize(v)  # strip control chars: untrusted field -> rendered line (terminal-escape injection)
     return default
 
 
@@ -213,20 +217,20 @@ class Workspace:
     @property
     def plugins(self) -> str:
         seen: dict[str, None] = {}
-        candidates = [config.CLAUDE_DIR / 'settings.json']
-        if self.project_dir:
-            candidates.append(Path(self.project_dir) / '.claude' / 'settings.json')
-        for sf in candidates:
-            if not sf.is_file():
-                continue
+        # SEC: read only the user's own (trusted) global settings. A cloned repo's
+        # project_dir/.claude/settings.json is attacker-authored content; rendering
+        # its enabledPlugins keys is both an unexpected trust-boundary read and a
+        # terminal-escape injection sink, for near-zero value. (Audit SEC-2.)
+        sf = config.CLAUDE_DIR / 'settings.json'
+        if sf.is_file():
             try:
                 data = json.loads(sf.read_text())
             except Exception:
-                continue
+                data = {}
             for key, val in (data.get('enabledPlugins') or {}).items():
                 if val is True:
-                    name = key.split('@', 1)[0]
-                    if name not in seen:
+                    name = _sanitize(key.split('@', 1)[0])
+                    if name and name not in seen:
                         seen[name] = None
         return ','.join(seen.keys())
 
@@ -309,6 +313,8 @@ class SessionInfo:
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> SessionInfo:
+        if not isinstance(d, dict):  # defence-in-depth: render(non-dict stdin) must not crash
+            d = {}
         def _dict(key: str) -> dict[str, object]:
             v = d.get(key)
             return v if isinstance(v, dict) else {}
@@ -317,9 +323,9 @@ class SessionInfo:
         cwd             = d.get('cwd', '')
         version         = d.get('version', '')
         return cls(
-            session_id          = str(session_id)      if session_id      is not None else '',
+            session_id          = _sanitize(str(session_id)) if session_id is not None else '',
             transcript_path     = str(transcript_path) if transcript_path is not None else '',
-            cwd                 = str(cwd)             if cwd             is not None else '',
+            cwd                 = _sanitize(str(cwd))        if cwd        is not None else '',
             model               = Model.from_dict(d.get('model') or {}),
             workspace           = Workspace.from_dict(_dict('workspace')),
             version             = str(version)         if version         is not None else '',

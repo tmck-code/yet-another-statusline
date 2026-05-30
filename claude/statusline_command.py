@@ -1806,7 +1806,15 @@ def main() -> None:
         elif a.startswith('--theme='):
             theme_name = a.split('=', 1)[1]
 
-    info  = json.loads(sys.stdin.read())
+    # A crashed statusLine command blanks the line entirely, so never let bad
+    # stdin escape. Empty/invalid JSON -> {}; non-object JSON ([], 123, "s",
+    # null, NaN, ...) parses but has no .get() -> {} too. (Audit ROB-1.)
+    try:
+        info = json.loads(sys.stdin.read())
+    except (ValueError, OSError):
+        info = {}
+    if not isinstance(info, dict):
+        info = {}
     theme = resolve_theme(theme_name)
 
     # Write payload so the multi-session observer can index it. Keyed by
@@ -1815,7 +1823,8 @@ def main() -> None:
     # to the newest payload per session (mon/discovery.index_payloads_by_session),
     # so the old timestamped filenames only ever accumulated dead weight.
     session_id = _as_str(info.get('session_id')) or 'unknown'
-    _atomic_write_text(config.CLAUDE_DIR / 'statusline-output' / f'statusline.{session_id}.json', json.dumps(info))
+    if info:  # skip on the crash-recovery {} so a bad render never clobbers the last good payload
+        _atomic_write_text(config.CLAUDE_DIR / 'statusline-output' / f'statusline.{session_id}.json', json.dumps(info))
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:

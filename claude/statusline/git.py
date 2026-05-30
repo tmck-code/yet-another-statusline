@@ -24,7 +24,7 @@ from pathlib import Path
 
 from statusline import config
 from statusline.models import _as_int
-from statusline.textutil import _atomic_write_text
+from statusline.textutil import _atomic_write_text, _sanitize
 
 
 try:
@@ -46,6 +46,7 @@ class GitInfo:
     def from_cwd(cls, cwd: str, session_id: str = '') -> GitInfo:
         repo, gitdir   = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)   # always live, so a branch switch shows immediately
+        branch, commit = _sanitize(branch), _sanitize(commit)  # untrusted .git contents -> rendered line
         modified = untracked = deleted = renamed = 0
         if branch:
             modified, untracked, deleted, renamed = cls._dirty_cached(repo, cwd, session_id)
