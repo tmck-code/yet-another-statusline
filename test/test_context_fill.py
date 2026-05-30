@@ -80,3 +80,42 @@ def test_context_line_renders_input_only_percentage():
     plain = re.sub(r'\x1b\[[0-9;]*m', '', line)
     assert '25%' in plain          # 50000/200000, not 58000/200000 (29%)
     assert '29%' not in plain
+
+
+def _wide_plain(payload):
+    import re
+    return re.sub(r'\x1b\[[0-9;]*m', '', sl.render(payload, 130, theme=sl.CLAUDE_DARK))
+
+
+def test_exceeds_200k_badge_shown_when_flag_set():
+    # DATA-4: on a 1M window 250k tokens is only ~25% fill (bar reads "safe"),
+    # but the host's fixed-threshold exceeds_200k_tokens flag must surface a
+    # distinct warning badge.
+    out = _wide_plain({
+        'session_id': 's', 'model': {'display_name': 'Opus 4.1'},
+        'workspace': {'current_dir': '/tmp/p'}, 'exceeds_200k_tokens': True,
+        'context_window': {'total_input_tokens': 250000, 'context_window_size': 1000000},
+    })
+    assert '!200K' in out
+
+
+def test_exceeds_200k_badge_absent_when_flag_unset():
+    out = _wide_plain({
+        'session_id': 's', 'model': {'display_name': 'Opus 4.1'},
+        'workspace': {'current_dir': '/tmp/p'}, 'exceeds_200k_tokens': False,
+        'context_window': {'total_input_tokens': 250000, 'context_window_size': 1000000},
+    })
+    assert '!200K' not in out
+
+
+def test_exceeds_200k_badge_never_overflows_box():
+    payload = {
+        'session_id': 's', 'model': {'display_name': 'Opus 4.1'},
+        'workspace': {'current_dir': '/tmp/p'}, 'exceeds_200k_tokens': True,
+        'context_window': {'total_input_tokens': 250000, 'context_window_size': 1000000},
+    }
+    for w in (90, 110, 130, 140):
+        import re
+        out = re.sub(r'\x1b\[[0-9;]*m', '', sl.render(payload, w, theme=sl.CLAUDE_DARK))
+        for line in out.splitlines():
+            assert sl._visible_width(line) <= w, f'overflow at width {w}'

@@ -202,6 +202,7 @@ GLYPH_CONTINUATION = '\u2514'                        # box up-right (universal)
 GLYPH_REPLYING     = _glyph('\u2026', '\U000f0189') # ellipsis replying state
 GLYPH_HOURGLASS    = _glyph('\u25f7', '\uf253')     # arc      subagent context size
 GLYPH_PIE          = _glyph('\u25d4', '\uf200')     # pie      subagent session share
+GLYPH_OVER_CAP     = _glyph('!', '\uf071')          # bang     exceeds_200k_tokens warning (universal '!')
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -1360,7 +1361,7 @@ class Renderer:
             parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
         return ''.join(parts)
 
-    def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
+    def context_line(self, ctx: ContextWindow, available: int = 76, *, over_cap: bool = False) -> str:
         # Input-only fill, preferring the host's pre-calculated used_percentage so
         # the headline agrees with Claude Code's /context (Audit DATA-1/DATA-2).
         # The token count shown matches: total_input_tokens (which already
@@ -1368,7 +1369,13 @@ class Renderer:
         fill_ratio, pct = context_fill(ctx)
         shown_tokens    = max(0, ctx.total_input_tokens)
         clr        = self.fill_colour(pct)
-        prefix = f'{clr}{self.R}{self.DIM_GREEN}{fmt_tok(shown_tokens)}{self.R} {clr}{BOLD}{pct:.0f}%{self.R} '
+        # exceeds_200k_tokens is a fixed-threshold host flag (total incl. output
+        # past 200k) — distinct from window-relative fill, and most useful on
+        # extended (1M) windows where 200k is only ~20% fill so the bar still reads
+        # "safe". Show it as a separate alert badge, never by flooring fill_colour
+        # (the two quantities differ). (Audit DATA-4.)
+        badge = f'{self.alert}{BOLD}{GLYPH_OVER_CAP}200K{self.R} ' if over_cap else ''
+        prefix = f'{clr}{self.R}{self.DIM_GREEN}{fmt_tok(shown_tokens)}{self.R} {clr}{BOLD}{pct:.0f}%{self.R} {badge}'
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -1686,7 +1693,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
 
-    line_context = r.context_line(ctx, width - 3)
+    line_context = r.context_line(ctx, width - 3, over_cap=session.exceeds_200k_tokens)
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
