@@ -921,13 +921,23 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
-    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False, max_width: int = 0) -> tuple[str, str, int]:
         step      = rainbow_step()
         c_think   = rainbow_at(step, 0)
         c_helper  = rainbow_at(step, 9)
-        model_clr = self.model_colour(model_name)
+        model_clr = self.model_colour(model_name)  # colour/anchor key off the ORIGINAL name
         pct       = self._model_bg_pct(effort_level)
         glyph     = GLYPH_BURN_FAST if fast_mode else GLYPH_THINKING
+
+        # Cap the displayed name so a long model.display_name can't blow out the
+        # box (and drive the caller's target_w negative). The fixed overhead
+        # covers the model glyph + its two spaces, plus the thinking suffix
+        # (space + glyph + two spaces + text) when present. max_width==0 keeps
+        # the legacy unbounded behaviour. (Audit MODELW.)
+        name = model_name
+        if max_width > 0:
+            overhead = 3 + ((4 + _visible_width(model_thinking)) if model_thinking else 0)
+            name = _middle_ellipsis(model_name, max(3, max_width - overhead))
 
         if pct:
             anchor, shift = self._model_anchor_pair(model_name)
@@ -935,7 +945,7 @@ class Renderer:
             cells.append((GLYPH_MODEL,    anchor, False, False))
             cells.append((' ',            anchor, False, False))
             cells.append((' ',            anchor, False, False))
-            for ch in model_name:
+            for ch in name:
                 cells.append((ch, anchor, False, False))
             cells.append((' ',            anchor, False, False))
             cells.append((glyph,          anchor, True,  False))
@@ -948,9 +958,9 @@ class Renderer:
             pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
             right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
         elif model_thinking:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+            right_text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
         else:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
+            right_text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
 
         right_w = _visible_width(right_text)
 
@@ -1658,6 +1668,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
+        max_width=max(8, width // 2),  # cap the model name so it can't overrun the box (Audit MODELW)
     )
     line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,

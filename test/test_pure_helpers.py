@@ -43,9 +43,11 @@ class TestIsWide:
     def test_ascii_not_wide(self) -> None:
         assert sl._is_wide('a') is False
 
-    def test_cjk_not_wide(self) -> None:
-        # CJK ideograph — outside the emoji block this function covers
-        assert sl._is_wide('中') is False
+    def test_cjk_is_wide(self) -> None:
+        # CJK ideographs are East-Asian Wide (2 cells). The renderer used to
+        # treat only the emoji block as wide and under-counted these, overflowing
+        # the box on any CJK cwd/branch/model (Audit CWIDTH).
+        assert sl._is_wide('中') is True
 
     def test_emoji_is_wide(self) -> None:
         assert sl._is_wide('🎨') is True

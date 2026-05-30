@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
@@ -44,18 +45,38 @@ def _atomic_write_text(path: Path, text: str) -> None:
         pass
 
 
-def _is_wide(ch: str) -> bool:
+def _char_width(ch: str) -> int:
+    '''Display columns for a single character: 0, 1, or 2.
+
+    Combining marks and format chars (ZWJ, variation selectors, BiDi controls)
+    occupy no cell. East-Asian Wide/Fullwidth characters (CJK, Hangul,
+    fullwidth forms) and emoji occupy two. Everything else is one. Previously
+    only the emoji block was treated as wide, so CJK/fullwidth/Hangul in a cwd,
+    branch, model, or session name under-counted and overflowed the box (Audit
+    CWIDTH). Residual limits (per-codepoint, so unresolvable here): ZWJ emoji
+    sequences, regional-indicator flag pairs, and U+FE0F-promoted glyphs.'''
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ('Mn', 'Me', 'Cf'):
+        return 0
     cp = ord(ch)
     # Supplemental Arrows-C (U+1F800-U+1F8FF) are EAW=N despite being in the
-    # emoji range — exclude them so arrow icons like 🡅/🡇 count as 1 col.
+    # emoji range — keep arrow icons like 🡅/🡇 at 1 col.
     if 0x1F800 <= cp <= 0x1F8FF:
-        return False
-    return 0x1F300 <= cp <= 0x1FAFF
+        return 1
+    if 0x1F300 <= cp <= 0x1FAFF:  # emoji / pictographs (render 2-wide even when EAW=N)
+        return 2
+    if unicodedata.east_asian_width(ch) in ('W', 'F'):
+        return 2
+    return 1
+
+
+def _is_wide(ch: str) -> bool:
+    'True iff the character occupies two display columns. Kept for callers/tests.'
+    return _char_width(ch) == 2
 
 
 def _visible_width(s: str) -> int:
     plain = _ANSI_RE.sub('', s)
-    return sum(2 if _is_wide(ch) else 1 for ch in plain)
+    return sum(_char_width(ch) for ch in plain)
 
 
 def _middle_ellipsis(text: str, max_w: int) -> str:
@@ -78,17 +99,21 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
             tokens.append((False, text[i]))
             i += 1
 
-    def _take(toks: list[tuple[bool, str]], n: int) -> list[str]:
+    def _take(toks: list[tuple[bool, str]], budget: int) -> list[str]:
+        # Accumulate by VISIBLE width, not codepoint count, so a wide char that
+        # would push past the budget is refused rather than silently spending one
+        # slot but two cells (Audit CTRUNC). Escapes are free (zero width).
         out: list[str] = []
-        seen = 0
+        used = 0
         for is_esc, tok in toks:
             if is_esc:
                 out.append(tok)
-            elif seen < n:
-                out.append(tok)
-                seen += 1
-            else:
+                continue
+            w = _char_width(tok)
+            if used + w > budget:
                 break
+            out.append(tok)
+            used += w
         return out
 
     prefix = _take(tokens, left_vis)
@@ -96,14 +121,19 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
     suffix.reverse()
 
     result = ''.join(prefix) + '…' + ''.join(suffix)
-    if _visible_width(result) <= max_w:
-        return result
-    # Trim one visible char from prefix to fix wide-char overshoot.
-    for j in range(len(prefix) - 1, -1, -1):
-        if not _ANSI_RE.fullmatch(prefix[j]):
-            prefix.pop(j)
-            break
-    return ''.join(prefix) + '…' + ''.join(suffix)
+    # Defensive: with width-aware _take the result already fits, but guard the
+    # contract (visible width <= max_w) by trimming visible chars off the longer
+    # side until it holds, degrading to '…' rather than ever overflowing.
+    while _visible_width(result) > max_w:
+        side = prefix if _visible_width(''.join(prefix)) >= _visible_width(''.join(suffix)) else suffix
+        for j in range(len(side) - 1, -1, -1):
+            if not _ANSI_RE.fullmatch(side[j]):
+                side.pop(j)
+                break
+        else:
+            break  # nothing left to trim but escapes
+        result = ''.join(prefix) + '…' + ''.join(suffix)
+    return result
 
 
 def fmt_tok(n: int) -> str:
