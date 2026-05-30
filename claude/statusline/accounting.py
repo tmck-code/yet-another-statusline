@@ -78,17 +78,18 @@ def _model_log_key(model: Model) -> str:
 
 @dataclass
 class TokenLog:
-    day_in: int = 0
+    day_in: int = 0            # billed input (plain input + cache-creation), as displayed
     day_cache_read: int = 0
     day_out: int = 0
-    # Per-model day totals (model_key -> (in, cache_read, out)) so day cost can
-    # price each model separately. Excluded from equality so a hand-built
-    # TokenLog(day_in=..., ...) in tests still compares equal.
-    by_model: dict[str, tuple[int, int, int]] = field(default_factory=dict, compare=False)
+    day_cache_creation: int = 0  # cache-WRITE tokens, tracked only to add day cost's 1.25x surcharge
+    # Per-model day totals (model_key -> (in, cache_creation, cache_read, out)) so
+    # day cost can price each model separately. Excluded from equality so a hand-
+    # built TokenLog(day_in=..., ...) in tests still compares equal.
+    by_model: dict[str, tuple[int, int, int, int]] = field(default_factory=dict, compare=False)
 
     @classmethod
     def update(cls, session_id: str, today: str, total_in: int, cache_read: int,
-               total_out: int, model_id: str = '') -> TokenLog:
+               total_out: int, model_id: str = '', *, cache_creation: int = 0) -> TokenLog:
         log = config.CLAUDE_DIR / 'statusline-tokens.log'
         old_lines: list[str] = []
         if log.exists():
@@ -96,12 +97,24 @@ class TokenLog:
                 old_lines = log.read_text().splitlines()
             except OSError:
                 old_lines = []
-        # A v2 row appends a space-free model id; an empty model keeps the legacy
-        # 5-field shape (and on-disk format) byte-for-byte unchanged.
-        new_row = f'{today} {session_id} {total_in} {cache_read} {total_out}'
-        if model_id:
-            new_row += f' {model_id}'
-        has_tokens = bool(session_id) and (total_in > 0 or cache_read > 0 or total_out > 0)
+        # Row formats (distinguished by field count when parsed):
+        #   v1 (4): date sid in out
+        #   v2 (5): date sid in cache_read out
+        #   v2+model (6): date sid in cache_read out model
+        #   v3 (7): date sid in cache_creation cache_read out model   (Audit ACCT-1)
+        # 'in' is billed input (plain + cache-creation) in every format; v3 adds a
+        # separate cache_creation column purely so day cost can apply the 1.25x
+        # cache-write surcharge. A v3 row is ALWAYS 7 fields incl. a model token
+        # ('-' sentinel when unknown) so it can never be mistaken for a 6-field
+        # v2+model row. cache_creation==0 keeps the legacy 5/6-field shape (and the
+        # on-disk bytes) unchanged.
+        if cache_creation:
+            new_row = f'{today} {session_id} {total_in} {cache_creation} {cache_read} {total_out} {model_id or "-"}'
+        else:
+            new_row = f'{today} {session_id} {total_in} {cache_read} {total_out}'
+            if model_id:
+                new_row += f' {model_id}'
+        has_tokens = bool(session_id) and (total_in > 0 or cache_read > 0 or total_out > 0 or cache_creation > 0)
         # Replace this session's row in place (preserves order, so an unchanged
         # render produces identical content and skips the write — churn fix).
         new_lines: list[str] = []
@@ -122,29 +135,36 @@ class TokenLog:
 
     @staticmethod
     def _rollup(lines: list[str], today: str) -> TokenLog:
-        day_in = day_cache_read = day_out = 0
-        by_model: dict[str, tuple[int, int, int]] = {}
+        day_in = day_cache_creation = day_cache_read = day_out = 0
+        by_model: dict[str, tuple[int, int, int, int]] = {}
         for ln in lines:
             parts = ln.split()
             if len(parts) < 4 or parts[0] != today:
                 continue
-            r_in = r_cache = r_out = 0
+            r_in = r_cc = r_cache = r_out = 0
             r_model = ''
             try:
-                if len(parts) >= 6:
+                if len(parts) >= 7:    # v3: date sid in cache_creation cache_read out model
+                    r_in, r_cc, r_cache, r_out, r_model = (
+                        int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5]), parts[6])
+                elif len(parts) == 6:  # v2+model: date sid in cache_read out model
                     r_in, r_cache, r_out, r_model = int(parts[2]), int(parts[3]), int(parts[4]), parts[5]
-                elif len(parts) == 5:
+                elif len(parts) == 5:  # v2: date sid in cache_read out
                     r_in, r_cache, r_out = int(parts[2]), int(parts[3]), int(parts[4])
-                else:  # 4-field legacy: date sid in out
+                else:                  # v1: date sid in out
                     r_in, r_out = int(parts[2]), int(parts[3])
             except ValueError:
                 continue
+            if r_model == '-':  # v3 sentinel for "no specific model" -> price at the current model
+                r_model = ''
             day_in += r_in
+            day_cache_creation += r_cc
             day_cache_read += r_cache
             day_out += r_out
-            prev = by_model.get(r_model, (0, 0, 0))
-            by_model[r_model] = (prev[0] + r_in, prev[1] + r_cache, prev[2] + r_out)
-        return TokenLog(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out, by_model=by_model)
+            prev = by_model.get(r_model, (0, 0, 0, 0))
+            by_model[r_model] = (prev[0] + r_in, prev[1] + r_cc, prev[2] + r_cache, prev[3] + r_out)
+        return TokenLog(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out,
+                        day_cache_creation=day_cache_creation, by_model=by_model)
 
 
 

@@ -116,3 +116,46 @@ def test_day_cost_legacy_rows_use_current_model(tmp_home: Path) -> None:
     # priced with the passed (current) model = Sonnet 3/15 -> 1*3 + 1*15 = 18
     cost = sl.compute_day_cost(sl.Model(id='claude-sonnet-4-6'), log)
     assert cost == pytest.approx(18.0, abs=1e-9)
+
+
+# --- ACCT-1: cache-creation 1.25x surcharge via the v3 row format ---
+
+def test_v3_row_format_records_cache_creation(tmp_home: Path) -> None:
+    """A cache_creation>0 update writes a 7-field v3 row (incl. a model token)."""
+    # billed_in (total_in) already includes cache_creation; the extra column lets
+    # day cost recover the cache-write surcharge.
+    sl.TokenLog.update('s1', TODAY, 1_000_000, 0, 0, 'claude-opus-4-7', cache_creation=1_000_000)
+    row = _log_path(tmp_home).read_text().splitlines()[0]
+    parts = row.split()
+    assert len(parts) == 7                                   # date sid in cache_creation cache_read out model
+    assert parts == [TODAY, 's1', '1000000', '1000000', '0', '0', 'claude-opus-4-7']
+
+
+def test_v3_row_uses_dash_sentinel_when_model_absent(tmp_home: Path) -> None:
+    """An empty model id in a v3 row is written as '-' so it stays 7 fields
+    (never collides with a 6-field v2+model row) and normalises back to ''."""
+    log = sl.TokenLog.update('s1', TODAY, 500_000, 0, 0, '', cache_creation=500_000)
+    assert _log_path(tmp_home).read_text().splitlines()[0].split()[6] == '-'
+    assert '' in log.by_model and '-' not in log.by_model     # sentinel normalised on read
+
+
+def test_day_cost_applies_cache_creation_surcharge(tmp_home: Path) -> None:
+    """day cost prices cache-creation at 1.25x (matching session_cost), not 1.0x.
+
+    Opus 4.7 rate_in=$5/M. Row: billed_in=1M (= 1M cache-creation, 0 plain input),
+    out=0. Correct = 1M*5 + 1M*5*0.25 = 6.25; the pre-ACCT-1 bug gave 5.00."""
+    log = sl.TokenLog.update('s1', TODAY, 1_000_000, 0, 0, 'claude-opus-4-7', cache_creation=1_000_000)
+    cost = sl.compute_day_cost(sl.Model(id='claude-opus-4-7'), log)
+    assert cost == pytest.approx(6.25, abs=1e-9)
+    assert cost != pytest.approx(5.0, abs=1e-9)              # guard against the old 1.0x behaviour
+
+
+def test_old_six_field_rows_still_price_cache_creation_at_1x(tmp_home: Path) -> None:
+    """Backward compat: a pre-v3 6-field row has no cache_creation column, so it
+    keeps the old 1.0x pricing (no surcharge) and still parses cleanly."""
+    _log_path(tmp_home).parent.mkdir(parents=True, exist_ok=True)
+    _log_path(tmp_home).write_text(f'{TODAY} s9 1000000 0 0 claude-opus-4-7\n')  # v2+model (6 fields)
+    log = sl.TokenLog.update('zzz', TODAY, 0, 0, 0)          # no-op write -> just rolls up the existing row
+    assert log.day_cache_creation == 0
+    cost = sl.compute_day_cost(sl.Model(id='claude-opus-4-7'), log)
+    assert cost == pytest.approx(5.0, abs=1e-9)              # 1M*5, no surcharge

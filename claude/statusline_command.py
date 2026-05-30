@@ -1658,7 +1658,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     usage         = TranscriptUsage.from_transcript(session.transcript_path)
     today         = clock.now().strftime('%Y-%m-%d')
-    token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out, _model_log_key(session.model))
+    token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out, _model_log_key(session.model), cache_creation=usage.cache_creation_input_tokens)
     tok_rate      = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     sess_cost     = session_cost_display(session, usage)
     day_cost      = compute_day_cost(session.model, token_log)

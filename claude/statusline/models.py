@@ -87,15 +87,20 @@ class TokenAccounting:
     def day_cost(model: Model, token_log: TokenLog) -> float:
         # Price each model's day tokens at its own rate. Rows with no recorded
         # model (legacy v1 rows) fall back to the current session's model.
+        # `din` is billed input (plain + cache-creation, already at 1.0x); add a
+        # 0.25x surcharge on the cache-creation portion so day cost matches
+        # session_cost's 1.25x cache-write rate (Audit ACCT-1). Pre-v3 rows have
+        # cache_creation==0, so they keep the old 1.0x behaviour.
         if token_log.by_model:
             total = 0.0
-            for mid, (din, dcache, dout) in token_log.by_model.items():
+            for mid, (din, dcc, dcache, dout) in token_log.by_model.items():
                 rate_in, rate_out = TokenAccounting.rates_for(mid) if mid else model.cost_rates
-                total += din * rate_in + dcache * rate_in * 0.1 + dout * rate_out
+                total += din * rate_in + dcc * rate_in * 0.25 + dcache * rate_in * 0.1 + dout * rate_out
             return total / 1_000_000
         rate_in, rate_out = TokenAccounting.rates_for(model.display_name or model.id)
         cost = (
             token_log.day_in * rate_in
+            + token_log.day_cache_creation * rate_in * 0.25
             + token_log.day_cache_read * rate_in * 0.1
             + token_log.day_out * rate_out
         )
