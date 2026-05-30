@@ -94,26 +94,39 @@ def subagent_share(sub_inout: int, session_inout: int) -> float | None:
 
 
 def terminal_width() -> int:
-    try:
-        w = int(subprocess.run([
-            "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
-        ], capture_output=True, text=True).stdout.strip().replace("'", ""))
-        if w > 0:
-            return w
-    except (OSError, ValueError, KeyError):
-        pass
-    try:
-        w = int((config.CLAUDE_DIR / 'terminal-width').read_text().strip())
-        if w > 0:
-            return w
-    except (OSError, ValueError):
-        pass
+    # COLUMNS is authoritative: Claude Code sets it to the exact width it
+    # allocated for the statusline before running this script (docs: v2.1.153+).
+    # It supersedes the tmux pane probe (pane width != the allocated statusline
+    # width once padding is reserved) and the legacy terminal-width file, so it
+    # is consulted FIRST; the rest are fallbacks for older Claude Code and the
+    # standalone demo path. (Audit WIDTH-1 / P4.)
     try:
         cols = int(os.environ.get('COLUMNS', '0'))
         if cols > 0:
             return cols
     except ValueError:
         pass
+    # Fallback 1 — tmux pane width (older Claude Code, no COLUMNS). Bounded by a
+    # short timeout so a wedged tmux server can't hang the render (the next update
+    # would cancel an in-flight render anyway). subprocess.SubprocessError covers
+    # TimeoutExpired. (Audit PERF-TMUX.)
+    try:
+        w = int(subprocess.run(
+            ['tmux', 'display-message', '-p', '-t', os.environ['TMUX_PANE'], '#{pane_width}'],
+            capture_output=True, text=True, timeout=0.2,
+        ).stdout.strip().replace("'", ''))
+        if w > 0:
+            return w
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        pass
+    # Fallback 2 — width file (legacy alacritty SIGWINCH helper).
+    try:
+        w = int((config.CLAUDE_DIR / 'terminal-width').read_text().strip())
+        if w > 0:
+            return w
+    except (OSError, ValueError):
+        pass
+    # Fallback 3 — direct tty query (non-Claude-Code invocations, e.g. demo).
     w = shutil.get_terminal_size(fallback=(0, 0)).columns
     if w > 0:
         return w
