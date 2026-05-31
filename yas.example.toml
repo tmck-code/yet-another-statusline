@@ -1,0 +1,40 @@
+# yas.toml — yet-another-statusline configuration
+#
+# Copy this file to ~/.claude/yas.toml (or $CLAUDE_CONFIG_DIR/yas.toml) and
+# uncomment the lines you want to change. Every knob below is shown commented
+# out at its built-in default, so as-is this file changes nothing.
+#
+# Requires Python 3.11+ (the file is parsed with the stdlib `tomllib`). On
+# Python 3.10 the file is silently skipped — environment variables work on
+# every Python version.
+#
+# Precedence (highest wins): CLI flag → YAS_* env var → legacy-alias env var
+# → this file → built-in default. So an environment variable always overrides
+# the matching value here. (The one exception: a per-model [[tokens.model]]
+# soft_limit override below beats the GLOBAL soft_limit from ANY source,
+# including YAS_SOFT_LIMIT — specificity beats source precedence.)
+
+# [layout]
+# max_width = 140      # int > 0; max box width in columns (ignored when full_width = true)
+# full_width = false   # bool; when true the box fills the terminal and ignores max_width
+
+# [tokens]
+# soft_limit = 150000   # int > 0; tokens; context-fill bar / % threshold. Raise for 1M-context models.
+# token_window = 60     # number > 0; seconds; rolling window for the token throughput (t/m) rate
+
+# Per-model soft_limit overrides. `match` is a case-insensitive plain substring
+# (no glob/regex) tested against the model id and display name. The LONGEST
+# match wins; ties break by file order. A match here beats the global
+# soft_limit from any source — including the YAS_SOFT_LIMIT env var. To single
+# out a variant from its family, give the variant the longer, more specific
+# match (below, "opus-4-8[1m]" outranks "opus" for the 1M-context model).
+# [[tokens.model]]
+# match = "opus"           # the whole Opus family
+# soft_limit = 200000
+# [[tokens.model]]
+# match = "opus-4-8[1m]"   # the 1M-context variant (longer match wins)
+# soft_limit = 1000000
+
+# [appearance]
+# theme = "claude-dark"  # one of: claude-dark, claude-light, catppuccin-latte, catppuccin-mocha
+# bg_shift = "warm"      # warm or cool; direction of the model-row gradient shift
