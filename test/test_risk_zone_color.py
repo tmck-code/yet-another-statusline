@@ -1,7 +1,8 @@
 import pytest
 import statusline_command as sl
+import statusline.renderer as renderer
 
-_r = sl.Renderer()
+_r = renderer.Renderer()
 
 @pytest.mark.parametrize('tokens,expected', [
     (49_999,  _r.safe),

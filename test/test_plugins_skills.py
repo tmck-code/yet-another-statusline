@@ -1,8 +1,8 @@
-import statusline_command as sl
+import statusline.renderer as renderer
+from statusline.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
+Renderer = renderer.Renderer
 
 
 def test_plugins_skills_skills_and_plugins() -> None:

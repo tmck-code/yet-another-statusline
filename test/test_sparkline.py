@@ -1,10 +1,11 @@
 import re
 
-import statusline_command as sl
+import statusline.constants as constants
+import statusline.renderer as renderer_mod
 from helper import strip_ansi
 
 
-_r = sl.Renderer()
+_r = renderer_mod.Renderer()
 
 
 # Empty / all-zero baselines
@@ -24,8 +25,8 @@ def test_sparkline_monotone_flat_at_max() -> None:
     # All cells equal and non-zero: first cell rises from implicit 0,
     # later equal cells render as flat █ blocks.
     top, bot = _r.sparkline([5, 5, 5])
-    assert strip_ansi(top) == f'{sl.SPARK_RISE_TOP}██'
-    assert strip_ansi(bot) == f'{sl.SPARK_RISE_TALL}██'
+    assert strip_ansi(top) == f'{constants.SPARK_RISE_TOP}██'
+    assert strip_ansi(bot) == f'{constants.SPARK_RISE_TALL}██'
 
 
 # Neighbor-aware slope behavior
@@ -37,16 +38,16 @@ def test_sparkline_isolated_peak_medium() -> None:
     s_bot = strip_ansi(bot)
     # i=2 is an isolated peak at idx=6 → rise medium.
     # i=3 falls from prev idx=6 → fall medium.
-    assert s_bot[2] == sl.SPARK_RISE_MED
-    assert s_bot[3] == sl.SPARK_FALL_MED
+    assert s_bot[2] == constants.SPARK_RISE_MED
+    assert s_bot[3] == constants.SPARK_FALL_MED
 
 
 def test_sparkline_isolated_peak_small() -> None:
     # max=10 → ratios [1.0, .1, 0] → idx [16, 1, 0]. Middle cell is a small peak.
     top, bot = _r.sparkline([10, 0, 1, 0])
     s_bot = strip_ansi(bot)
-    assert s_bot[2] == sl.SPARK_RISE_SMALL
-    assert s_bot[3] == sl.SPARK_FALL_SMALL
+    assert s_bot[2] == constants.SPARK_RISE_SMALL
+    assert s_bot[3] == constants.SPARK_FALL_SMALL
 
 
 def test_sparkline_full_peak_uses_top_row() -> None:
@@ -56,10 +57,10 @@ def test_sparkline_full_peak_uses_top_row() -> None:
     s_top = strip_ansi(top)
     s_bot = strip_ansi(bot)
     assert s_top[0] == ' '
-    assert s_top[1] == sl.SPARK_RISE_TOP
-    assert s_top[2] == sl.SPARK_FALL_TOP
-    assert s_bot[1] == sl.SPARK_RISE_TALL
-    assert s_bot[2] == sl.SPARK_FALL_TALL
+    assert s_top[1] == constants.SPARK_RISE_TOP
+    assert s_top[2] == constants.SPARK_FALL_TOP
+    assert s_bot[1] == constants.SPARK_RISE_TALL
+    assert s_bot[2] == constants.SPARK_FALL_TALL
 
 
 def test_sparkline_monotone_rise() -> None:
@@ -67,9 +68,9 @@ def test_sparkline_monotone_rise() -> None:
     top, bot = _r.sparkline([1, 2, 3])
     s_bot = strip_ansi(bot)
     # max=3 → ratios [.33, .67, 1.0] → idx [5, 10, 16].
-    assert s_bot[0] == sl.SPARK_RISE_MED   # idx=5,  prev=0
-    assert s_bot[1] == sl.SPARK_RISE_TALL  # idx=10, prev=5
-    assert s_bot[2] == sl.SPARK_RISE_TALL  # idx=16, prev=10
+    assert s_bot[0] == constants.SPARK_RISE_MED   # idx=5,  prev=0
+    assert s_bot[1] == constants.SPARK_RISE_TALL  # idx=10, prev=5
+    assert s_bot[2] == constants.SPARK_RISE_TALL  # idx=16, prev=10
 
 
 def test_sparkline_monotone_fall() -> None:
@@ -78,9 +79,9 @@ def test_sparkline_monotone_fall() -> None:
     top, bot = _r.sparkline([3, 2, 1])
     s_bot = strip_ansi(bot)
     # max=3 → idx [16, 10, 5].
-    assert s_bot[0] == sl.SPARK_RISE_TALL  # idx=16, prev=0
-    assert s_bot[1] == sl.SPARK_FALL_TALL  # prev=16 > idx=10
-    assert s_bot[2] == sl.SPARK_FALL_TALL  # prev=10 > idx=5
+    assert s_bot[0] == constants.SPARK_RISE_TALL  # idx=16, prev=0
+    assert s_bot[1] == constants.SPARK_FALL_TALL  # prev=16 > idx=10
+    assert s_bot[2] == constants.SPARK_FALL_TALL  # prev=10 > idx=5
 
 
 def test_sparkline_width_matches_input() -> None:

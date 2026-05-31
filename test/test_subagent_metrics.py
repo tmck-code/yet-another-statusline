@@ -1,6 +1,8 @@
 import pytest
 
-from statusline_command import subagent_avg_tpm, subagent_share
+import statusline_command as sl
+import statusline.metrics as metrics
+from statusline.metrics import subagent_avg_tpm, subagent_share
 
 
 class TestSubagentAvgTpm:

@@ -3,21 +3,22 @@ from typing import Any
 import pytest
 
 import statusline_command as sl
+import statusline.session as session
 
 
 
 _FROM_DICT_CASES = [
-    ('Model',        sl.Model,        sl.Model()),
-    ('OutputStyle',  sl.OutputStyle,  sl.OutputStyle()),
-    ('Effort',       sl.Effort,       sl.Effort()),
-    ('Thinking',     sl.Thinking,     sl.Thinking()),
-    ('CurrentUsage', sl.CurrentUsage, sl.CurrentUsage()),
-    ('RateBucket',   sl.RateBucket,   sl.RateBucket()),
-    ('Workspace',    sl.Workspace,    sl.Workspace()),
-    ('Cost',         sl.Cost,         sl.Cost()),
-    ('ContextWindow',sl.ContextWindow,sl.ContextWindow()),
-    ('RateLimits',   sl.RateLimits,   sl.RateLimits()),
-    ('SessionInfo',  sl.SessionInfo,  sl.SessionInfo()),
+    ('Model',        session.Model,        session.Model()),
+    ('OutputStyle',  session.OutputStyle,  session.OutputStyle()),
+    ('Effort',       session.Effort,       session.Effort()),
+    ('Thinking',     session.Thinking,     session.Thinking()),
+    ('CurrentUsage', session.CurrentUsage, session.CurrentUsage()),
+    ('RateBucket',   session.RateBucket,   session.RateBucket()),
+    ('Workspace',    session.Workspace,    session.Workspace()),
+    ('Cost',         session.Cost,         session.Cost()),
+    ('ContextWindow',session.ContextWindow,session.ContextWindow()),
+    ('RateLimits',   session.RateLimits,   session.RateLimits()),
+    ('SessionInfo',  session.SessionInfo,  session.SessionInfo()),
 ]
 
 
@@ -28,21 +29,21 @@ def test_from_dict_empty_yields_defaults(name: str, cls: Any, default: object) -
 
 
 def test_session_info_ignores_unknown_key() -> None:
-    result = sl.SessionInfo.from_dict({'experimental_field': 'x'})
-    assert result == sl.SessionInfo()
+    result = session.SessionInfo.from_dict({'experimental_field': 'x'})
+    assert result == session.SessionInfo()
 
 
 
 def test_context_window_missing_current_usage() -> None:
-    result = sl.ContextWindow.from_dict({'used_percentage': 8})
-    assert result.current_usage == sl.CurrentUsage()
+    result = session.ContextWindow.from_dict({'used_percentage': 8})
+    assert result.current_usage == session.CurrentUsage()
     assert result.used_percentage == 8
 
 
 
 def test_rate_bucket_rounds_used_percentage() -> None:
-    result = sl.RateBucket.from_dict({'used_percentage': 12.3456, 'resets_at': 1700000000})
-    assert result == sl.RateBucket(used_percentage=12.35, resets_at=1700000000)
+    result = session.RateBucket.from_dict({'used_percentage': 12.3456, 'resets_at': 1700000000})
+    assert result == session.RateBucket(used_percentage=12.35, resets_at=1700000000)
 
 
 
@@ -67,16 +68,16 @@ def test_session_info_recursive_population() -> None:
         },
     }
 
-    result = sl.SessionInfo.from_dict(payload)
+    result = session.SessionInfo.from_dict(payload)
 
-    assert result.model == sl.Model(id='claude-sonnet-4-6', display_name='Sonnet')
+    assert result.model == session.Model(id='claude-sonnet-4-6', display_name='Sonnet')
     assert result.workspace.current_dir == '/tmp'
     assert result.cost.total_cost_usd == pytest.approx(1.23)
-    assert result.context_window.current_usage == sl.CurrentUsage(
+    assert result.context_window.current_usage == session.CurrentUsage(
         input_tokens=100,
         output_tokens=50,
         cache_creation_input_tokens=10,
         cache_read_input_tokens=5,
     )
-    assert result.rate_limits.five_hour == sl.RateBucket(used_percentage=33.0, resets_at=1700000001)
-    assert result.rate_limits.seven_day == sl.RateBucket(used_percentage=10.5, resets_at=1700000002)
+    assert result.rate_limits.five_hour == session.RateBucket(used_percentage=33.0, resets_at=1700000001)
+    assert result.rate_limits.seven_day == session.RateBucket(used_percentage=10.5, resets_at=1700000002)

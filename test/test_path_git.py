@@ -1,9 +1,9 @@
-import statusline_command as sl
+import statusline.renderer as renderer
+from statusline.git import GitInfo
+from statusline.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
-GitInfo = sl.GitInfo
+Renderer = renderer.Renderer
 
 
 def test_path_git_clean_no_elapsed() -> None:
@@ -93,7 +93,7 @@ class TestPathGitFlags:
 
 class TestFitPath:
     def _git(self, branch: str = 'main', commit: str = 'abc1234',
-             modified: int = 2, untracked: int = 1) -> sl.GitInfo:
+             modified: int = 2, untracked: int = 1) -> GitInfo:
         return GitInfo(branch=branch, commit=commit,
                        modified=modified, untracked=untracked)
 

@@ -1,10 +1,11 @@
 import statusline_command as sl
+import statusline.transcript as transcript
 
 
 
 class TestTranscriptUsageProps:
     def test_billed_in(self) -> None:
-        u = sl.TranscriptUsage(
+        u = transcript.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
             cache_read_input_tokens=3,
@@ -13,7 +14,7 @@ class TestTranscriptUsageProps:
         assert u.billed_in == 12  # 10 + 2
 
     def test_cache_read(self) -> None:
-        u = sl.TranscriptUsage(
+        u = transcript.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
             cache_read_input_tokens=3,
@@ -22,7 +23,7 @@ class TestTranscriptUsageProps:
         assert u.cache_read == 3
 
     def test_out(self) -> None:
-        u = sl.TranscriptUsage(
+        u = transcript.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
             cache_read_input_tokens=3,
@@ -31,7 +32,7 @@ class TestTranscriptUsageProps:
         assert u.out == 4
 
     def test_all_props_combined(self) -> None:
-        u = sl.TranscriptUsage(
+        u = transcript.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
             cache_read_input_tokens=3,
@@ -42,7 +43,7 @@ class TestTranscriptUsageProps:
         assert u.out == 4
 
     def test_zeros(self) -> None:
-        u = sl.TranscriptUsage()
+        u = transcript.TranscriptUsage()
         assert u.billed_in == 0
         assert u.cache_read == 0
         assert u.out == 0

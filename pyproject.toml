@@ -16,6 +16,9 @@ dev = [
     "uv",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["claude"]
+
 [tool.mypy]
 exclude = [
     ".claude/",

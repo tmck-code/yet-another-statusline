@@ -1,8 +1,7 @@
 """Tests for OpenSpec._find_root and OpenSpec.from_cwd."""
 from pathlib import Path
 
-import statusline_command as sl
-
+import statusline.openspec as openspec_mod
 
 
 def test_find_root_walks_upward(tmp_path: Path) -> None:
@@ -12,15 +11,14 @@ def test_find_root_walks_upward(tmp_path: Path) -> None:
     sub = tmp_path / 'sub'
     sub.mkdir()
 
-    result = sl.OpenSpec._find_root(str(sub))
+    result = openspec_mod.OpenSpec._find_root(str(sub))
     assert result == str(tmp_path / 'openspec')
 
 
 def test_find_root_no_openspec_returns_empty(tmp_path: Path) -> None:
     """_find_root returns '' when no openspec/ directory is found."""
-    result = sl.OpenSpec._find_root(str(tmp_path))
+    result = openspec_mod.OpenSpec._find_root(str(tmp_path))
     assert result == ''
-
 
 
 def test_counts_open_and_done_tasks(tmp_path: Path) -> None:
@@ -33,13 +31,12 @@ def test_counts_open_and_done_tasks(tmp_path: Path) -> None:
         '- [x] three\n'
     )
 
-    result = sl.OpenSpec.from_cwd(str(tmp_path))
+    result = openspec_mod.OpenSpec.from_cwd(str(tmp_path))
     assert len(result.changes) == 1
     name, done, total = result.changes[0]
     assert name == 'my-change'
     assert done == 2
     assert total == 3
-
 
 
 def test_archived_changes_excluded(tmp_path: Path) -> None:
@@ -48,9 +45,8 @@ def test_archived_changes_excluded(tmp_path: Path) -> None:
     archive_dir.mkdir(parents=True)
     (archive_dir / 'tasks.md').write_text('- [ ] task\n')
 
-    result = sl.OpenSpec.from_cwd(str(tmp_path))
+    result = openspec_mod.OpenSpec.from_cwd(str(tmp_path))
     assert result.changes == []
-
 
 
 def test_empty_tasks_excluded(tmp_path: Path) -> None:
@@ -59,5 +55,5 @@ def test_empty_tasks_excluded(tmp_path: Path) -> None:
     changes_dir.mkdir(parents=True)
     (changes_dir / 'tasks.md').write_text('# No tasks here\nJust prose.\n')
 
-    result = sl.OpenSpec.from_cwd(str(tmp_path))
+    result = openspec_mod.OpenSpec.from_cwd(str(tmp_path))
     assert result.changes == []

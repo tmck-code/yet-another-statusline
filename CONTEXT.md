@@ -124,6 +124,19 @@ _Avoid_: "per-model env var" (none exists by design).
 The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. Full per-value reasons are written to stderr only when `YAS_DEBUG` is set. A rejected knob silently falls back to its default — the row is informational, never fatal.
 _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single failure message, and never aborts the render).
 
+### Derived session state
+
+**SessionView**:
+The lazy, pure-read view of all *derived* session state, built once per render from a parsed **SessionInfo** plus **Config** and consumed by the layout builders. Each field — `git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes` (**OpenSpec** changes), `elapsed`, `session_cost`, `session_inout` — is a `@cached_property` that reads its source on first access and caches, so a narrow render pays only for the fields it draws (no git subprocess, transcript scan, or openspec walk it never shows). Lives in `claude/statusline/info.py`, below the render layer in the DAG: it imports the six filesystem readers, `metrics`, and `tokens` (cost compute only) but never `Renderer`. Holds no render geometry (the bar **fill**, the pill percentage, **Anchor**/**Shift**) — those stay render-side — and performs no disk writes.
+_Avoid_: "session model" (that is **SessionInfo**, the raw JSON parse; **SessionView** is the gathered layer above it) and "snapshot" (fields resolve at first access, not at one frozen instant — only `now` is frozen for time math).
+
+**Session In/Out** (`session_inout`):
+The **Session Share %** denominator carried on the **SessionView**: `(Billed Input + Cache Read + Output) + Σ(Running Subagent total_input + output)`. The one genuinely *derived* SessionView field — it composes the **Transcript Usage** and **Running Subagent** readers — so it lives in exactly one place rather than being recomputed per caller.
+
+**Tick Record** (`record_tick`):
+The per-render disk-write step, owned by `app` and kept off the **SessionView** so the view stays a pure read. It persists this tick's **Transcript Usage** to the **Day Total** ledger (`TokenLog.update`) and the rate log (`TokenRate.update`), then returns a `TickRecord` bundling `token_log`, `day_cost`, and the token rate. `app` threads the `TickRecord` into the wide layout builder, so **Day Total** and day-cost never masquerade as gathered facts. Sits beside the existing per-render payload write in `app.main` (the `statusline-output` index file) — the one place per-render side effects belong.
+_Avoid_: "gather the day total" (the **Day Total** is *written*, not gathered — it depends on this tick's persist, which is why it is a **Tick Record** value and not a **SessionView** field).
+
 ## Relationships
 
 - **Billed Input** + **Cache Read** + **Output** are the three columns shown twice in the tokens row — once for this session, once as **Day Total**.
@@ -142,3 +155,31 @@ _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single 
 
 - "input tokens" was ambiguous between raw `input_tokens` and the displayed **Billed Input** (which includes cache writes). Resolved: **Billed Input** is the canonical term for the `↓` column.
 - "context limit" was ambiguous between **Context Window Size** (per-model capacity) and the 150K **Compaction-Risk Zone** threshold. Resolved: these are distinct — the bar shows both.
+
+## Module map
+
+The statusline source lives in `claude/statusline/` as a layered package. Each module owns one concern; imports only flow downward (earlier → later layers).
+
+| Module | Canonical concept |
+|--------|-------------------|
+| `constants` | ANSI colours, glyph/icon escape constants, width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
+| `text` | Terminal-width math (`_visible_width`, `_is_wide`), string helpers (`_middle_ellipsis`, `fmt_tok`, `fmt_dur`), `terminal_width` |
+| `config` | `Config` — env/argv/toml resolution; no import-time singleton |
+| `session` | Session data model: `SessionInfo`, `Model`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, … |
+| `metrics` | Derived session metrics: `burndown_delta`, `subagent_avg_tpm`, `subagent_share` |
+| `tokens` | `TokenAccounting`, `TokenLog`, `TokenRate`, `TickRecord`, cost computations |
+| `git` | `GitInfo` — working-tree branch/dirty state |
+| `skills` | `LoadedSkills` — skill files on disk |
+| `subagents` | `RunningSubagents` — active sub-agent processes |
+| `tasks` | `Task`, `TaskList` — Claude task tracking |
+| `transcript` | `TranscriptUsage` — per-transcript token counts |
+| `openspec` | `OpenSpec` — active OpenSpec change |
+| `info` | `SessionView` — lazy `@cached_property` gather seam for all derived session state (`git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes`, `elapsed`, `session_cost`, `session_inout`); `_fmt_elapsed` pure formatter |
+| `gradient` | `GradientEngine`, rainbow palette helpers, `pill_gradient_fg` |
+| `pill` | `Pill` dataclass — model-effort coloured pill rendering |
+| `borders` | `BorderRenderer` — box-drawing elbow/fill math |
+| `renderer` | `Renderer` — all section helpers (path, model, tokens, context, plugins, …) |
+| `layout` | `RowSpec`, `LayoutSpec`, `build_narrow/medium/wide`, `render_layout` — builders consume a `SessionView` (and `TickRecord` for wide); no longer imports the six reader modules directly |
+| `app` | `render`, `resolve_theme`, `main` — public entry points; `record_tick`/`TickRecord` construction and dispatch |
+
+`claude/statusline_command.py` is the frozen entrypoint: it imports `main` from `statusline.app` and calls it under `__main__`.

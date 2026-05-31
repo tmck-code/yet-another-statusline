@@ -2,12 +2,13 @@ from datetime import datetime, timezone, tzinfo
 
 import pytest
 
-import statusline_command as sl
+import statusline.renderer as renderer
+from statusline.constants import FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, GLYPH_BURN_FAST, GLYPH_BURN_SLOW
+from statusline.session import RateBucket
+from statusline.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
-RateBucket = sl.RateBucket
+Renderer = renderer.Renderer
 
 _NOW = 1_000_000_000.0  # fixed timestamp for deterministic tests
 
@@ -16,8 +17,8 @@ class TestBurndownTrend:
     """Tests for Renderer.burndown_trend colour buckets and glyph selection."""
 
     _r = Renderer()
-    _W = sl.FIVE_HOUR_MINUTES
-    _WU = sl.FIVE_HOUR_WARMUP_MINUTES
+    _W = FIVE_HOUR_MINUTES
+    _WU = FIVE_HOUR_WARMUP_MINUTES
 
     def _trend(self, used_pct: float, delta_minutes: float) -> str:
         resets_at = int(_NOW + delta_minutes * 60)
@@ -37,41 +38,41 @@ class TestBurndownTrend:
     # --- on-pace boundary: small deltas still render a glyph (no neutral dot) ---
     def test_on_pace_small_over_burn(self) -> None:
         # elapsed = 150 -> ideal = 50%; used = 50.3% -> delta = +0.3 -> fast glyph
-        assert strip_ansi(self._trend(50.3, 150)) == f'{sl.GLYPH_BURN_FAST} +00.30%'
+        assert strip_ansi(self._trend(50.3, 150)) == f'{GLYPH_BURN_FAST} +00.30%'
 
     def test_on_pace_small_under_burn(self) -> None:
         # used = 49.5% -> delta = -0.5 -> slow glyph
-        assert strip_ansi(self._trend(49.5, 150)) == f'{sl.GLYPH_BURN_SLOW} -00.50%'
+        assert strip_ansi(self._trend(49.5, 150)) == f'{GLYPH_BURN_SLOW} -00.50%'
 
     def test_exactly_on_pace_uses_slow_glyph(self) -> None:
         # delta == 0 is not > 0, so the slow glyph; sign is '+' (only delta < 0 gets '-')
-        assert strip_ansi(self._trend(50.0, 150)) == f'{sl.GLYPH_BURN_SLOW} +00.00%'
+        assert strip_ansi(self._trend(50.0, 150)) == f'{GLYPH_BURN_SLOW} +00.00%'
 
     # --- over-burn (delta > 0): fast glyph, '+' sign, zero-padded 05.2f ---
     def test_over_burn_small(self) -> None:
         # delta = +3.0
-        assert strip_ansi(self._trend(53.0, 150)) == f'{sl.GLYPH_BURN_FAST} +03.00%'
+        assert strip_ansi(self._trend(53.0, 150)) == f'{GLYPH_BURN_FAST} +03.00%'
 
     def test_over_burn_mid(self) -> None:
         # delta = +8.0
-        assert strip_ansi(self._trend(58.0, 150)) == f'{sl.GLYPH_BURN_FAST} +08.00%'
+        assert strip_ansi(self._trend(58.0, 150)) == f'{GLYPH_BURN_FAST} +08.00%'
 
     def test_over_burn_large(self) -> None:
         # delta = +20.0
-        assert strip_ansi(self._trend(70.0, 150)) == f'{sl.GLYPH_BURN_FAST} +20.00%'
+        assert strip_ansi(self._trend(70.0, 150)) == f'{GLYPH_BURN_FAST} +20.00%'
 
     # --- under-burn (delta < 0): slow glyph, '-' sign ---
     def test_under_burn_small(self) -> None:
         # delta = -3.0
-        assert strip_ansi(self._trend(47.0, 150)) == f'{sl.GLYPH_BURN_SLOW} -03.00%'
+        assert strip_ansi(self._trend(47.0, 150)) == f'{GLYPH_BURN_SLOW} -03.00%'
 
     def test_under_burn_mid(self) -> None:
         # delta = -8.0
-        assert strip_ansi(self._trend(42.0, 150)) == f'{sl.GLYPH_BURN_SLOW} -08.00%'
+        assert strip_ansi(self._trend(42.0, 150)) == f'{GLYPH_BURN_SLOW} -08.00%'
 
     def test_under_burn_large(self) -> None:
         # delta = -20.0
-        assert strip_ansi(self._trend(30.0, 150)) == f'{sl.GLYPH_BURN_SLOW} -20.00%'
+        assert strip_ansi(self._trend(30.0, 150)) == f'{GLYPH_BURN_SLOW} -20.00%'
 
     # --- colour: continuous gradient mapped from delta, not palette buckets ---
     def test_colour_follows_gradient_mapping(self) -> None:
@@ -101,8 +102,8 @@ class TestHelperBurndownIntegration:
                     return fixed.astimezone(tz)
                 return fixed
 
-        monkeypatch.setattr(sl, 'datetime', _FakeDatetime)
-        monkeypatch.setattr(sl.time, 'time', lambda: _NOW)
+        monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
+        monkeypatch.setattr(renderer.time, 'time', lambda: _NOW)
 
     def test_pre_warmup_no_trend(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch(monkeypatch)
@@ -111,7 +112,7 @@ class TestHelperBurndownIntegration:
         r = Renderer()
         out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
-        assert sl.GLYPH_BURN_FAST not in stripped
+        assert GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
         assert 'T-' in stripped
 
@@ -123,9 +124,9 @@ class TestHelperBurndownIntegration:
         out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
         assert '60.0%' in stripped
-        assert sl.GLYPH_BURN_FAST in stripped
+        assert GLYPH_BURN_FAST in stripped
         t_pos = stripped.index('T-')
-        arrow_pos = stripped.index(sl.GLYPH_BURN_FAST)
+        arrow_pos = stripped.index(GLYPH_BURN_FAST)
         assert arrow_pos < t_pos
 
     def test_expired_window_infinity_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,7 +145,7 @@ class TestHelperBurndownIntegration:
         r = Renderer()
         out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
-        assert sl.GLYPH_BURN_FAST in stripped or '▼' in stripped or sl.GLYPH_BURN_SLOW in stripped
+        assert GLYPH_BURN_FAST in stripped or '▼' in stripped or GLYPH_BURN_SLOW in stripped
 
 
 def test_helper_no_usage_no_reset() -> None:
@@ -171,7 +172,7 @@ def test_helper_reset_in_future(monkeypatch: pytest.MonkeyPatch) -> None:
                 return fixed_now.astimezone(tz)
             return fixed_now
 
-    monkeypatch.setattr(sl, 'datetime', _FakeDatetime)
+    monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
 
     future_ts = int(fixed_now.timestamp()) + 3600
     r = Renderer()

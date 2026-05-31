@@ -15,10 +15,17 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
+import statusline.app as app
+import statusline.layout as layout
+import statusline.renderer as renderer_mod
+import statusline.session as session_mod
+from statusline.config import Config
+from statusline.constants import BG_LUM_THRESHOLD, NARROW_WIDTH, MEDIUM_WIDTH
+from statusline.info import SessionView
+from statusline.themes import THEMES, CLAUDE_DARK, Theme
+from statusline.tokens import TickRecord, TokenLog
 
-THEMES   = sl.THEMES
-Theme    = sl.Theme
+Theme    = Theme  # re-export for parametrize type hints
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 SESSION  = (Path(__file__).parent.parent / 'claude' / 'statusline'
@@ -60,9 +67,9 @@ def test_theme_anchor_luminance_triggers_flip(theme_name: str) -> None:
     for model, mc in t.models.items():
         r, g, b = mc.anchor
         lum = (r * 299 + g * 587 + b * 114) // 1000
-        assert lum >= sl.BG_LUM_THRESHOLD, (
+        assert lum >= BG_LUM_THRESHOLD, (
             f'{theme_name}: {model} anchor lum={lum} '
-            f'< threshold {sl.BG_LUM_THRESHOLD}'
+            f'< threshold {BG_LUM_THRESHOLD}'
         )
 
 
@@ -72,7 +79,7 @@ def test_resolve_theme_defaults_to_claude_dark(
     monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
 ) -> None:
     monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
-    assert sl.resolve_theme(None) is sl.CLAUDE_DARK
+    assert app.resolve_theme(None) is CLAUDE_DARK
 
 
 def test_resolve_theme_cli_beats_env_and_file(
@@ -81,7 +88,7 @@ def test_resolve_theme_cli_beats_env_and_file(
     monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'catppuccin-mocha')
     (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
     (tmp_home / '.claude' / 'statusline-theme').write_text('claude-light\n')
-    assert sl.resolve_theme('catppuccin-latte') is THEMES['catppuccin-latte']
+    assert app.resolve_theme('catppuccin-latte') is THEMES['catppuccin-latte']
 
 
 def test_resolve_theme_env_beats_file(
@@ -90,7 +97,7 @@ def test_resolve_theme_env_beats_file(
     monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'catppuccin-mocha')
     (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
     (tmp_home / '.claude' / 'statusline-theme').write_text('claude-light\n')
-    assert sl.resolve_theme(None) is THEMES['catppuccin-mocha']
+    assert app.resolve_theme(None) is THEMES['catppuccin-mocha']
 
 
 def test_resolve_theme_file_used_when_no_env(
@@ -99,14 +106,14 @@ def test_resolve_theme_file_used_when_no_env(
     monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
     (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
     (tmp_home / '.claude' / 'statusline-theme').write_text('claude-light')
-    assert sl.resolve_theme(None) is THEMES['claude-light']
+    assert app.resolve_theme(None) is THEMES['claude-light']
 
 
 def test_resolve_theme_unknown_name_falls_through(
     monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
 ) -> None:
     monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
-    assert sl.resolve_theme('no-such-theme') is sl.CLAUDE_DARK
+    assert app.resolve_theme('no-such-theme') is CLAUDE_DARK
 
 
 # Byte-identity snapshot — claude-dark × 3 layouts
@@ -141,21 +148,26 @@ class _FrozenDatetime:
 
 @pytest.fixture
 def frozen(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(sl.time, 'time', lambda: float(FROZEN_EPOCH))
-    monkeypatch.setattr(sl, 'datetime', _FrozenDatetime)
+    import statusline.renderer as _renderer_mod
+    import time as _time_mod
+    monkeypatch.setattr(_time_mod, 'time', lambda: float(FROZEN_EPOCH))
+    monkeypatch.setattr(_renderer_mod.time, 'time', lambda: float(FROZEN_EPOCH))
+    monkeypatch.setattr(_renderer_mod, 'datetime', _FrozenDatetime)
     yield
 
 
 def _render(width: int, theme: Theme) -> str:
-    session = sl.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    r       = sl.Renderer(bg_shift='warm', theme=theme)
-    if width < sl.NARROW_WIDTH:
-        spec = sl.build_narrow(session, width, r)
-    elif width < sl.MEDIUM_WIDTH:
-        spec = sl.build_medium(session, width, r)
+    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
+    view    = SessionView(session, Config())
+    r       = renderer_mod.Renderer(bg_shift='warm', theme=theme)
+    if width < NARROW_WIDTH:
+        spec = layout.build_narrow(view, width, r)
+    elif width < MEDIUM_WIDTH:
+        spec = layout.build_medium(view, width, r)
     else:
-        spec = sl.build_wide(session, width, r)
-    return '\n'.join(sl.render_layout(spec, r))
+        tick = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
+        spec = layout.build_wide(view, tick, width, r)
+    return '\n'.join(layout.render_layout(spec, r))
 
 
 @pytest.mark.parametrize('layout,width', [
@@ -165,7 +177,7 @@ def _render(width: int, theme: Theme) -> str:
 ])
 def test_claude_dark_byte_identity(layout: str, width: int, frozen, tmp_home) -> None:  # type: ignore[no-untyped-def]
     fixture = FIXTURES / f'claude_dark_{layout}.ansi'
-    actual  = _render(width, sl.CLAUDE_DARK)
+    actual  = _render(width, CLAUDE_DARK)
     if not fixture.exists():
         fixture.parent.mkdir(parents=True, exist_ok=True)
         fixture.write_text(actual)

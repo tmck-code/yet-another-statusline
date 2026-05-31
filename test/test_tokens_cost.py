@@ -1,10 +1,11 @@
 from typing import Any
 
-import statusline_command as sl
+import statusline.renderer as renderer
+from statusline.constants import ICON_TOK_RATE
+from statusline.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
+Renderer = renderer.Renderer
 
 
 BOX_WIDTH = 160
@@ -39,7 +40,7 @@ def test_tokens_cost_row1_starts_with_rate_icon_in_right_section() -> None:
     _, col2 = cols
     row1_stripped = strip_ansi(lines[0])
     leader_start = col2 - 1
-    assert row1_stripped[leader_start] == sl.ICON_TOK_RATE
+    assert row1_stripped[leader_start] == ICON_TOK_RATE
 
 
 def test_tokens_cost_row2_right_section_begins_with_15_spaces() -> None:

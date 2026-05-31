@@ -22,16 +22,16 @@ pr-info:
 	@uv --version 2>/dev/null || echo "uv: not installed"
 
 demo:
-	@uv run python3 claude/statusline/demo.py
+	@uv run python3 ops/demo.py
 
 demo/img:
-	@uv run python3 claude/statusline/demo.py --snapshots demo/
+	@uv run python3 ops/demo.py --snapshots demo/
 
 test:
 	@uv run pytest -q
 
 statusline/test:
-	@uv run python claude/statusline/demo.py
+	@uv run python ops/demo.py
 
 mon/run:
 	uv run python claude/mon.py

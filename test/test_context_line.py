@@ -1,10 +1,9 @@
-import statusline_command as sl
+import statusline.renderer as renderer
+from statusline.constants import CLR_ALERT, DEFAULT_SOFT_LIMIT as SOFT_LIMIT
+from statusline.session import ContextWindow
+from statusline.text import _visible_width
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
-ContextWindow = sl.ContextWindow
-CLR_ALERT = sl.CLR_ALERT
-SOFT_LIMIT = sl.SOFT_LIMIT
+Renderer = renderer.Renderer
 
 
 def test_context_line_under_soft_limit() -> None:
