@@ -58,7 +58,18 @@ fi
 printf "  Plugin root: %s\n" "$PLUGIN_ROOT"
 ```
 
-## Step 2: Check if already current
+## Step 2: Remove legacy statusline-info-* files
+
+Run unconditionally (even if already up-to-date).
+
+```bash
+for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
+    [ -e "$f" ] || continue
+    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+done  # timeout: 5000
+```
+
+## Step 3: Check if already current
 
 ```bash
 jq --arg script "$SCRIPT" -e '
@@ -68,7 +79,7 @@ jq --arg script "$SCRIPT" -e '
 
 If exit 0: print `statusLine already set to current version — skipping.` and stop.
 
-## Step 3: Detect Python interpreter
+## Step 4: Detect Python interpreter
 
 ```bash
 PYTHON_BIN=""
@@ -86,7 +97,7 @@ fi
 printf "  Python: %s\n" "$PYTHON_BIN"
 ```
 
-## Step 4: Back up and write statusLine.command
+## Step 5: Back up and write statusLine.command
 
 ```bash
 SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
@@ -113,15 +124,6 @@ mv "$_tmp" "$SETTINGS"  # timeout: 3000
 printf "  settings.json updated\n"
 ```
 
-## Step 5: Remove legacy statusline-info-* files
-
-```bash
-for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
-    [ -e "$f" ] || continue
-    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
-done  # timeout: 5000
-```
-
 ## Step 6: Validate and report
 
 ```bash
@@ -136,6 +138,5 @@ Print:
   Config dir: $CLAUDE_CONFIG_DIR
   Done. Reload Claude Code to activate the statusline.
 ```
-
 
 </workflow>
