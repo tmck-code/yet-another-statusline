@@ -3,7 +3,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 import statusline_command as sl
 
@@ -67,25 +66,45 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
     uncapped_w = _first_line_width({'YAS_FULL_WIDTH': '1'})
     default_w  = _first_line_width({})
 
-    assert uncapped_w == fake_tw,      f'YAS_FULL_WIDTH: expected {fake_tw}, got {uncapped_w}'
+    assert uncapped_w == fake_tw-6,      f'YAS_FULL_WIDTH: expected {fake_tw-6}, got {uncapped_w}'
     assert default_w  == sl.MAX_WIDTH, f'default: expected {sl.MAX_WIDTH}, got {default_w}'
 
 
-def test_render_matches_cli_subprocess(tmp_path, monkeypatch):
+def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     import os
-    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    # tmp_home patches both HOME and CLAUDE_DIR for the in-process render; the
+    # subprocess must read the same (empty) CLAUDE_DIR or its token/cost/sparkline
+    # rows diverge from the real ~/.claude logs. The CLI caps width at MAX_WIDTH
+    # (raw_tw - 6), so feed COLUMNS = MAX_WIDTH + 6 and render the API at the cap.
+    claude_dir = tmp_home / '.claude'
 
     info = _load_example()
+
+    # Build an env the subprocess can't escape the sandbox through. Inheriting
+    # os.environ wholesale lets the host leak in:
+    #   - TMUX_PANE / TMUX make terminal_width() query the real tmux pane and
+    #     ignore COLUMNS, so the subprocess renders at the pane width, not MAX_WIDTH.
+    #   - YAS_FULL_WIDTH switches main() to the uncapped (raw_tw - 6) branch.
+    # Strip both so the subprocess deterministically caps at MAX_WIDTH via COLUMNS,
+    # and pin YAS_MAX_WIDTH to the in-process sl.MAX_WIDTH so the cap matches exactly.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('TMUX_PANE', 'TMUX', 'YAS_FULL_WIDTH')}
+    env.update({
+        'COLUMNS':           str(sl.MAX_WIDTH + 6),
+        'YAS_MAX_WIDTH':     str(sl.MAX_WIDTH),
+        'HOME':              str(tmp_home),
+        'CLAUDE_CONFIG_DIR': str(claude_dir),
+    })
 
     proc = subprocess.run(
         [sys.executable, str(_SCRIPT)],
         input=json.dumps(info),
         capture_output=True,
         text=True,
-        env={**os.environ, 'COLUMNS': '166', 'HOME': str(tmp_path)},
+        env=env,
     )
     result_cli = proc.stdout
 
-    result_api = sl.render(info, 160)
+    result_api = sl.render(info, sl.MAX_WIDTH)
 
     assert result_api == result_cli.rstrip('\n')

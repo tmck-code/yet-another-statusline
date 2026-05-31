@@ -24,8 +24,8 @@ def test_path_git_dirty_with_elapsed() -> None:
     git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=1)
     out = r.path_git('~/proj', git, '12m')
     stripped = strip_ansi(out)
-    assert '●3' in stripped
-    assert '*1' in stripped
+    assert '*3' in stripped   # modified
+    assert '•1' in stripped   # untracked
     assert '[12m]' in stripped
 
 
@@ -67,7 +67,7 @@ class TestPathGitFlags:
         stripped = strip_ansi(out)
         assert 'abc1234' not in stripped
         assert '/' not in stripped.split('main')[1]
-        assert '●1' in stripped
+        assert '*1' in stripped   # modified
         assert '[3m]' in stripped
 
     def test_show_elapsed_false_omits_tail(self) -> None:
@@ -107,7 +107,6 @@ class TestFitPath:
     def test_no_commit_when_full_overflows(self) -> None:
         r = Renderer()
         git = self._git()
-        full     = r.path_git('~/p', git, '2m')
         no_commit = r.path_git('~/p', git, '2m', show_commit=False)
         target_w = _visible_width(no_commit)
         result = r.fit_path('~/p', git, '2m', target_w)
@@ -166,7 +165,6 @@ class TestFitPath:
     def test_compact_only_skips_path_git_variants(self) -> None:
         r = Renderer()
         git = self._git()
-        full = r.path_git('~/p', git, '2m')
         compact = r.path_git_compact('~/p', git)
         # target_w fits compact but not full
         target_w = _visible_width(compact)
@@ -176,7 +174,6 @@ class TestFitPath:
     def test_compact_only_never_returns_full_path_git(self) -> None:
         r = Renderer()
         git = self._git()
-        full = r.path_git('~/p', git, '2m')
         # Very wide target_w — compact_only should still not return full path_git
         result = r.fit_path('~/p', git, '2m', 999, compact_only=True)
         assert 'abc1234' not in strip_ansi(result)

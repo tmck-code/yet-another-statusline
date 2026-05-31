@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,7 +11,7 @@ class ActiveSession:
     session_id: str
     jsonl_path: Path
     jsonl_mtime: float
-    payload: dict
+    payload: dict[str, object]
     payload_mtime: float
 
 
@@ -22,7 +21,7 @@ def find_active_jsonls(
     projects_root: Path = Path.home() / '.claude' / 'projects',
 ) -> list[tuple[Path, float]]:
     """Return (jsonl_path, mtime) pairs for .jsonl files whose mtime is within include_after of now."""
-    result = []
+    result: list[tuple[Path, float]] = []
     now_ts = now.timestamp()
     cutoff = include_after.total_seconds()
 
@@ -42,9 +41,9 @@ def find_active_jsonls(
 
 def index_payloads_by_session(
     payloads_root: Path = Path.home() / '.claude' / 'statusline-output',
-) -> dict[str, tuple[Path, float, dict]]:
+) -> dict[str, tuple[Path, float, dict[str, object]]]:
     """Return most-recent payload file per session_id as (path, mtime, parsed_dict)."""
-    index: dict[str, tuple[Path, float, dict]] = {}
+    index: dict[str, tuple[Path, float, dict[str, object]]] = {}
 
     if not payloads_root.exists():
         return index

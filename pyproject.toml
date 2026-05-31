@@ -1,10 +1,10 @@
 [project]
-name = "claude-code-config"
-version = "0.1.0"
-description = "My Claude Code config"
+name = "yet-another-statusline"
+version = "0.2.0"
+description = "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more"
 readme = "README.md"
 
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 
 dependencies = []
 
@@ -20,8 +20,8 @@ dev = [
 exclude = [
     ".claude/",
     ".venv/",
-    "claude/",
     "openspec/",
+    "test/",
 ]
 plugins = []
 disallow_untyped_defs = true  # no functions without type annotations
@@ -38,13 +38,12 @@ exclude = [
     ".git",
     ".ruff_cache",
     ".venv",
-    "claude/",
     "openspec/",
 ]
 
 line-length = 140
 indent-width = 4
-target-version = "py312"
+target-version = "py310"
 
 
 [tool.ruff.lint]

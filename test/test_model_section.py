@@ -117,7 +117,6 @@ class TestSingleRowGuarantee:
         path, helper, right, right_w = self._wide_combo(r, width)
         path_w   = _visible_width(path)
         helper_w = _visible_width(helper)
-        row_text = path + helper + right
         total    = path_w + self._vsep_w + helper_w + right_w
         assert total <= width - 4, f'row overflows: total={total} width={width}'
         assert strip_ansi(right_w and right or right) != ''
@@ -246,7 +245,7 @@ class TestModelRightSectionCompactBurndown:
         rate = RateLimits(five_hour=RateBucket(used_percentage=60.0, resets_at=0))
         rate_text, _right, _w = self._r.model_right_section_compact('Sonnet 4.6', rate, max_right_width=40)
         stripped = strip_ansi(rate_text)
-        assert sl.GLYPH_FAST not in stripped
+        assert sl.GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
         assert '·' not in stripped
 

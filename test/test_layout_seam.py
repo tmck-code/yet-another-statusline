@@ -30,7 +30,14 @@ def _make_sub() -> sl.RunningSubagent:
 
 
 def _silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strip every conditional (dynamic) section so token stats are last."""
+    """Strip every conditional (dynamic) section so token stats are last.
+
+    Each dynamic section below the token stats reads the real machine (the
+    transcript, ~/.claude/settings.json, the cwd's openspec dir, ...). Left
+    alone, the host's own plugins/skills/tasks leak in and synthesise a
+    dynamic row + seam, so neutralise every source — including
+    Workspace.plugins, which reads CLAUDE_DIR/settings.json directly.
+    """
     monkeypatch.setattr(sl.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir: sl.RunningSubagents(subagents=[])))
     monkeypatch.setattr(sl.TaskList, 'from_session',
@@ -39,6 +46,7 @@ def _silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
                         classmethod(lambda cls, path: sl.LoadedSkills(names=[])))
     monkeypatch.setattr(sl.OpenSpec, 'from_cwd',
                         classmethod(lambda cls, cwd: sl.OpenSpec(changes=[])))
+    monkeypatch.setattr(sl.Workspace, 'plugins', property(lambda self: ''))
 
 
 def _kinds(spec: sl.LayoutSpec) -> list[str]:

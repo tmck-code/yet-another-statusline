@@ -8,7 +8,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from claude.mon.discovery import (  # noqa: E402
-    ActiveSession,
     discover,
     find_active_jsonls,
     index_payloads_by_session,

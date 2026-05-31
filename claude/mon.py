@@ -8,15 +8,12 @@ import select
 import shutil
 import signal
 import sys
-import time
 import traceback
 from datetime import datetime
 from pathlib import Path
 
 # Add claude/ dir to sys.path so sibling modules are importable.
-_CLAUDE_DIR = Path(__file__).resolve().parent
-if str(_CLAUDE_DIR) not in sys.path:
-    sys.path.insert(0, str(_CLAUDE_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mon.discovery import discover
 from mon.lifecycle import classify, validate_thresholds, apply_dim

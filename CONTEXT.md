@@ -107,6 +107,23 @@ A velocity indicator rendered alongside each active rate-limit bucket's `<pct>%`
 
 Suppressed when: `resets_at == 0` (no window), window expired, or within warmup period (first 5 min of 5h window, first 30 min of 7d window). Per-layout policy: wide shows trend for both 5h and 7d; medium shows 5h trend only; narrow shows no trend.
 
+### Configuration
+
+**Config**:
+The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
+_Avoid_: "settings" (overloaded with Claude Code's `settings.json`, which is unrelated — `Config` reads `yas.toml` and `YAS_*` env vars).
+
+**Precedence Chain**:
+The fixed order every knob resolves through, highest priority first: CLI flag → canonical `YAS_*` env var → legacy-alias env var → `yas.toml` value → built-in default. The first source that is *present and valid* wins; absent (an empty-string env var counts as absent) or invalid sources fall through to the next. The single documented exception is the **Per-Model Override**, which beats the global `soft_limit` from any source — specificity beats source precedence.
+
+**Per-Model Override**:
+A `[[tokens.model]]` entry in `yas.toml` pairing a `match` substring with a `soft_limit`. `match` is a case-insensitive plain substring (no glob/regex) tested against the model id and display name; the longest match wins, ties break by file order. A matching override beats the global `soft_limit` from *any* source, including `YAS_SOFT_LIMIT` — there is intentionally no per-model env var, so this is the one place specificity outranks the **Precedence Chain**.
+_Avoid_: "per-model env var" (none exists by design).
+
+**Config-Error Row**:
+The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. Full per-value reasons are written to stderr only when `YAS_DEBUG` is set. A rejected knob silently falls back to its default — the row is informational, never fatal.
+_Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single failure message, and never aborts the render).
+
 ## Relationships
 
 - **Billed Input** + **Cache Read** + **Output** are the three columns shown twice in the tokens row — once for this session, once as **Day Total**.

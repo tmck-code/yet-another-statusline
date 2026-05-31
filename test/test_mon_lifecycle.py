@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude.mon.lifecycle import Tier, apply_dim, classify, validate_thresholds
+from claude.mon.lifecycle import apply_dim, classify, validate_thresholds
 
 NOW = 1_000_000.0
 IDLE = timedelta(minutes=5)

@@ -10,24 +10,35 @@ import shutil
 import subprocess
 import sys
 import time
+try:
+    import tomllib
+except ImportError:  # Python 3.10 ships no stdlib tomllib; yas.toml is skipped.
+    tomllib = None  # type: ignore[assignment]
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 
 # Load the themes module via importlib because this script runs as a top-level
 # file (not inside a package). The same shim is used by test/conftest.py.
+# TYPE_CHECKING lets mypy resolve the types via a normal import path while the
+# importlib load handles the runtime side.
+if TYPE_CHECKING:
+    from statusline.themes import ModelColors, Theme
+
 _THEMES_PATH = Path(__file__).resolve().parent / 'statusline' / 'themes.py'
 _themes_spec = importlib.util.spec_from_file_location('statusline_themes', _THEMES_PATH)
 assert _themes_spec is not None and _themes_spec.loader is not None
 themes = importlib.util.module_from_spec(_themes_spec)
 sys.modules['statusline_themes'] = themes
 _themes_spec.loader.exec_module(themes)
-Theme        = themes.Theme
-ModelColors  = themes.ModelColors
-THEMES       = themes.THEMES
-CLAUDE_DARK  = themes.CLAUDE_DARK
+if not TYPE_CHECKING:
+    Theme       = themes.Theme
+    ModelColors = themes.ModelColors
+THEMES:     dict[str, Theme] = themes.THEMES
+CLAUDE_DARK: Theme           = themes.CLAUDE_DARK
 
 
 class BarChars:
@@ -40,17 +51,293 @@ class BarChars:
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 MIN_WIDTH    = 40
-DEFAULT_MAX_WIDTH = 140
-MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
+DEFAULT_MAX_WIDTH    = 140
+DEFAULT_SOFT_LIMIT   = 150_000
+DEFAULT_TOKEN_WINDOW = 60.0
+DEFAULT_THEME        = 'claude-dark'
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
-SOFT_LIMIT = 150_000
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 FIVE_HOUR_MINUTES        = 300
 SEVEN_DAY_MINUTES        = 10080
 FIVE_HOUR_WARMUP_MINUTES = 5
 SEVEN_DAY_WARMUP_MINUTES = 30
+
+
+# ---------------------------------------------------------------------------
+# Layered configuration (Config dataclass + precedence chain).
+#
+# Every configurable knob resolves through one fixed chain:
+#   CLI flag  →  canonical YAS_* env  →  legacy-alias env  →  yas.toml  →  default
+# A higher-precedence source that is present and valid wins; an absent or
+# invalid source falls through to the next. Only yas.toml-sourced rejections are
+# surfaced in the visible error row (the row is titled "yas.toml"); every
+# rejection (any source) is recorded in debug_lines for YAS_DEBUG stderr output.
+# ---------------------------------------------------------------------------
+
+
+def _parse_pos_int(raw: object, origin: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise ValueError('expected an integer')
+    n = int(raw)  # str/int/float ok; 'banana' raises
+    if n <= 0:
+        raise ValueError('must be > 0')
+    return n
+
+
+def _parse_pos_float(raw: object, origin: str) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise ValueError('expected a number')
+    x = float(raw)
+    if x <= 0:
+        raise ValueError('must be > 0')
+    return x
+
+
+def _parse_bool(raw: object, origin: str) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    # Env form: any non-empty value is true (empty strings are filtered out
+    # before reaching here). A non-bool from yas.toml is a type error.
+    if origin == 'cli' or origin.startswith('env'):
+        return True
+    raise ValueError('expected a boolean')
+
+
+def _parse_theme(raw: object, origin: str) -> str:
+    name = str(raw).strip()
+    if name in THEMES:
+        return name
+    raise ValueError(f'unknown theme {name!r}')
+
+
+def _parse_bg_shift(raw: object, origin: str) -> str:
+    v = str(raw).strip().lower()
+    if v in ('warm', 'cool'):
+        return v
+    raise ValueError(f'expected warm or cool, got {v!r}')
+
+
+def _env_sources(env: dict[str, str], canonical: str, *aliases: str) -> list[tuple[str, object]]:
+    out: list[tuple[str, object]] = []
+    for name in (canonical, *aliases):
+        v = env.get(name)
+        if v not in (None, ''):  # empty string env var == absent
+            out.append((f'env:{name}', v))
+    return out
+
+
+_T = TypeVar('_T')
+
+
+def _resolve(
+    label: str,
+    sources: list[tuple[str, object]],
+    parse: Callable[[object, str], _T],
+    default: _T,
+    errors: list[str],
+    debug: list[str],
+) -> _T:
+    """Walk precedence sources; first that parses wins, else the default.
+
+    Records every present-but-invalid value in ``debug``; records the knob name
+    in ``errors`` only for yas.toml-sourced rejections (the visible row is
+    titled "yas.toml" so env/CLI failures stay debug-only).
+    """
+    for origin, raw in sources:
+        try:
+            return parse(raw, origin)
+        except (ValueError, TypeError) as e:
+            debug.append(f'{label}: {origin} value {raw!r} rejected ({e})')
+            if origin == 'toml' and label not in errors:
+                errors.append(label)
+    return default
+
+
+def _legacy_theme_sources(config_dir: Path) -> list[tuple[str, object]]:
+    """The deprecated ~/.claude/statusline-theme file, lowest priority."""
+    try:
+        name = (config_dir / 'statusline-theme').read_text().strip()
+    except OSError:
+        return []
+    return [('legacy', name)] if name else []
+
+
+def _parse_argv(argv: Sequence[str]) -> dict[str, str]:
+    """Extract --theme / --bg-shift overrides from a CLI argv slice."""
+    out: dict[str, str] = {}
+    args = list(argv)
+    while args:
+        a = args.pop(0)
+        if a == '--bg-shift' and args:
+            out['bg_shift'] = args.pop(0)
+        elif a.startswith('--bg-shift='):
+            out['bg_shift'] = a.split('=', 1)[1]
+        elif a == '--theme' and args:
+            out['theme'] = args.pop(0)
+        elif a.startswith('--theme='):
+            out['theme'] = a.split('=', 1)[1]
+    return out
+
+
+def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
+    """Read config_dir/yas.toml.
+
+    Returns (data, error). Missing file or no tomllib (Python 3.10) → ({}, None),
+    i.e. silently skipped. A parse failure → ({}, "yas.toml: parse error").
+    """
+    if tomllib is None:
+        return {}, None
+    try:
+        text = (config_dir / 'yas.toml').read_text()
+    except OSError:
+        return {}, None  # missing file is not an error
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        return {}, 'yas.toml: parse error'
+    return data, None
+
+
+def _parse_models(raw: object, errors: list[str], debug: list[str]) -> list[tuple[str, int]]:
+    """Validate the [[tokens.model]] array into order-preserving (match, limit)."""
+    out: list[tuple[str, int]] = []
+    if not isinstance(raw, list):
+        return out
+    for i, entry in enumerate(raw):
+        label = f'tokens.model[{i}]'
+        if not isinstance(entry, dict):
+            errors.append(label)
+            debug.append(f'{label}: not a table')
+            continue
+        match = entry.get('match')
+        limit = entry.get('soft_limit')
+        if not isinstance(match, str) or not match.strip():
+            errors.append(label)
+            debug.append(f'{label}: missing or empty match')
+            continue
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            errors.append(label)
+            debug.append(f'{label}: soft_limit must be an integer > 0')
+            continue
+        out.append((match.strip().lower(), limit))
+    return out
+
+
+@dataclass(frozen=True)
+class Config:
+    max_width: int = DEFAULT_MAX_WIDTH
+    full_width: bool = False
+    soft_limit: int = DEFAULT_SOFT_LIMIT
+    token_window: float = DEFAULT_TOKEN_WINDOW
+    theme: str = DEFAULT_THEME
+    bg_shift: str = 'warm'
+    soft_limit_models: tuple[tuple[str, int], ...] = ()
+    errors: tuple[str, ...] = ()
+    debug_lines: tuple[str, ...] = ()
+
+    @classmethod
+    def load(
+        cls,
+        env: dict[str, str] | None = None,
+        config_dir: Path | None = None,
+        argv: Sequence[str] | None = None,
+    ) -> Config:
+        if env is None:
+            env = dict(os.environ)
+        if config_dir is None:
+            config_dir = CLAUDE_DIR
+        errors: list[str] = []
+        debug: list[str] = []
+
+        toml_data, parse_err = _load_toml(config_dir)
+        if parse_err:
+            errors.append(parse_err)
+            debug.append(parse_err)
+
+        def _table(name: str) -> dict[str, object]:
+            v = toml_data.get(name)
+            return v if isinstance(v, dict) else {}
+
+        layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
+        cli = _parse_argv(argv) if argv is not None else {}
+
+        def toml_src(table: dict[str, object], key: str) -> list[tuple[str, object]]:
+            return [('toml', table[key])] if key in table else []
+
+        def cli_src(name: str) -> list[tuple[str, object]]:
+            return [('cli', cli[name])] if name in cli else []
+
+        max_width = _resolve(
+            'max_width',
+            _env_sources(env, 'YAS_MAX_WIDTH') + toml_src(layout, 'max_width'),
+            _parse_pos_int, DEFAULT_MAX_WIDTH, errors, debug)
+        full_width = _resolve(
+            'full_width',
+            _env_sources(env, 'YAS_FULL_WIDTH') + toml_src(layout, 'full_width'),
+            _parse_bool, False, errors, debug)
+        soft_limit = _resolve(
+            'soft_limit',
+            _env_sources(env, 'YAS_SOFT_LIMIT') + toml_src(tokens, 'soft_limit'),
+            _parse_pos_int, DEFAULT_SOFT_LIMIT, errors, debug)
+        token_window = _resolve(
+            'token_window',
+            _env_sources(env, 'YAS_TOKEN_WINDOW', 'STATUSLINE_TOKEN_WINDOW') + toml_src(tokens, 'token_window'),
+            _parse_pos_float, DEFAULT_TOKEN_WINDOW, errors, debug)
+        theme = _resolve(
+            'theme',
+            cli_src('theme')
+            + _env_sources(env, 'YAS_THEME', 'CLAUDE_STATUSLINE_THEME')
+            + toml_src(appearance, 'theme')
+            + _legacy_theme_sources(config_dir),
+            _parse_theme, DEFAULT_THEME, errors, debug)
+        bg_shift = _resolve(
+            'bg_shift',
+            cli_src('bg_shift')
+            + _env_sources(env, 'YAS_BG_SHIFT')
+            + toml_src(appearance, 'bg_shift'),
+            _parse_bg_shift, 'warm', errors, debug)
+
+        soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
+
+        return cls(
+            max_width=max_width,
+            full_width=full_width,
+            soft_limit=soft_limit,
+            token_window=token_window,
+            theme=theme,
+            bg_shift=bg_shift,
+            soft_limit_models=tuple(soft_limit_models),
+            errors=tuple(errors),
+            debug_lines=tuple(debug),
+        )
+
+    def soft_limit_for(self, model_id: str, display_name: str = '') -> int:
+        """Resolve the effective soft_limit for a session model.
+
+        Each [[tokens.model]] ``match`` is a case-insensitive plain substring
+        tested against the lowercased id and display_name. The longest match
+        wins; ties break by file order. No match → the global soft_limit.
+        """
+        hay_id, hay_name = model_id.lower(), display_name.lower()
+        best_key: tuple[int, int] | None = None
+        best_limit = self.soft_limit
+        for i, (match, limit) in enumerate(self.soft_limit_models):
+            if match in hay_id or match in hay_name:
+                key = (len(match), -i)  # longer wins; tie → earlier (smaller i)
+                if best_key is None or key > best_key:
+                    best_key, best_limit = key, limit
+        return best_limit
+
+
+CONFIG = Config.load()
+MAX_WIDTH    = CONFIG.max_width
+SOFT_LIMIT   = CONFIG.soft_limit
+TOKEN_WINDOW = CONFIG.token_window
+if os.environ.get('YAS_DEBUG'):
+    for _line in CONFIG.debug_lines:
+        print(_line, file=sys.stderr)
 
 
 def burndown_delta(
@@ -93,10 +380,12 @@ def subagent_share(sub_inout: int, session_inout: int) -> float | None:
 
 def terminal_width() -> int:
     try:
-        w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
+        w = int(subprocess.run([
+            "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
+        ], capture_output=True, text=True).stdout.strip().replace("'", ""))
         if w > 0:
             return w
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError):
         pass
     try:
         w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
@@ -176,6 +465,7 @@ GLYPH_CONTINUATION = '└'    # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (└)
 GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
 GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE          = '\uf200'  # nf-fa-pie_chart     (subagent session share)
+GLYPH_CONFIG_WARN  = '\u26a0'  # U+26A0 WARNING SIGN (config-error row marker)
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -346,15 +636,40 @@ class TokenAccounting:
         return cost / 1_000_000
 
 
+def _as_int(v: object, default: int = 0) -> int:
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    return default
+
+
+def _as_float(v: object, default: float = 0.0) -> float:
+    if isinstance(v, (int, float)):
+        return float(v)
+    return default
+
+
+def _as_str(v: object, default: str = '') -> str:
+    if isinstance(v, str):
+        return v
+    return default
+
+
 class Model(NamedTuple):
     id: str = ''
     display_name: str = ''
 
     @classmethod
-    def from_dict(cls, d) -> Model:
+    def from_dict(cls, d: object) -> Model:
         if isinstance(d, str):
             return cls(id=d, display_name='')
-        return cls(id=d.get('id', ''), display_name=d.get('display_name', ''))
+        if isinstance(d, dict):
+            return cls(
+                id           = _as_str(d.get('id')),
+                display_name = _as_str(d.get('display_name')),
+            )
+        return cls()
 
     @property
     def cost_rates(self) -> tuple[float, float]:
@@ -365,23 +680,23 @@ class OutputStyle(NamedTuple):
     name: str = 'default'
 
     @classmethod
-    def from_dict(cls, d: dict) -> OutputStyle:
-        return cls(name=d.get('name', 'default'))
+    def from_dict(cls, d: dict[str, object]) -> OutputStyle:
+        return cls(name=_as_str(d.get('name'), 'default'))
 
 
 class Effort(NamedTuple):
     level: str = ''
 
     @classmethod
-    def from_dict(cls, d: dict) -> Effort:
-        return cls(level=d.get('level', ''))
+    def from_dict(cls, d: dict[str, object]) -> Effort:
+        return cls(level=_as_str(d.get('level')))
 
 
 class Thinking(NamedTuple):
     enabled: bool = False
 
     @classmethod
-    def from_dict(cls, d: dict) -> Thinking:
+    def from_dict(cls, d: dict[str, object]) -> Thinking:
         return cls(enabled=bool(d.get('enabled', False)))
 
 
@@ -392,12 +707,12 @@ class CurrentUsage(NamedTuple):
     cache_read_input_tokens: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> CurrentUsage:
+    def from_dict(cls, d: dict[str, object]) -> CurrentUsage:
         return cls(
-            input_tokens                = d.get('input_tokens', 0),
-            output_tokens               = d.get('output_tokens', 0),
-            cache_creation_input_tokens = d.get('cache_creation_input_tokens', 0),
-            cache_read_input_tokens     = d.get('cache_read_input_tokens', 0),
+            input_tokens                = _as_int(d.get('input_tokens', 0)),
+            output_tokens               = _as_int(d.get('output_tokens', 0)),
+            cache_creation_input_tokens = _as_int(d.get('cache_creation_input_tokens', 0)),
+            cache_read_input_tokens     = _as_int(d.get('cache_read_input_tokens', 0)),
         )
 
 
@@ -406,10 +721,10 @@ class RateBucket(NamedTuple):
     resets_at: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> RateBucket:
+    def from_dict(cls, d: dict[str, object]) -> RateBucket:
         return cls(
-            used_percentage = round(float(d.get('used_percentage', 0.0)), 2),
-            resets_at       = d.get('resets_at', 0),
+            used_percentage = round(_as_float(d.get('used_percentage', 0.0)), 2),
+            resets_at       = _as_int(d.get('resets_at', 0)),
         )
 
 
@@ -417,14 +732,17 @@ class RateBucket(NamedTuple):
 class Workspace:
     current_dir: str = ''
     project_dir: str = ''
-    added_dirs: list = field(default_factory=list)
+    added_dirs: list[object] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Workspace:
+    def from_dict(cls, d: dict[str, object]) -> Workspace:
+        current_dir = d.get('current_dir', '')
+        project_dir = d.get('project_dir', '')
+        added_dirs  = d.get('added_dirs')
         return cls(
-            current_dir = d.get('current_dir', ''),
-            project_dir = d.get('project_dir', ''),
-            added_dirs  = d.get('added_dirs') or [],
+            current_dir = str(current_dir) if current_dir else '',
+            project_dir = str(project_dir) if project_dir else '',
+            added_dirs  = list(added_dirs) if isinstance(added_dirs, list) else [],
         )
 
     @property
@@ -457,13 +775,13 @@ class Cost:
     total_lines_removed: int = 0
 
     @classmethod
-    def from_dict(cls, d: dict) -> Cost:
+    def from_dict(cls, d: dict[str, object]) -> Cost:
         return cls(
-            total_cost_usd        = d.get('total_cost_usd', 0.0),
-            total_duration_ms     = d.get('total_duration_ms', 0),
-            total_api_duration_ms = d.get('total_api_duration_ms', 0),
-            total_lines_added     = d.get('total_lines_added', 0),
-            total_lines_removed   = d.get('total_lines_removed', 0),
+            total_cost_usd        = _as_float(d.get('total_cost_usd', 0.0)),
+            total_duration_ms     = _as_int(d.get('total_duration_ms', 0)),
+            total_api_duration_ms = _as_int(d.get('total_api_duration_ms', 0)),
+            total_lines_added     = _as_int(d.get('total_lines_added', 0)),
+            total_lines_removed   = _as_int(d.get('total_lines_removed', 0)),
         )
 
 
@@ -477,14 +795,18 @@ class ContextWindow:
     remaining_percentage: float | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> ContextWindow:
+    def from_dict(cls, d: dict[str, object]) -> ContextWindow:
+        cu_raw = d.get('current_usage')
+        cu = CurrentUsage.from_dict(cu_raw if isinstance(cu_raw, dict) else {})
+        used_pct = d.get('used_percentage')
+        rem_pct  = d.get('remaining_percentage')
         return cls(
-            total_input_tokens   = d.get('total_input_tokens', 0),
-            total_output_tokens  = d.get('total_output_tokens', 0),
-            context_window_size  = d.get('context_window_size', 0),
-            current_usage        = CurrentUsage.from_dict(d.get('current_usage') or {}),
-            used_percentage      = d.get('used_percentage'),
-            remaining_percentage = d.get('remaining_percentage'),
+            total_input_tokens   = _as_int(d.get('total_input_tokens', 0)),
+            total_output_tokens  = _as_int(d.get('total_output_tokens', 0)),
+            context_window_size  = _as_int(d.get('context_window_size', 0)),
+            current_usage        = cu,
+            used_percentage      = float(used_pct) if isinstance(used_pct, (int, float)) else None,
+            remaining_percentage = float(rem_pct)  if isinstance(rem_pct,  (int, float)) else None,
         )
 
 
@@ -494,10 +816,12 @@ class RateLimits:
     seven_day: RateBucket = field(default_factory=RateBucket)
 
     @classmethod
-    def from_dict(cls, d: dict) -> RateLimits:
+    def from_dict(cls, d: dict[str, object]) -> RateLimits:
+        fh = d.get('five_hour')
+        sd = d.get('seven_day')
         return cls(
-            five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
-            seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
+            five_hour = RateBucket.from_dict(fh if isinstance(fh, dict) else {}),
+            seven_day = RateBucket.from_dict(sd if isinstance(sd, dict) else {}),
         )
 
 
@@ -519,22 +843,29 @@ class SessionInfo:
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
-    def from_dict(cls, d: dict) -> SessionInfo:
+    def from_dict(cls, d: dict[str, object]) -> SessionInfo:
+        def _dict(key: str) -> dict[str, object]:
+            v = d.get(key)
+            return v if isinstance(v, dict) else {}
+        session_id      = d.get('session_id', '')
+        transcript_path = d.get('transcript_path', '')
+        cwd             = d.get('cwd', '')
+        version         = d.get('version', '')
         return cls(
-            session_id          = d.get('session_id', ''),
-            transcript_path     = d.get('transcript_path', ''),
-            cwd                 = d.get('cwd', ''),
+            session_id          = str(session_id)      if session_id      is not None else '',
+            transcript_path     = str(transcript_path) if transcript_path is not None else '',
+            cwd                 = str(cwd)             if cwd             is not None else '',
             model               = Model.from_dict(d.get('model') or {}),
-            workspace           = Workspace.from_dict(d.get('workspace') or {}),
-            version             = d.get('version', ''),
-            output_style        = OutputStyle.from_dict(d.get('output_style') or {}),
-            cost                = Cost.from_dict(d.get('cost') or {}),
-            context_window      = ContextWindow.from_dict(d.get('context_window') or {}),
-            exceeds_200k_tokens = d.get('exceeds_200k_tokens', False),
-            effort              = Effort.from_dict(d.get('effort') or {}),
-            thinking            = Thinking.from_dict(d.get('thinking') or {}),
+            workspace           = Workspace.from_dict(_dict('workspace')),
+            version             = str(version)         if version         is not None else '',
+            output_style        = OutputStyle.from_dict(_dict('output_style')),
+            cost                = Cost.from_dict(_dict('cost')),
+            context_window      = ContextWindow.from_dict(_dict('context_window')),
+            exceeds_200k_tokens = bool(d.get('exceeds_200k_tokens', False)),
+            effort              = Effort.from_dict(_dict('effort')),
+            thinking            = Thinking.from_dict(_dict('thinking')),
             fast_mode           = bool(d.get('fast_mode', False)),
-            rate_limits         = RateLimits.from_dict(d.get('rate_limits') or {}),
+            rate_limits         = RateLimits.from_dict(_dict('rate_limits')),
         )
 
     @property
@@ -637,7 +968,7 @@ class TokenLog:
 
 
 class TokenRate:
-    WINDOW = float(os.environ.get('STATUSLINE_TOKEN_WINDOW', '60'))
+    WINDOW = TOKEN_WINDOW  # resolved via Config (YAS_TOKEN_WINDOW / STATUSLINE_TOKEN_WINDOW / yas.toml)
     KEEP = 300.0
 
     @classmethod
@@ -819,8 +1150,10 @@ class GitInfo:
             return modified, untracked, deleted, renamed
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'status', '--porcelain=v1', '-z',
-                 '--untracked-files=normal'],
+                # --no-optional-locks: skip the index refresh write, so a
+                # SIGKILL on timeout can't leave a stray .git/index.lock.
+                ['git', '--no-optional-locks', '-C', repo, 'status',
+                 '--porcelain=v1', '-z', '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,
             )
         except Exception:
@@ -894,7 +1227,7 @@ class RunningSubagent:
     model:         str                   = ''
     cache_read_in: int                   = 0
     total_input:   int                   = 0
-    last_activity: tuple[str, str, dict] = field(default_factory=lambda: ('', '', {}))
+    last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
 
 
 @dataclass
@@ -960,14 +1293,14 @@ class RunningSubagents:
         return cls(subagents=subagents)
 
     @staticmethod
-    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict]]:
+    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]]]:
         seen: set[str] = set()
         billed_in    = 0
         cache_read_in = 0
         output       = 0
         first_ts     = 0.0
         model        = ''
-        last_activity: tuple[str, str, dict] = ('', '', {})
+        last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
         try:
             with jsonl.open('r', errors='ignore') as fh:
                 for ln in fh:
@@ -1300,7 +1633,10 @@ def model_key(name: str) -> str:
 
 
 def _scale(rgb: tuple[int, int, int], pct: int) -> tuple[int, int, int]:
-    return tuple(min(255, max(0, c * pct // 100)) for c in rgb)
+    r, g, b = rgb
+    return (min(255, max(0, r * pct // 100)),
+            min(255, max(0, g * pct // 100)),
+            min(255, max(0, b * pct // 100)))
 
 
 def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]],
@@ -1321,12 +1657,13 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
         g = int(c0[1] + (c1[1] - c0[1]) * t)
         b = int(c0[2] + (c1[2] - c0[2]) * t)
         lum = (r * 299 + g * 587 + b * 114) // 1000
+        fg_rgb: tuple[int, int, int] | None
         if lum >= BG_LUM_THRESHOLD:
             fg_rgb = pill_fg_dark
         elif pill_fg_light is not None:
             fg_rgb = pill_fg_light
         else:
-            fg_rgb = fg if fg is not None else None
+            fg_rgb = fg
         cur_bg = (r, g, b)
         if cur_bg != prev_bg:
             parts.append(f'\033[48;2;{r};{g};{b}m')
@@ -1913,7 +2250,7 @@ class Renderer:
 
         def _build(name: str, rate: str) -> tuple[str, int]:
             if pct_bg:
-                cells = []
+                cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
                 cells.append((GLYPH_MODEL, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
@@ -2059,7 +2396,7 @@ class Renderer:
 
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
-    def subagent_activity(self, last_activity: tuple[str, str, dict]) -> str:
+    def subagent_activity(self, last_activity: tuple[str, str, dict[str, object]]) -> str:
         kind, name, inp = last_activity
         if kind == 'tool_use':
             key = TOOL_ARG_KEY.get(name)
@@ -2234,7 +2571,7 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> tuple[list[str], tuple[int, int], int]:
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
         in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
@@ -2351,12 +2688,12 @@ class Renderer:
             parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
         return ''.join(parts)
 
-    def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
+    def context_line(self, ctx: ContextWindow, available: int = 76, soft_limit: int = SOFT_LIMIT) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a = BOLD + self.risk_zone_color(total_tokens)
             secondary = ''
             if ctx.context_window_size > 0:
@@ -2382,12 +2719,12 @@ class Renderer:
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
 
-    def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
+    def context_line_compact(self, ctx: ContextWindow, available: int, soft_limit: int = SOFT_LIMIT) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
-        pct_soft     = total_tokens / SOFT_LIMIT * 100
+        fill_ratio   = min(total_tokens / soft_limit, 1.0)
+        pct_soft     = total_tokens / soft_limit * 100
 
-        if total_tokens >= SOFT_LIMIT:
+        if total_tokens >= soft_limit:
             a      = BOLD + self.risk_zone_color(total_tokens)
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
@@ -2404,7 +2741,7 @@ class Renderer:
         bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f' {prefix}{bar}'
 
-    SPEC_GRADIENTS = [
+    SPEC_GRADIENTS: Sequence[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = [
         ((20, 60, 200),  (30, 200, 180),  (220, 255, 120)),     # Ocean    blue → teal → pale green
         ((60, 20, 160),  (240, 60, 140),  (255, 200, 60)),      # Sunset   indigo → magenta → gold
         ((10, 80, 120),  (120, 220, 40),  (240, 240, 60)),      # Forest   navy → lime → yellow
@@ -2422,7 +2759,7 @@ class Renderer:
     SPEC_MID_MIN_WIDTH = 20
 
     def _spec_rgb_at(self, t: float, idx: int, three_stops: bool = True) -> tuple[int, int, int]:
-        stops = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        stops: tuple[tuple[int, int, int], ...] = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
         if not three_stops:
             stops = (stops[0], stops[-1])
         n = len(stops)
@@ -2534,10 +2871,31 @@ class LayoutSpec:
     rows: list[RowSpec] = field(default_factory=list)
 
 
-def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
+def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) -> None:
+    """Append a compact yas.toml config-error row above the bottom border.
+
+    No-op when ``cfg`` has no errors. The row is plain content (no elbows or
+    dividers); the closing border's elbows shift up onto a dim separator placed
+    above the row, so the box math is unchanged. Truncated to the render width
+    via ``_visible_width`` so a long list of rejected knobs never breaks the box.
+    """
+    if not cfg.errors:
+        return
+    names = ', '.join(cfg.errors)
+    text  = f'{GLYPH_CONFIG_WARN} yas.toml: {len(cfg.errors)} values ignored ({names})'
+    avail = max(1, width - 4)  # inner content area between "│ " and " │"
+    if _visible_width(text) > avail:
+        text = text[:avail - 1] + '…'
+    bottom = rows.pop()  # the bottom_border RowSpec
+    rows.append(RowSpec('separator_dim', ups=bottom.ups))
+    rows.append(RowSpec('content', content=f'{CLR_WARN}{text}{RESET}'))
+    rows.append(RowSpec('bottom_border'))
+
+
+def build_narrow(session: SessionInfo, width: int, r: Renderer, soft_limit: int = SOFT_LIMIT) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
@@ -2547,7 +2905,7 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     rate_text, right_text, right_w = r.model_right_section_compact(
         session.model_name, session.rate_limits, max_right, effort_for_bg,
     )
-    line_context = r.context_line_compact(ctx, width - 3)
+    line_context = r.context_line_compact(ctx, width - 3, soft_limit)
 
     pill: Pill | None = None
     if pill_pct:
@@ -2577,21 +2935,22 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
+    append_error_row(rows, CONFIG, width, r)
     spec.rows = rows
     return spec
 
 
-def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
+def build_medium(session: SessionInfo, width: int, r: Renderer, soft_limit: int = SOFT_LIMIT) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     git          = GitInfo.from_cwd(session.cwd)
-    line_context = r.context_line_compact(ctx, width - 3)
+    line_context = r.context_line_compact(ctx, width - 3, soft_limit)
 
     max_right    = max(8, width // 2)
     rate_text, right_text, right_w = r.model_right_section_compact(
@@ -2636,18 +2995,17 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
+    append_error_row(rows, CONFIG, width, r)
     spec.rows = rows
     return spec
 
 
-def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
+def build_wide(session: SessionInfo, width: int, r: Renderer, soft_limit: int = SOFT_LIMIT) -> LayoutSpec:
     ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill         = min(total_tokens / soft_limit, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
-    bg_trail      = r.model_bg_trail(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
@@ -2685,7 +3043,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
 
-    line_context = r.context_line(ctx, width - 3)
+    line_context = r.context_line(ctx, width - 3, soft_limit)
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
@@ -2763,6 +3121,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     else:
         rows.append(RowSpec('bottom_border', ups=pending_ups))
 
+    append_error_row(rows, CONFIG, width, r)
     spec.rows = rows
     return spec
 
@@ -2788,32 +3147,28 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
 
 
 def resolve_theme(cli_name: str | None) -> Theme:
-    """Layered theme selection: CLI → env → config file → CLAUDE_DARK."""
+    """Layered theme selection: CLI → YAS_THEME → CLAUDE_STATUSLINE_THEME
+    → [appearance].theme → statusline-theme file → CLAUDE_DARK.
+
+    Resolves live (fresh Config.load) so callers see the current environment and
+    CLAUDE_DIR; the import-time CONFIG singleton is for the module constants."""
     if cli_name and cli_name in THEMES:
         return THEMES[cli_name]
-    env = os.environ.get('CLAUDE_STATUSLINE_THEME', '').strip()
-    if env in THEMES:
-        return THEMES[env]
-    try:
-        cfg = (CLAUDE_DIR / 'statusline-theme').read_text().strip()
-        if cfg in THEMES:
-            return THEMES[cfg]
-    except OSError:
-        pass
-    return CLAUDE_DARK
+    return THEMES.get(Config.load().theme, CLAUDE_DARK)
 
 
-def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
+def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
     if width < MIN_WIDTH:
         return ''
     session = SessionInfo.from_dict(session_info)
     r       = Renderer(bg_shift=bg_shift, theme=theme)
+    soft_limit = CONFIG.soft_limit_for(session.model.id, session.model.display_name)
     if width < NARROW_WIDTH:
-        spec = build_narrow(session, width, r)
+        spec = build_narrow(session, width, r, soft_limit)
     elif width < MEDIUM_WIDTH:
-        spec = build_medium(session, width, r)
+        spec = build_medium(session, width, r, soft_limit)
     else:
-        spec = build_wide(session, width, r)
+        spec = build_wide(session, width, r, soft_limit)
     return '\n'.join(render_layout(spec, r))
 
 
@@ -2827,42 +3182,34 @@ def main() -> None:
     # already UTF-8 (most Unix systems since Python 3.7).
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
-    bg_shift   = 'warm'
-    theme_name: str | None = None
-    args = sys.argv[1:]
-    while args:
-        a = args.pop(0)
-        if a == '--bg-shift' and args:
-            v = args.pop(0).lower()
-            if v in ('warm', 'cool'):
-                bg_shift = v
-        elif a.startswith('--bg-shift='):
-            v = a.split('=', 1)[1].lower()
-            if v in ('warm', 'cool'):
-                bg_shift = v
-        elif a == '--theme' and args:
-            theme_name = args.pop(0)
-        elif a.startswith('--theme='):
-            theme_name = a.split('=', 1)[1]
+    # Resolve config live so a freshly-set env var (e.g. YAS_FULL_WIDTH) or an
+    # edited yas.toml takes effect on this invocation; CLI flags are top priority.
+    cfg = Config.load(argv=sys.argv[1:])
+    bg_shift = cfg.bg_shift
+    theme    = THEMES.get(cfg.theme, CLAUDE_DARK)
 
-    info  = json.loads(sys.stdin.read())
-    theme = resolve_theme(theme_name)
+    info = json.loads(sys.stdin.read())
 
-    # Write payload so the multi-session observer can index it.
+    # Write payload so the multi-session observer can index it. Keyed by
+    # session_id and overwritten in place, so the dir holds one file per
+    # session rather than one per render tick. The observer already collapses
+    # to the newest payload per session (mon/discovery.index_payloads_by_session),
+    # so the old timestamped filenames only ever accumulated dead weight.
     try:
         out_dir = CLAUDE_DIR / 'statusline-output'
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f'statusline.{int(time.time())}.json').write_text(json.dumps(info))
+        session_id = _as_str(info.get('session_id')) or 'unknown'
+        (out_dir / f'statusline.{session_id}.json').write_text(json.dumps(info))
     except OSError:
         pass
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
         return
-    if os.environ.get('YAS_FULL_WIDTH'):
+    if cfg.full_width:
         width = max(MIN_WIDTH, raw_tw-6)
     else:
-        width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
+        width = max(MIN_WIDTH, min(cfg.max_width, raw_tw - 6))
 
     sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
 

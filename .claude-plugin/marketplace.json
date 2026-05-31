@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "yet-another-statusline",
+  "description": "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more",
+  "owner": {
+    "name": "tmck-code",
+    "url": "https://github.com/tmck-code"
+  },
+  "plugins": [
+    {
+      "name": "yas",
+      "description": "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

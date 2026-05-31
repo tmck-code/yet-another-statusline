@@ -1,6 +1,5 @@
 import time
 
-import pytest
 
 import statusline_command as sl
 

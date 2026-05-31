@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import random
 import re
 import shutil
 import subprocess
@@ -27,7 +26,7 @@ FIXTURE_PATH = WRAPPER_DIR / 'session-info-example.json'
 STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline_command.py'
 
 
-SKILLS_PROGRESSION = (
+SKILLS_PROGRESSION: tuple[list[str], ...] = (
     [],
     ['grill-me'],
     ['grill-me', 'caveman'],
@@ -36,7 +35,7 @@ SKILLS_PROGRESSION = (
     ['grill-me', 'caveman', 'tdd', 'rocky:rocky', 'frontend-design:frontend-design'],
 )
 
-PLUGINS_PROGRESSION = (
+PLUGINS_PROGRESSION: tuple[list[str], ...] = (
     [],
     ['openspec@0.1.0'],
     ['openspec@0.1.0', 'frontend-design@0.3.2'],
@@ -45,7 +44,7 @@ PLUGINS_PROGRESSION = (
 
 # [(name, done, total), ...] per animation stage. Both specs hit 100% before the
 # final empty stage clears them.
-OPENSPEC_PROGRESSION = (
+OPENSPEC_PROGRESSION: tuple[list[tuple[str, int, int]], ...] = (
     [],
     [('port-statusline-to-python', 1, 8)],
     [('port-statusline-to-python', 3, 8), ('add-gradient-engine', 2, 8)],
@@ -56,7 +55,7 @@ OPENSPEC_PROGRESSION = (
 
 # (agentType, description, billed_in, output_tokens, action) — empty list means no subagent active
 # action is (tool_name, input_dict) or None; omit to leave activity blank.
-SUBAGENTS_PROGRESSION = (
+SUBAGENTS_PROGRESSION: tuple[list[tuple[object, ...]], ...] = (
     [],
     [('explore',         'Search codebase - looking for token tracking',  1_200,    80, ('Bash',  {'command': 'grep -rn "billed_in" claude/statusline_command.py'}))],
     [('explore',         'Search codebase - looking for token tracking',  3_100,   190, ('Read',  {'file_path': 'claude/statusline_command.py'}))],
@@ -145,7 +144,7 @@ def write_subagents(
     claude_dir:  Path,
     session_id:  str,
     project_dir: Path,
-    subagents:   list[tuple],
+    subagents:   list[tuple[object, ...]],
     *,
     age_seconds: float = 0.0,
 ) -> None:
@@ -166,38 +165,44 @@ def write_subagents(
     ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
     _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
     for i, row in enumerate(subagents, 1):
-        agent_type, description, billed_in, output_tokens = row[:4]
-        action = row[4] if len(row) > 4 else None
+        agent_type_raw, description_raw, billed_in_raw, output_tokens_raw = row[:4]
+        action_raw = row[4] if len(row) > 4 else None
+        agent_type    = str(agent_type_raw)
+        description   = str(description_raw)
+        billed_in     = int(billed_in_raw) if isinstance(billed_in_raw, (int, float)) else 0
+        output_tokens = int(output_tokens_raw) if isinstance(output_tokens_raw, (int, float)) else 0
         model  = _demo_models[(i - 1) % len(_demo_models)]
         name = f'demo-subagent-{i}'
         (subagents_dir / f'{name}.meta.json').write_text(
             json.dumps({'agentType': agent_type, 'description': description})
         )
         jsonl = subagents_dir / f'{name}.jsonl'
-        if billed_in or output_tokens or action:
+        if billed_in or output_tokens or action_raw:
             # cache_creation carries the bulk; input_tokens gets the remainder
             cache_creation = int(billed_in * 0.7)
             input_tokens   = billed_in - cache_creation
-            entry = {
-                'type':      'assistant',
-                'timestamp': ts,
-                'message': {
-                    'id':    f'msg_demo_agent_{i}',
-                    'role':  'assistant',
-                    'model': model,
-                    'usage': {
-                        'input_tokens':                input_tokens,
-                        'cache_creation_input_tokens': cache_creation,
-                        'cache_read_input_tokens':     0,
-                        'output_tokens':               output_tokens,
-                    },
+            msg: dict[str, object] = {
+                'id':    f'msg_demo_agent_{i}',
+                'role':  'assistant',
+                'model': model,
+                'usage': {
+                    'input_tokens':                input_tokens,
+                    'cache_creation_input_tokens': cache_creation,
+                    'cache_read_input_tokens':     0,
+                    'output_tokens':               output_tokens,
                 },
             }
-            if action is not None:
-                tool_name, input_dict = action
-                entry['message']['content'] = [
+            if isinstance(action_raw, tuple) and len(action_raw) == 2:
+                tool_name = str(action_raw[0])
+                input_dict = action_raw[1]
+                msg['content'] = [
                     {'type': 'tool_use', 'name': tool_name, 'input': input_dict}
                 ]
+            entry: dict[str, object] = {
+                'type':      'assistant',
+                'timestamp': ts,
+                'message':   msg,
+            }
             jsonl.write_text(json.dumps(entry) + '\n')
         else:
             jsonl.write_text('')
@@ -226,7 +231,7 @@ def write_transcript(
         share_cc   = total_cc   // n + (total_cc   % n if last else 0)
         share_cr   = total_cr   // n + (total_cr   % n if last else 0)
         share_out  = total_out  // n + (total_out  % n if last else 0)
-        msg: dict = {
+        msg: dict[str, object] = {
             'id': f'msg_demo_{i+1}',
             'role': 'assistant',
             'usage': {
@@ -279,16 +284,32 @@ def write_transcript(
     transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
 
 
-def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
+def mutate_session_info(tmpdir: Path, session_id: str, raw: dict[str, object]) -> str:
     project = tmpdir / 'my-project'
     raw['cwd'] = str(project)
-    raw.setdefault('workspace', {})['project_dir'] = str(project)
+    workspace = raw.get('workspace')
+    if not isinstance(workspace, dict):
+        workspace = {}
+        raw['workspace'] = workspace
+    workspace['project_dir'] = str(project)
     raw['transcript_path'] = str(
         tmpdir / '.claude' / 'projects' / session_id / f'{session_id}.jsonl'
     )
     resets = int(time.time()) + 7200
-    raw.setdefault('rate_limits', {}).setdefault('five_hour', {})['resets_at'] = resets
-    raw['rate_limits'].setdefault('seven_day', {})['resets_at'] = resets
+    rate_limits = raw.get('rate_limits')
+    if not isinstance(rate_limits, dict):
+        rate_limits = {}
+        raw['rate_limits'] = rate_limits
+    five_hour = rate_limits.get('five_hour')
+    if not isinstance(five_hour, dict):
+        five_hour = {}
+        rate_limits['five_hour'] = five_hour
+    five_hour['resets_at'] = resets
+    seven_day = rate_limits.get('seven_day')
+    if not isinstance(seven_day, dict):
+        seven_day = {}
+        rate_limits['seven_day'] = seven_day
+    seven_day['resets_at'] = resets
     raw['thinking'] = {'enabled': True}
     raw['effort'] = {'level': 'high'}
     return json.dumps(raw)
@@ -297,7 +318,7 @@ def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
 SOFT_LIMIT = 150_000
 
 
-def render_once(env: dict, payload: str) -> str:
+def render_once(env: dict[str, str], payload: str) -> str:
     result = subprocess.run(
         [sys.executable, str(STATUSLINE_SCRIPT)],
         input=payload,
@@ -327,17 +348,29 @@ RATE_PEAK_PROFILE = {
 }
 
 
-def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DEMO_STEPS, delay: float = DEMO_DELAY) -> None:
-    raw.setdefault('context_window', {})
-    raw.setdefault('rate_limits', {}).setdefault('five_hour', {})
-    raw['rate_limits'].setdefault('seven_day', {})
+def _ensure_nested(d: dict[str, object], *keys: str) -> dict[str, object]:
+    'Walk into nested dicts by key path, creating empty dicts as needed.'
+    cur = d
+    for k in keys:
+        val = cur.get(k)
+        if not isinstance(val, dict):
+            val = {}
+            cur[k] = val
+        cur = val
+    return cur
+
+
+def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_id: str, steps: int = DEMO_STEPS, delay: float = DEMO_DELAY) -> None:
+    ctx_win   = _ensure_nested(raw, 'context_window')
+    rate_lims = _ensure_nested(raw, 'rate_limits')
+    five_hour = _ensure_nested(rate_lims, 'five_hour')
+    seven_day = _ensure_nested(rate_lims, 'seven_day')
 
     claude       = tmpdir / '.claude'
     project      = tmpdir / 'my-project'
     transcript_p = claude / 'projects' / session_id / f'{session_id}.jsonl'
     rate_log     = claude / 'statusline-token-rate.log'
 
-    rng = random.Random(42)
     KEEP = max(300.0, DEMO_TOKEN_WINDOW * 4)
 
     sys.stdout.write('\n\n')
@@ -379,13 +412,13 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
             kept.append(f'{now:.3f} {session_id} {rate_cumul_in} {cumul_out}')
             rate_log.write_text('\n'.join(kept) + '\n')
 
-            raw['context_window']['total_input_tokens']  = total_in
-            raw['context_window']['total_output_tokens'] = total_out
+            ctx_win['total_input_tokens']  = total_in
+            ctx_win['total_output_tokens'] = total_out
             # five_hour ideal_pct ≈ 60% (resets_at=now+2h, window=5h → 3h elapsed / 5h = 60%)
             # sine arc: candle at start/end, flame at midpoint, hitting all colour thresholds
             burn_5h = 60.0 + 22.0 * math.sin(pct * 2 * math.pi - math.pi / 2)
-            raw['rate_limits']['five_hour']['used_percentage'] = round(burn_5h, 1)
-            raw['rate_limits']['seven_day']['used_percentage'] = round(35 + pct * 30, 1)
+            five_hour['used_percentage'] = round(burn_5h, 1)
+            seven_day['used_percentage'] = round(35 + pct * 30, 1)
 
             out = render_once(env, json.dumps(raw))
             # Write cursor-up + new content + erase-below in one call so the
@@ -420,11 +453,12 @@ class ScenarioConfig:
     context_pct:   float                     = 0.20
     skills:        list[str]                 = field(default_factory=list)
     plugins:       list[str]                 = field(default_factory=list)
-    subagents:     list[tuple]                     = field(default_factory=list)
+    subagents:     list[tuple[object, ...]]         = field(default_factory=list)
     openspec:      list[tuple[str, int, int]]= field(default_factory=list)
     tasks:         list[tuple[str, str, str]]= field(default_factory=list)
     five_hour_pct: float                     = 30.0
     seven_day_pct: float                     = 20.0
+    yas_toml:      str | None                = None
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -536,6 +570,30 @@ SCENARIOS: list[ScenarioConfig] = [
         five_hour_pct = 71.0,
         seven_day_pct = 62.0,
     ),
+    ScenarioConfig(
+        name        = 'config-error',
+        model_id    = 'claude-opus-4-7',
+        model_name  = 'Opus 4.7',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.45,
+        skills      = ['grill-me', 'caveman'],
+        plugins     = ['openspec@0.1.0'],
+        five_hour_pct = 46.0,
+        seven_day_pct = 37.0,
+        # Three rejected knobs → compact in-border error row. max_width is the
+        # wrong type, soft_limit is out of range, bg_shift is an unknown enum;
+        # each falls back to its default while the valid theme still applies.
+        yas_toml    = (
+            '[layout]\n'
+            'max_width = "banana"\n'
+            '[tokens]\n'
+            'soft_limit = -5\n'
+            '[appearance]\n'
+            'theme = "catppuccin-mocha"\n'
+            'bg_shift = "purple"\n'
+        ),
+    ),
 ]
 
 
@@ -588,8 +646,8 @@ def write_rate_log_with_peaks(
 
 
 def render_scenario(
-    env:        dict,
-    fixture:    dict,
+    env:        dict[str, str],
+    fixture:    dict[str, object],
     tmpdir:     Path,
     session_id: str,
     cfg:        ScenarioConfig,
@@ -608,26 +666,40 @@ def render_scenario(
 
     write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
     write_settings(claude, cfg.plugins)
+    if cfg.yas_toml is not None:
+        (claude / 'yas.toml').write_text(cfg.yas_toml)
     write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
 
-    raw = dict(fixture)
+    raw: dict[str, object] = dict(fixture)
     raw['model']          = {'id': cfg.model_id, 'display_name': cfg.model_name}
     raw['effort']         = {'level': cfg.effort} if cfg.effort else {}
     raw['thinking']       = {'enabled': cfg.thinking}
     raw['cwd']            = str(project)
-    raw.setdefault('workspace', {})['project_dir'] = str(project)
+    workspace = _ensure_nested(raw, 'workspace')
+    workspace['project_dir'] = str(project)
     raw['transcript_path'] = str(transcript_p)
-    raw['context_window']['total_input_tokens']  = total_in
-    raw['context_window']['total_output_tokens'] = total_out
-    resets = int(time.time()) + 7200
-    raw.setdefault('rate_limits', {}).setdefault('five_hour', {})['resets_at']        = resets
-    raw['rate_limits'].setdefault('seven_day', {})['resets_at']                        = resets
-    raw['rate_limits']['five_hour']['used_percentage'] = cfg.five_hour_pct
-    raw['rate_limits']['seven_day']['used_percentage'] = cfg.seven_day_pct
+    ctx_win = _ensure_nested(raw, 'context_window')
+    ctx_win['total_input_tokens']  = total_in
+    ctx_win['total_output_tokens'] = total_out
+    resets    = int(time.time()) + 7200
+    rate_lims = _ensure_nested(raw, 'rate_limits')
+    five_hour = _ensure_nested(rate_lims, 'five_hour')
+    seven_day = _ensure_nested(rate_lims, 'seven_day')
+    five_hour['resets_at']        = resets
+    seven_day['resets_at']        = resets
+    five_hour['used_percentage']  = cfg.five_hour_pct
+    seven_day['used_percentage']  = cfg.seven_day_pct
 
-    snap_env = {**env, 'COLUMNS': str(SNAPSHOT_COLS), 'STATUSLINE_TOKEN_WINDOW': str(SNAP_WINDOW)}
+    # Every YAS_* config knob already flows through `env` (a copy of os.environ)
+    # to the statusline subprocess, so e.g. `YAS_SOFT_LIMIT=5000000 make demo/img`
+    # just works. COLUMNS and the token window are the only values the demo pins,
+    # and only as defaults: setdefault lets a user-provided value win so the demo
+    # responds to those too (e.g. `COLUMNS=90 make demo/img` for the medium layout).
+    snap_env = dict(env)
+    snap_env.setdefault('COLUMNS', str(SNAPSHOT_COLS))
+    snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
     out = render_once(snap_env, json.dumps(raw))
     dest = out_dir / f'{cfg.name}.txt'
     dest.write_text('\n\n'+out+'\n\n')

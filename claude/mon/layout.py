@@ -153,15 +153,25 @@ def aggregate_rate_limits(
     if not sessions:
         return (None, None)
     latest = max(sessions, key=lambda s: s.payload_mtime)
-    rl = latest.payload.get('rate_limits', {})
-    five_h  = rl.get('five_hour',  {}).get('used_percentage')
-    seven_d = rl.get('seven_day',  {}).get('used_percentage')
+    rl_raw = latest.payload.get('rate_limits')
+    rl = rl_raw if isinstance(rl_raw, dict) else {}
+
+    five_h_raw  = rl.get('five_hour')
+    seven_d_raw = rl.get('seven_day')
+    five_h_bucket  = five_h_raw  if isinstance(five_h_raw,  dict) else {}
+    seven_d_bucket = seven_d_raw if isinstance(seven_d_raw, dict) else {}
+
+    five_h_pct  = five_h_bucket.get('used_percentage')
+    seven_d_pct = seven_d_bucket.get('used_percentage')
+
+    five_h: int | None
+    seven_d: int | None
     try:
-        five_h  = int(five_h)  if five_h  is not None else None
+        five_h  = int(five_h_pct)  if five_h_pct  is not None else None
     except (TypeError, ValueError):
         five_h = None
     try:
-        seven_d = int(seven_d) if seven_d is not None else None
+        seven_d = int(seven_d_pct) if seven_d_pct is not None else None
     except (TypeError, ValueError):
         seven_d = None
     return (five_h, seven_d)
@@ -169,7 +179,11 @@ def aggregate_rate_limits(
 
 def aggregate_day_cost(sessions: list[ActiveSession]) -> float:
     """Sum total_cost_usd across all sessions."""
-    return sum(
-        s.payload.get('cost', {}).get('total_cost_usd', 0.0)
-        for s in sessions
-    )
+    total = 0.0
+    for s in sessions:
+        cost = s.payload.get('cost')
+        if isinstance(cost, dict):
+            val = cost.get('total_cost_usd', 0.0)
+            if isinstance(val, (int, float)):
+                total += float(val)
+    return total
