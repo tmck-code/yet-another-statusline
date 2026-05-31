@@ -74,16 +74,16 @@ def test_task_row_header_shows_total_elapsed() -> None:
     assert '2:0' in header  # 2:0x, tolerant of the render-tick second
 
 
-def test_task_row_header_count_precedes_elapsed_with_timer_glyph() -> None:
+def test_task_row_header_elapsed_precedes_count_no_timer_glyph() -> None:
     now = time.time()
     out = _r.task_row(_make_tasks(
         [('a', 'a', 'completed'), ('b', 'b', 'in_progress')],
         timestamps=[(now - 120, now - 90), (now - 90, None)],
     ), 120)
     header = strip_ansi(out[0])
-    # Order: done/total count, then the stopwatch-marked Total Elapsed.
-    assert header.index('1/2') < header.index('2:0')
-    assert sl.GLYPH_TASK_TIMER in header
+    # Order: Total Elapsed first (leading column), then the done/total count.
+    assert header.index('2:0') < header.index('1/2')
+    assert not hasattr(sl, 'GLYPH_TASK_TIMER')
 
 
 def test_task_row_total_elapsed_absent_when_never_started() -> None:
@@ -159,6 +159,23 @@ def test_task_row_timers_align_in_fixed_leading_column() -> None:
         s = strip_ansi(line)
         if ':' in s:
             assert s.index(':') < s.index(subj)
+
+
+def test_task_row_per_task_timers_right_align_under_total_elapsed() -> None:
+    now = time.time()
+    out = _r.task_row(_make_tasks(
+        [('done', 'doing', 'completed'), ('active', 'doing active', 'in_progress')],
+        # total elapsed ~11:40 (5 wide); the completed task is 1:35 (4 wide).
+        timestamps=[(now - 700, now - 605), (now - 605, None)],
+    ), 120)
+    header = strip_ansi(out[0])
+    item   = strip_ansi(out[1])
+    elapsed_tok = header.split()[0]   # leading Total Elapsed, e.g. '11:40'
+    assert len(elapsed_tok) == 5
+    # The narrower task timer gains a leading pad so its right edge lines up
+    # with the Total Elapsed above it.
+    assert item.startswith(' 1:35')
+    assert item.index('1:35') + len('1:35') == len(elapsed_tok)
 
 
 def test_task_row_long_subject_truncates_after_leading_timer() -> None:

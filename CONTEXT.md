@@ -92,7 +92,7 @@ The 2-minute staleness limit on the **Task Row**. If the most recent `TaskCreate
 _Avoid_: "task TTL" (suggests the tasks themselves expire — they don't, only the row's visibility does).
 
 **Task Checklist**:
-The rendered list of the current plan's tasks — a `GLYPH_TASKS` header (`done/total` count then **Total Elapsed** behind a `GLYPH_TASK_TIMER` stopwatch glyph) followed by one row per task (**Task Timer** in a fixed leading column + `GLYPH_TASK_PENDING` / `GLYPH_TASK_ACTIVE` / `GLYPH_TASK_DONE` marker + the task's 1-indexed number + subject). Shown in the wide and medium layouts; collapses to a single compact line in narrow. The displayed rows are the **Active Window** slice, not necessarily every task; the task numbers make the clipping legible without separate collapse lines.
+The rendered list of the current plan's tasks — a header leading with **Total Elapsed** (in the same leading column as the per-task timers below it) followed by the `GLYPH_TASKS` marker and `done/total` count, then one row per task (**Task Timer** in a fixed leading column + `GLYPH_TASK_PENDING` / `GLYPH_TASK_ACTIVE` / `GLYPH_TASK_DONE` marker + the task's 1-indexed number + subject). Shown in the wide and medium layouts; collapses to a single compact line in narrow. The displayed rows are the **Active Window** slice, not necessarily every task; the task numbers make the clipping legible without separate collapse lines.
 _Avoid_: "task list" when you mean the rendered block (the `TaskList` dataclass holds *all* tasks; the **Task Checklist** is what survives windowing).
 
 **Plan Generation**:

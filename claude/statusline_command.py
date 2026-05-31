@@ -472,7 +472,6 @@ GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
 GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
 GLYPH_TASKS    = '\U000f08a8'  # nf-md-clipboard-check-outline (Task Row marker)
-GLYPH_TASK_TIMER   = '\uf520'      # nf-oct-stopwatch        (Total Elapsed marker)
 GLYPH_TASK_PENDING = '\ue640'      # nf-fa-circle_o          (pending task)
 GLYPH_TASK_ACTIVE  = '\U000f0117'  # nf-md-arrow_right_thick (in_progress task)
 GLYPH_TASK_DONE    = '\uf4a7'      # nf-oct-check_circle_fill (completed task)
@@ -2597,14 +2596,8 @@ class Renderer:
             return [head]
 
         # --- full-list branch (wide/medium): header + windowed items ---
-        # Header order: glyph, done/total count, then Total Elapsed behind its
-        # own clock glyph. The elapsed half is omitted when never started.
-        elapsed = total_elapsed(tasks, now)
-        if elapsed is not None:
-            dur  = f'{DIM}{GLYPH_TASK_TIMER} {fmt_duration(elapsed)}{self.R}'
-            head = f'{glyph_s}  {count_p}  {dur}'
-        else:
-            head = f'{glyph_s}  {count_p}'
+        elapsed   = total_elapsed(tasks, now)
+        elapsed_s = fmt_duration(elapsed) if elapsed is not None else ''
 
         win = select_window(tasks)
 
@@ -2630,8 +2623,22 @@ class Renderer:
                 timer = ''
             rows.append((glyph, f'{t.id}. ', subj, timer))
 
-        # Fixed leading timer column = widest shown timer string.
-        timer_w = max((_visible_width(tm) for *_, tm in rows if tm), default=0)
+        # Fixed leading timer column = widest shown timer string, also covering
+        # the header's Total Elapsed so the per-task timers right-align under it.
+        timer_w = max(
+            (_visible_width(tm) for *_, tm in rows if tm),
+            default=0,
+        )
+        timer_w = max(timer_w, _visible_width(elapsed_s))
+
+        # Header order: Total Elapsed first (right-aligned in the timer column so
+        # it lines up with the per-task timers below), then glyph + done/total
+        # count. The leading elapsed is omitted when never started.
+        if elapsed_s:
+            head_pad = ' ' * max(0, timer_w - _visible_width(elapsed_s))
+            head     = f'{head_pad}{DIM}{elapsed_s}{self.R} {glyph_s}  {count_p}'
+        else:
+            head = f'{glyph_s}  {count_p}'
 
         # Available width for the inner content of a content row.
         inner_w = width - 3
