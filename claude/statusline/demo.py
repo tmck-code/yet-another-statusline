@@ -692,7 +692,14 @@ def render_scenario(
     five_hour['used_percentage']  = cfg.five_hour_pct
     seven_day['used_percentage']  = cfg.seven_day_pct
 
-    snap_env = {**env, 'COLUMNS': str(SNAPSHOT_COLS), 'STATUSLINE_TOKEN_WINDOW': str(SNAP_WINDOW)}
+    # Every YAS_* config knob already flows through `env` (a copy of os.environ)
+    # to the statusline subprocess, so e.g. `YAS_SOFT_LIMIT=5000000 make demo/img`
+    # just works. COLUMNS and the token window are the only values the demo pins,
+    # and only as defaults: setdefault lets a user-provided value win so the demo
+    # responds to those too (e.g. `COLUMNS=90 make demo/img` for the medium layout).
+    snap_env = dict(env)
+    snap_env.setdefault('COLUMNS', str(SNAPSHOT_COLS))
+    snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
     out = render_once(snap_env, json.dumps(raw))
     dest = out_dir / f'{cfg.name}.txt'
     dest.write_text('\n\n'+out+'\n\n')
