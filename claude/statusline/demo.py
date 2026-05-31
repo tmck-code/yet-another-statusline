@@ -66,11 +66,25 @@ SUBAGENTS_PROGRESSION: tuple[list[tuple[object, ...]], ...] = (
 
 # (subject, activeForm) for the TaskList progression row.
 DEMO_TASKS = (
-    ('Audit gradient palette', 'Auditing gradient palette'),
-    ('Wire alert-mode pill',   'Wiring alert-mode pill'),
-    ('Refactor border math',   'Refactoring border math'),
-    ('Update CONTEXT.md',      'Updating CONTEXT.md'),
+    ('Audit gradient palette',  'Auditing gradient palette'),
+    ('Wire alert-mode pill',    'Wiring alert-mode pill'),
+    ('Refactor border math',    'Refactoring border math'),
+    ('Update CONTEXT.md',       'Updating CONTEXT.md'),
+    ('Add sparkline buckets',   'Adding sparkline buckets'),
+    ('Fix elbow column math',   'Fixing elbow column math'),
+    ('Wire token tracker',      'Wiring token tracker'),
+    ('Backfill renderer tests', 'Backfilling renderer tests'),
 )
+
+# Synthetic per-task durations (seconds), indexed by task position. Varied,
+# realistic coding-task spans with at least one sub-minute and a couple of
+# multi-minute entries so the right-aligned timer column is well exercised.
+# Frozen for completed tasks; the in_progress task uses TASK_LIVE_SECONDS instead.
+TASK_DURATIONS: tuple[int, ...] = (34, 152, 248, 95, 71, 188, 42, 133)
+#                                  0:34 2:32 4:08 1:35 1:11 3:08 0:42 2:13
+
+# How long ago the in_progress task started, in seconds (its live timer reads ~this).
+TASK_LIVE_SECONDS = 67  # ~1:07
 
 # pct below which no TaskList is shown (lets the demo open without it).
 TASKS_START_PCT = 0.15
@@ -214,6 +228,47 @@ def write_settings(claude_dir: Path, plugins: list[str]) -> None:
     (claude_dir / 'settings.json').write_text(json.dumps(settings, indent=2) + '\n')
 
 
+def _iso(epoch: float) -> str:
+    'Format an epoch as a local ISO-8601 string (matches the parser''s expectations).'
+    return datetime.fromtimestamp(epoch).astimezone().isoformat()
+
+
+def _task_timeline(
+    tasks: list[tuple[str, str, str]],
+    base_time: float,
+) -> dict[int, tuple[float | None, float | None]]:
+    """Lay a contiguous timeline ending at `base_time` ("now").
+
+    Returns {task_index: (started_at, completed_at)}. The in_progress task (if
+    any) starts TASK_LIVE_SECONDS before now; completed tasks are placed
+    sequentially before it using their TASK_DURATIONS so the last completed
+    task's completed_at meets the in_progress start (or now). Pending tasks get
+    (None, None). Total Elapsed = sum(completed durations) + live.
+    """
+    has_active = any(status == 'in_progress' for _, _, status in tasks)
+    # Where the chain of completed tasks ends: at the in_progress start if there
+    # is one, otherwise at "now".
+    chain_end = base_time - TASK_LIVE_SECONDS if has_active else base_time
+
+    times: dict[int, tuple[float | None, float | None]] = {}
+    cursor = chain_end
+    # Walk completed tasks backwards so the last one ends at chain_end.
+    for i in range(len(tasks) - 1, -1, -1):
+        if tasks[i][2] != 'completed':
+            continue
+        dur = TASK_DURATIONS[i % len(TASK_DURATIONS)]
+        completed_at = cursor
+        started_at = completed_at - dur
+        times[i] = (started_at, completed_at)
+        cursor = started_at
+    for i, (_, _, status) in enumerate(tasks):
+        if status == 'in_progress':
+            times[i] = (base_time - TASK_LIVE_SECONDS, None)
+        elif status == 'pending':
+            times[i] = (None, None)
+    return times
+
+
 def write_transcript(
     transcript: Path,
     skills: list[str],
@@ -222,7 +277,10 @@ def write_transcript(
     total_cr: int,
     total_out: int,
     tasks: list[tuple[str, str, str]] | None = None,
+    base_time: float | None = None,
 ) -> None:
+    if base_time is None:
+        base_time = time.time()
     msgs = []
     n = max(1, len(skills))
     for i, skill in enumerate(skills or ['']):
@@ -245,10 +303,14 @@ def write_transcript(
             msg['content'] = [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': skill}}]
         msgs.append({'type': 'assistant', 'message': msg})
     if tasks:
-        ts_now = datetime.now().astimezone().isoformat()
+        times = _task_timeline(tasks, base_time)
+        # TaskCreate stamped at the earliest started_at (start of the span), so
+        # the parser's Total Elapsed anchor lands at the timeline origin.
+        starts = [st for st, _ in times.values() if st is not None]
+        create_ts = min(starts) if starts else base_time
         msgs.append({
             'type': 'assistant',
-            'timestamp': ts_now,
+            'timestamp': _iso(create_ts),
             'message': {
                 'id': 'msg_task_create',
                 'role': 'assistant',
@@ -262,23 +324,35 @@ def write_transcript(
                 ],
             },
         })
-        updates = [
-            {
-                'type': 'tool_use',
-                'name': 'TaskUpdate',
-                'input': {'taskId': str(i + 1), 'status': status, 'activeForm': af},
-            }
-            for i, (_, af, status) in enumerate(tasks)
-            if status != 'pending'
-        ]
-        if updates:
+        # Build one TaskUpdate message per transition, then emit ascending by
+        # timestamp so the parser (which folds in file order, last write wins)
+        # sees each task's in_progress before its completed.
+        events: list[tuple[float, int, dict[str, object]]] = []
+        for i, (_, af, status) in enumerate(tasks):
+            if status == 'pending':
+                continue
+            started_at, completed_at = times[i]
+            if started_at is not None:
+                events.append((started_at, 0, {
+                    'type': 'tool_use',
+                    'name': 'TaskUpdate',
+                    'input': {'taskId': str(i + 1), 'status': 'in_progress', 'activeForm': af},
+                }))
+            if status == 'completed' and completed_at is not None:
+                events.append((completed_at, 1, {
+                    'type': 'tool_use',
+                    'name': 'TaskUpdate',
+                    'input': {'taskId': str(i + 1), 'status': 'completed', 'activeForm': af},
+                }))
+        events.sort(key=lambda e: (e[0], e[1]))
+        for seq, (ts, _kind, content) in enumerate(events):
             msgs.append({
                 'type': 'assistant',
-                'timestamp': ts_now,
+                'timestamp': _iso(ts),
                 'message': {
-                    'id': 'msg_task_update',
+                    'id': f'msg_task_update_{seq}',
                     'role': 'assistant',
-                    'content': updates,
+                    'content': [content],
                 },
             })
     transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
@@ -379,6 +453,10 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
     last_lines = 0
     rate_cumul_in = 0
 
+    # Fixed anchor for the task timeline so completed durations stay frozen and
+    # the in_progress live timer (real now - started_at) advances across frames.
+    task_base = time.time()
+
     try:
         for i in range(steps + 1):
             pct = i / steps
@@ -398,7 +476,7 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
             openspec_now = OPENSPEC_PROGRESSION[openspec_idx]
 
             tasks_now = task_state_for(pct)
-            write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now)
+            write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now, base_time=task_base)
             write_settings(claude, plugins_now)
             write_subagents(claude, session_id, project, subagent_now, age_seconds=pct * 120)
             write_openspec_changes(project, openspec_now)
@@ -494,10 +572,14 @@ SCENARIOS: list[ScenarioConfig] = [
         skills      = ['grill-me', 'caveman'],
         plugins     = ['openspec@0.1.0'],
         tasks       = [
-            ('Audit gradient palette', 'Auditing gradient palette', 'completed'),
-            ('Wire alert-mode pill',   'Wiring alert-mode pill',    'completed'),
-            ('Refactor border math',   'Refactoring border math',   'in_progress'),
-            ('Update CONTEXT.md',      'Updating CONTEXT.md',       'pending'),
+            ('Audit gradient palette',  'Auditing gradient palette',  'completed'),
+            ('Wire alert-mode pill',    'Wiring alert-mode pill',     'completed'),
+            ('Refactor border math',    'Refactoring border math',    'completed'),
+            ('Update CONTEXT.md',       'Updating CONTEXT.md',        'completed'),
+            ('Add sparkline buckets',   'Adding sparkline buckets',   'completed'),
+            ('Fix elbow column math',   'Fixing elbow column math',   'in_progress'),
+            ('Wire token tracker',      'Wiring token tracker',       'pending'),
+            ('Backfill renderer tests', 'Backfilling renderer tests', 'pending'),
         ],
         five_hour_pct = 22.0,
         seven_day_pct = 15.0,
@@ -552,10 +634,14 @@ SCENARIOS: list[ScenarioConfig] = [
             ('wire-alert-mode-pill',       1, 6),
         ],
         tasks       = [
-            ('Audit gradient palette', 'Auditing gradient palette', 'completed'),
-            ('Wire alert-mode pill',   'Wiring alert-mode pill',    'completed'),
-            ('Refactor border math',   'Refactoring border math',   'in_progress'),
-            ('Update CONTEXT.md',      'Updating CONTEXT.md',       'pending'),
+            ('Audit gradient palette',  'Auditing gradient palette',  'completed'),
+            ('Wire alert-mode pill',    'Wiring alert-mode pill',     'completed'),
+            ('Refactor border math',    'Refactoring border math',    'completed'),
+            ('Update CONTEXT.md',       'Updating CONTEXT.md',        'completed'),
+            ('Add sparkline buckets',   'Adding sparkline buckets',   'completed'),
+            ('Fix elbow column math',   'Fixing elbow column math',   'in_progress'),
+            ('Wire token tracker',      'Wiring token tracker',       'pending'),
+            ('Backfill renderer tests', 'Backfilling renderer tests', 'pending'),
         ],
         five_hour_pct = 58.0,
         seven_day_pct = 49.0,
