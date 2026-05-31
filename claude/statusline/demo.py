@@ -458,6 +458,7 @@ class ScenarioConfig:
     tasks:         list[tuple[str, str, str]]= field(default_factory=list)
     five_hour_pct: float                     = 30.0
     seven_day_pct: float                     = 20.0
+    yas_toml:      str | None                = None
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -569,6 +570,30 @@ SCENARIOS: list[ScenarioConfig] = [
         five_hour_pct = 71.0,
         seven_day_pct = 62.0,
     ),
+    ScenarioConfig(
+        name        = 'config-error',
+        model_id    = 'claude-opus-4-7',
+        model_name  = 'Opus 4.7',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.45,
+        skills      = ['grill-me', 'caveman'],
+        plugins     = ['openspec@0.1.0'],
+        five_hour_pct = 46.0,
+        seven_day_pct = 37.0,
+        # Three rejected knobs → compact in-border error row. max_width is the
+        # wrong type, soft_limit is out of range, bg_shift is an unknown enum;
+        # each falls back to its default while the valid theme still applies.
+        yas_toml    = (
+            '[layout]\n'
+            'max_width = "banana"\n'
+            '[tokens]\n'
+            'soft_limit = -5\n'
+            '[appearance]\n'
+            'theme = "catppuccin-mocha"\n'
+            'bg_shift = "purple"\n'
+        ),
+    ),
 ]
 
 
@@ -641,6 +666,8 @@ def render_scenario(
 
     write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
     write_settings(claude, cfg.plugins)
+    if cfg.yas_toml is not None:
+        (claude / 'yas.toml').write_text(cfg.yas_toml)
     write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
@@ -665,7 +692,14 @@ def render_scenario(
     five_hour['used_percentage']  = cfg.five_hour_pct
     seven_day['used_percentage']  = cfg.seven_day_pct
 
-    snap_env = {**env, 'COLUMNS': str(SNAPSHOT_COLS), 'STATUSLINE_TOKEN_WINDOW': str(SNAP_WINDOW)}
+    # Every YAS_* config knob already flows through `env` (a copy of os.environ)
+    # to the statusline subprocess, so e.g. `YAS_SOFT_LIMIT=5000000 make demo/img`
+    # just works. COLUMNS and the token window are the only values the demo pins,
+    # and only as defaults: setdefault lets a user-provided value win so the demo
+    # responds to those too (e.g. `COLUMNS=90 make demo/img` for the medium layout).
+    snap_env = dict(env)
+    snap_env.setdefault('COLUMNS', str(SNAPSHOT_COLS))
+    snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
     out = render_once(snap_env, json.dumps(raw))
     dest = out_dir / f'{cfg.name}.txt'
     dest.write_text('\n\n'+out+'\n\n')

@@ -40,37 +40,98 @@ The statusline also renders differently according to available width
 
 ## Configuration
 
-The statusline is configured through CLI arguments and environment variables, plus a couple of optional files under your Claude config dir (`~/.claude` by default).
+Every configurable knob resolves through one fixed precedence chain (highest wins):
 
-### CLI arguments
+```
+CLI flag  →  canonical YAS_* env var  →  legacy-alias env var  →  yas.toml  →  built-in default
+```
 
-Pass these in the `statusLine.command` of your `~/.claude/settings.json`:
+The first source in that chain that is **present and valid** wins; an absent or
+invalid source falls through to the next (an empty-string env var counts as
+absent). Canonical `YAS_*` env vars always win over their deprecated legacy
+aliases when both are set — the aliases keep working but are deprecated.
 
-| arg | values | default | description |
-|-----|--------|---------|-------------|
-| `--theme NAME` | `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha` | `claude-dark` | colour theme |
-| `--bg-shift DIR` | `warm`, `cool` | `warm` | direction of the background gradient shift |
+### Knobs
 
-Both also accept the `--theme=NAME` / `--bg-shift=DIR` form.
+| Knob | Env var | Legacy alias | `yas.toml` key | Default |
+|------|---------|--------------|----------------|---------|
+| `max_width` | `YAS_MAX_WIDTH` | — | `[layout].max_width` | `140` |
+| `full_width` | `YAS_FULL_WIDTH` | — | `[layout].full_width` | `false` |
+| `soft_limit` | `YAS_SOFT_LIMIT` | — | `[tokens].soft_limit` | `150000` |
+| `token_window` | `YAS_TOKEN_WINDOW` | `STATUSLINE_TOKEN_WINDOW` | `[tokens].token_window` | `60` |
+| `theme` | `YAS_THEME` (also `--theme` CLI) | `CLAUDE_STATUSLINE_THEME` | `[appearance].theme` | `claude-dark` |
+| `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
 
-### Environment variables
+- Valid `theme` values: `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha`.
+- Valid `bg_shift` values: `warm` or `cool`.
+- `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
+- The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
+- The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
+
+### `yas.toml`
+
+`yas.toml` lives in `CLAUDE_CONFIG_DIR` (defaults to `~/.claude/`). It is **not**
+auto-created — its absence simply means all-defaults — and `/yas:init` never
+writes it. See [`yas.example.toml`](yas.example.toml) for a fully-commented
+template; copy it to `~/.claude/yas.toml` and uncomment what you want.
+
+```toml
+[layout]
+max_width = 140
+
+[tokens]
+soft_limit = 150000
+token_window = 60
+
+[appearance]
+theme = "claude-dark"
+bg_shift = "warm"
+```
+
+> **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.
+> On Python 3.10 the file is silently skipped; **environment variables work on
+> every Python version**.
+
+Bad config never crashes the statusline. A malformed `yas.toml` is ignored
+wholesale, and a single bad / out-of-range / wrong-type value drops only that
+one knob back to its default. When any `yas.toml` value is rejected, a compact
+warning row — `⚠ yas.toml: N values ignored (...)` — appears at the bottom of
+the box listing the rejected knob names. Detailed per-value reasons go to stderr
+only when `YAS_DEBUG` is set.
+
+### Per-model `soft_limit` overrides
+
+Beyond the global `[tokens].soft_limit`, you can declare per-model overrides as
+an inline array under `[tokens]`:
+
+```toml
+[tokens]
+model = [
+    { match = "opus",         soft_limit = 200000 },   # the whole Opus family
+    { match = "opus-4-8[1m]", soft_limit = 1000000 },  # 1M-context variant (longer match wins)
+]
+```
+
+- `match` is a **case-insensitive plain substring** (no glob/regex), tested
+  against the model's id and display name.
+- When multiple entries match, the **longest** `match` wins; ties break by array
+  order (first wins). If no entry matches, the global `soft_limit` is used. So to
+  single out a variant from its family, give the variant the **longer, more
+  specific** `match` (above, `opus-4-8[1m]` outranks `opus` for the 1M model).
+- **A matching per-model override beats the global `soft_limit` from _any_
+  source — including the `YAS_SOFT_LIMIT` environment variable.** This is the
+  one documented exception to the "env beats `yas.toml`" rule: specificity beats
+  source precedence (there is intentionally no per-model env var). It lets you
+  raise the compaction-risk threshold for a 1M-context model variant distinctly
+  from the rest of its family.
+
+### Other environment variables
 
 | var | default | description |
 |-----|---------|-------------|
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | base dir for config/state files (theme file, width file, token-rate log, output payloads) |
-| `CLAUDE_STATUSLINE_THEME` | _(unset)_ | theme name; overrides the config file, overridden by `--theme` |
-| `STATUSLINE_TOKEN_WINDOW` | `60` | seconds; rolling window used to compute the token throughput rate |
-| `YAS_SOFT_LIMIT` | `150000` | tokens; threshold used for the context-fill bar and percentage display. Bump this for 1M-context models (e.g. `1000000` for Opus 4.7 1M / Sonnet 4.6 1M) to keep the displayed `%` ≤ 100. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | base dir for config/state files (`yas.toml`, theme file, width file, token-rate log, output payloads) |
+| `YAS_DEBUG` | _(unset)_ | when set, prints detailed per-value config-rejection reasons to stderr |
 | `COLUMNS` | _(unset)_ | terminal-width fallback when tmux / width-file detection fail |
-
-### Theme resolution
-
-The theme is chosen by the first of these that names a known theme:
-
-1. `--theme NAME` CLI arg
-2. `CLAUDE_STATUSLINE_THEME` env var
-3. `~/.claude/statusline-theme` file (contents = theme name)
-4. built-in default (`claude-dark`)
 
 ### Terminal width
 
