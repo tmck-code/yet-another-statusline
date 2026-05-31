@@ -22,6 +22,13 @@ import statusline_command as sl
 SESSION = (Path(__file__).parent.parent / 'claude' / 'statusline'
            / 'session-info-example.json')
 
+# yas.toml parsing needs stdlib tomllib (Python 3.11+). On 3.10 the file is
+# silently skipped (env + defaults still apply — see the degrade test below),
+# so tests that assert toml-sourced values are applied can't run there.
+requires_tomllib = pytest.mark.skipif(
+    sl.tomllib is None, reason='yas.toml parsing requires tomllib (Python 3.11+)',
+)
+
 
 # 4.1 Precedence chain: env > toml > default
 
@@ -31,6 +38,7 @@ def test_env_overrides_toml(tmp_path: Path) -> None:
     assert cfg.max_width == 160
 
 
+@requires_tomllib
 def test_toml_overrides_default(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
     cfg = sl.Config.load(env={}, config_dir=tmp_path)
@@ -90,6 +98,7 @@ def test_cli_theme_beats_env(tmp_path: Path) -> None:
 
 # 4.3 Per-knob validation / fallback + error recording
 
+@requires_tomllib
 def test_invalid_toml_knob_falls_back_and_records_error(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[layout]\nmax_width = "banana"\n[tokens]\nsoft_limit = 1000000\n'
@@ -101,6 +110,7 @@ def test_invalid_toml_knob_falls_back_and_records_error(tmp_path: Path) -> None:
     assert 'soft_limit' not in cfg.errors
 
 
+@requires_tomllib
 def test_out_of_range_toml_soft_limit(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[tokens]\nsoft_limit = -5\n')
     cfg = sl.Config.load(env={}, config_dir=tmp_path)
@@ -108,6 +118,7 @@ def test_out_of_range_toml_soft_limit(tmp_path: Path) -> None:
     assert 'soft_limit' in cfg.errors
 
 
+@requires_tomllib
 def test_unknown_enum_bg_shift(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[appearance]\nbg_shift = "purple"\n')
     cfg = sl.Config.load(env={}, config_dir=tmp_path)
@@ -122,6 +133,7 @@ def test_invalid_env_value_records_no_error(tmp_path: Path) -> None:
     assert any('max_width' in line for line in cfg.debug_lines)
 
 
+@requires_tomllib
 def test_toml_full_width_must_be_real_bool(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = "yes"\n')
     cfg = sl.Config.load(env={}, config_dir=tmp_path)
@@ -129,6 +141,7 @@ def test_toml_full_width_must_be_real_bool(tmp_path: Path) -> None:
     assert 'full_width' in cfg.errors
 
 
+@requires_tomllib
 def test_toml_full_width_true(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = true\n')
     cfg = sl.Config.load(env={}, config_dir=tmp_path)
@@ -142,6 +155,7 @@ def test_env_full_width_any_nonempty_is_true(tmp_path: Path) -> None:
 
 # 4.4 Broken TOML + unknown keys
 
+@requires_tomllib
 def test_broken_toml_file_ignored_with_parse_error(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout\nmax_width = 200')  # missing ]
     cfg = sl.Config.load(env={'YAS_SOFT_LIMIT': '1000000'}, config_dir=tmp_path)
@@ -150,6 +164,7 @@ def test_broken_toml_file_ignored_with_parse_error(tmp_path: Path) -> None:
     assert 'yas.toml: parse error' in cfg.errors
 
 
+@requires_tomllib
 def test_unknown_keys_and_sections_ignored(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[layout]\nmax_width = 175\nbogus_key = 1\n'
@@ -192,6 +207,7 @@ def test_soft_limit_env_empty_string_falls_back(tmp_path: Path) -> None:
 
 # 4.6a soft_limit_for: per-model matching
 
+@requires_tomllib
 def test_soft_limit_for_longest_match_wins(tmp_path: Path) -> None:
     # Longest substring match wins: "opus-4-8" (8 chars) beats "opus" (4).
     (tmp_path / 'yas.toml').write_text(
@@ -203,6 +219,7 @@ def test_soft_limit_for_longest_match_wins(tmp_path: Path) -> None:
                               'Opus 4.8 (1M context)') == 1_000_000
 
 
+@requires_tomllib
 def test_soft_limit_for_matches_display_name(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[[tokens.model]]\nmatch = "1m context"\nsoft_limit = 1000000\n'
@@ -212,6 +229,7 @@ def test_soft_limit_for_matches_display_name(tmp_path: Path) -> None:
                               'Opus 4.8 (1M context)') == 1_000_000
 
 
+@requires_tomllib
 def test_soft_limit_for_falls_back_to_global(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[tokens]\nsoft_limit = 175000\n'
@@ -221,6 +239,7 @@ def test_soft_limit_for_falls_back_to_global(tmp_path: Path) -> None:
     assert cfg.soft_limit_for('claude-sonnet-4-6', 'Sonnet 4.6') == 175_000
 
 
+@requires_tomllib
 def test_soft_limit_for_tie_break_file_order(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[[tokens.model]]\nmatch = "opus"\nsoft_limit = 111111\n'
@@ -231,6 +250,7 @@ def test_soft_limit_for_tie_break_file_order(tmp_path: Path) -> None:
     assert cfg.soft_limit_for('claude-opus-4-8', 'Opus 4.8') == 111_111
 
 
+@requires_tomllib
 def test_soft_limit_for_per_model_beats_env(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[[tokens.model]]\nmatch = "1m"\nsoft_limit = 1000000\n'
@@ -244,6 +264,7 @@ def test_soft_limit_for_per_model_beats_env(tmp_path: Path) -> None:
 
 # 4.6b Malformed [[tokens.model]] entries
 
+@requires_tomllib
 def test_malformed_model_entries_dropped_valid_kept(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text(
         '[[tokens.model]]\nmatch = ""\nsoft_limit = 500000\n'        # idx 0: empty match
