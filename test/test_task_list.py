@@ -151,11 +151,13 @@ def test_is_visible_true_with_in_progress(tmp_path: Path) -> None:
 
 
 def test_is_visible_false_past_freshness_cap(tmp_path: Path) -> None:
+    # D5: the freshness cap only applies when nothing is in_progress, so this
+    # case uses two pending tasks (no in_progress to pin it visible).
     now = time.time()
     old = now - sl.TaskList.FRESHNESS_CAP - 5
     path = _write_transcript(tmp_path, [
         _create_line('A', 'Doing A', old),
-        _update_line(1, 'in_progress', old),
+        _create_line('B', 'Doing B', old),
     ])
 
     result = sl.TaskList.from_session(str(path))
@@ -204,3 +206,180 @@ def test_taskupdate_referencing_missing_id_ignored(tmp_path: Path) -> None:
 
     assert result.tasks[0].status == 'pending'
     assert result.total == 1
+
+
+# --- D1: Per-task timestamps -------------------------------------------------
+
+def test_in_progress_sets_started_at_and_clears_completed_at(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'Doing A', now - 30),
+        _update_line(1, 'in_progress', now - 20),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.tasks[0].started_at == pytest_approx(now - 20)
+    assert result.tasks[0].completed_at is None
+
+
+def test_completed_sets_completed_at(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'Doing A', now - 30),
+        _update_line(1, 'in_progress', now - 25),
+        _update_line(1, 'completed', now - 10),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.tasks[0].started_at == pytest_approx(now - 25)
+    assert result.tasks[0].completed_at == pytest_approx(now - 10)
+
+
+def test_reopen_overwrites_started_at_and_clears_completed_at(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'Doing A', now - 60),
+        _update_line(1, 'in_progress', now - 50),
+        _update_line(1, 'completed', now - 40),
+        _update_line(1, 'in_progress', now - 10),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.tasks[0].status == 'in_progress'
+    assert result.tasks[0].started_at == pytest_approx(now - 10)
+    assert result.tasks[0].completed_at is None
+
+
+def test_pending_to_completed_leaves_started_at_none(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'Doing A', now - 30),
+        _update_line(1, 'completed', now - 10),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.tasks[0].started_at is None
+    assert result.tasks[0].completed_at == pytest_approx(now - 10)
+
+
+# --- D2: Plan Generation scoping --------------------------------------------
+
+def test_create_while_all_completed_starts_fresh_generation(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('Old A', 'Old A', now - 60),
+        _create_line('Old B', 'Old B', now - 59),
+        _update_line(1, 'completed', now - 50),
+        _update_line(2, 'completed', now - 45),
+        _create_line('New A', 'New A', now - 20),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert [t.id for t in result.tasks] == [1]
+    assert [t.subject for t in result.tasks] == ['New A']
+    assert result.total == 1
+    assert result.completed == 0
+
+
+def test_create_while_work_open_appends(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'A', now - 60),
+        _update_line(1, 'in_progress', now - 50),
+        _create_line('B', 'B', now - 40),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert [t.id for t in result.tasks] == [1, 2]
+    assert [t.subject for t in result.tasks] == ['A', 'B']
+
+
+def test_count_reflects_only_latest_generation(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        # Generation 1: two tasks, both completed
+        _create_line('G1 A', 'G1 A', now - 90),
+        _create_line('G1 B', 'G1 B', now - 89),
+        _update_line(1, 'completed', now - 80),
+        _update_line(2, 'completed', now - 75),
+        # Generation 2 starts here
+        _create_line('G2 A', 'G2 A', now - 60),
+        _create_line('G2 B', 'G2 B', now - 59),
+        _create_line('G2 C', 'G2 C', now - 58),
+        _update_line(1, 'completed', now - 40),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.total == 3
+    assert result.completed == 1
+    assert [t.subject for t in result.tasks] == ['G2 A', 'G2 B', 'G2 C']
+
+
+def test_update_after_reset_resolves_against_new_ids(tmp_path: Path) -> None:
+    now = time.time()
+    path = _write_transcript(tmp_path, [
+        _create_line('Old', 'Old', now - 60),
+        _update_line(1, 'completed', now - 50),
+        _create_line('New', 'New', now - 30),
+        _update_line(1, 'in_progress', now - 10),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.tasks[0].subject == 'New'
+    assert result.tasks[0].status == 'in_progress'
+
+
+# --- D5: Pinned visibility while active -------------------------------------
+
+def test_is_visible_pinned_past_freshness_cap_when_in_progress(tmp_path: Path) -> None:
+    now = time.time()
+    old = now - sl.TaskList.FRESHNESS_CAP - 60
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'Doing A', old),
+        _update_line(1, 'in_progress', old),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.is_visible(now=now) is True
+
+
+def test_is_visible_cap_applies_when_nothing_in_progress(tmp_path: Path) -> None:
+    now = time.time()
+    old = now - sl.TaskList.FRESHNESS_CAP - 5
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'A', old),
+        _create_line('B', 'B', old),
+        _update_line(1, 'completed', old),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    # B is still pending (not all completed), but past the 120s cap -> hidden
+    assert result.is_visible(now=now) is False
+
+
+def test_is_visible_grace_applies_when_nothing_in_progress(tmp_path: Path) -> None:
+    now = time.time()
+    done_ts = now - sl.TaskList.GRACE_SECONDS - 5
+    path = _write_transcript(tmp_path, [
+        _create_line('A', 'A', done_ts - 5),
+        _update_line(1, 'completed', done_ts),
+    ])
+
+    result = sl.TaskList.from_session(str(path))
+
+    assert result.is_visible(now=now) is False
+
+
+def pytest_approx(value: float, tol: float = 1.0) -> object:
+    import pytest
+    return pytest.approx(value, abs=tol)
