@@ -102,21 +102,19 @@ only when `YAS_DEBUG` is set.
 ### Per-model `soft_limit` overrides
 
 Beyond the global `[tokens].soft_limit`, you can declare per-model overrides as
-an array of tables:
+an inline array under `[tokens]`:
 
 ```toml
-[[tokens.model]]
-match = "opus"          # the whole Opus family → 200000
-soft_limit = 200000
-
-[[tokens.model]]
-match = "opus-4-8[1m]"  # the 1M-context variant → 1000000 (longer match wins)
-soft_limit = 1000000
+[tokens]
+model = [
+    { match = "opus",         soft_limit = 200000 },   # the whole Opus family
+    { match = "opus-4-8[1m]", soft_limit = 1000000 },  # 1M-context variant (longer match wins)
+]
 ```
 
 - `match` is a **case-insensitive plain substring** (no glob/regex), tested
   against the model's id and display name.
-- When multiple entries match, the **longest** `match` wins; ties break by file
+- When multiple entries match, the **longest** `match` wins; ties break by array
   order (first wins). If no entry matches, the global `soft_limit` is used. So to
   single out a variant from its family, give the variant the **longer, more
   specific** `match` (above, `opus-4-8[1m]` outranks `opus` for the 1M model).
