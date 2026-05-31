@@ -21,7 +21,7 @@ claude -p "/yas:init"
 
 A dummy session to demonstrate the layout:
 
-<img width="1524" height="530" alt="statusline-demo-1779720526" src="https://github.com/user-attachments/assets/6be6e870-5207-4737-89f4-b85723c86620" />
+<img width="2946" height="1410" alt="yas-demo" src="https://github.com/user-attachments/assets/14256007-7d46-4712-8f15-5fc40a67d487" />
 
 ## Layout Reference
 
