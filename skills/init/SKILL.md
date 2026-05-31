@@ -113,7 +113,16 @@ mv "$_tmp" "$SETTINGS"  # timeout: 3000
 printf "  settings.json updated\n"
 ```
 
-## Step 5: Validate and report
+## Step 5: Remove legacy statusline-info-* files
+
+```bash
+for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
+    [ -e "$f" ] || continue
+    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+done  # timeout: 5000
+```
+
+## Step 6: Validate and report
 
 ```bash
 jq empty "$SETTINGS"  # timeout: 5000
@@ -127,5 +136,6 @@ Print:
   Config dir: $CLAUDE_CONFIG_DIR
   Done. Reload Claude Code to activate the statusline.
 ```
+
 
 </workflow>

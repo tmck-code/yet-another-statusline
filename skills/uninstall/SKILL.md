@@ -89,6 +89,12 @@ done
 if [ -d "$CONFIG_DIR/statusline-output" ]; then
     rm -rf "$CONFIG_DIR/statusline-output" && printf "  Removed statusline-output/\n"
 fi
+
+# Legacy: older versions wrote per-session info files here
+for f in "$CONFIG_DIR"/statusline-info-*; do
+    [ -e "$f" ] || continue
+    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+done
 ```
 
 (Use the resolved `$CONFIG_DIR` — not a hardcoded `~/.claude`.)
