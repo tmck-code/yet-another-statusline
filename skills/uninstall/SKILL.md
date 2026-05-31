@@ -1,6 +1,6 @@
 ---
 name: uninstall
-description: "Unwire yet-another-statusline from Claude Code — removes statusLine.command from ~/.claude/settings.json and deletes the renderer's runtime state. Run before (or after) `claude plugin uninstall yas`, which only deletes the plugin cache and leaves the statusLine config behind."
+description: "Unwire yet-another-statusline from Claude Code — removes statusLine.command from settings.json in CLAUDE_CONFIG_DIR (default ~/.claude/) and deletes the renderer's runtime state. Run before (or after) `claude plugin uninstall yas`, which only deletes the plugin cache and leaves the statusLine config behind."
 allowed-tools: Read, Write, Bash
 effort: low
 model: haiku
@@ -8,7 +8,7 @@ model: haiku
 
 <objective>
 
-Reverse `/yas:init`. Remove the `statusLine` block from `~/.claude/settings.json` (only when it points at this plugin's renderer) and delete the runtime logs and per-session payloads the renderer wrote.
+Reverse `/yas:init`. Remove the `statusLine` block from `settings.json` in `$CLAUDE_CONFIG_DIR` (default `~/.claude/`), only when it points at this plugin's renderer, and delete the runtime logs and per-session payloads the renderer wrote.
 
 `claude plugin uninstall yas@yet-another-statusline` only deletes the plugin *cache* — Claude Code keeps reading `statusLine.command` from settings.json and tries to run the now-missing script. This skill clears that config so the statusline actually stops.
 
@@ -89,6 +89,12 @@ done
 if [ -d "$CONFIG_DIR/statusline-output" ]; then
     rm -rf "$CONFIG_DIR/statusline-output" && printf "  Removed statusline-output/\n"
 fi
+
+# Legacy: older versions wrote per-session info files here
+for f in "$CONFIG_DIR"/statusline-info-*; do
+    [ -e "$f" ] || continue
+    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+done
 ```
 
 (Use the resolved `$CONFIG_DIR` — not a hardcoded `~/.claude`.)

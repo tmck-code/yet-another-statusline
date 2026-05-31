@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Wire yet-another-statusline into Claude Code — writes statusLine.command to ~/.claude/settings.json. Run once after plugin install, and again after every upgrade to update the versioned path."
+description: "Wire yet-another-statusline into Claude Code — writes statusLine.command to settings.json in CLAUDE_CONFIG_DIR (default ~/.claude/). Run once after plugin install, and again after every upgrade to update the versioned path."
 allowed-tools: Read, Write, Bash
 effort: low
 model: haiku
@@ -8,7 +8,7 @@ model: haiku
 
 <objective>
 
-Write `statusLine.command` into `~/.claude/settings.json` pointing at this plugin's Python renderer.
+Write `statusLine.command` into `settings.json` (in `$CLAUDE_CONFIG_DIR`, defaulting to `~/.claude/`) pointing at this plugin's Python renderer.
 
 Run once after `claude plugin install yas@yet-another-statusline`.
 Re-run after every upgrade — detects stale versioned path and rewrites.
@@ -20,6 +20,8 @@ Re-run after every upgrade — detects stale versioned path and rewrites.
 ## Step 1: Locate plugin root
 
 ```bash
+CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 PLUGIN_ROOT=$(jq -r '
     .plugins
     | to_entries[]
@@ -28,11 +30,11 @@ PLUGIN_ROOT=$(jq -r '
     | select(.installPath != null)
     | [.installedAt, .installPath]
     | @tsv
-' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null \
+' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
     | sort -rk1 | head -1 | cut -f2)  # timeout: 5000
 
 if [ -z "$PLUGIN_ROOT" ]; then
-    PLUGIN_ROOT=$(find ~/.claude/plugins/cache -maxdepth 5 -name "plugin.json" 2>/dev/null \
+    PLUGIN_ROOT=$(find "$CLAUDE_CONFIG_DIR/plugins/cache" -maxdepth 5 -name "plugin.json" 2>/dev/null \
             | xargs grep -l '"name"[[:space:]]*:[[:space:]]*"yas"' 2>/dev/null \
             | while IFS= read -r f; do
                 dir=$(dirname "$(dirname "$f")")
@@ -56,17 +58,28 @@ fi
 printf "  Plugin root: %s\n" "$PLUGIN_ROOT"
 ```
 
-## Step 2: Check if already current
+## Step 2: Remove legacy statusline-info-* files
+
+Run unconditionally (even if already up-to-date).
+
+```bash
+for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
+    [ -e "$f" ] || continue
+    rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+done  # timeout: 5000
+```
+
+## Step 3: Check if already current
 
 ```bash
 jq --arg script "$SCRIPT" -e '
     (.statusLine.command // "") | contains($script)
-' ~/.claude/settings.json >/dev/null 2>&1  # timeout: 5000
+' "$CLAUDE_CONFIG_DIR/settings.json" >/dev/null 2>&1  # timeout: 5000
 ```
 
 If exit 0: print `statusLine already set to current version — skipping.` and stop.
 
-## Step 3: Detect Python interpreter
+## Step 4: Detect Python interpreter
 
 ```bash
 PYTHON_BIN=""
@@ -84,35 +97,37 @@ fi
 printf "  Python: %s\n" "$PYTHON_BIN"
 ```
 
-## Step 4: Back up and write statusLine.command
+## Step 5: Back up and write statusLine.command
 
 ```bash
+SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
+
 # Create settings.json with empty object if missing (no backup needed for a new file)
-if [ ! -f "$HOME/.claude/settings.json" ]; then
-    printf '{}\n' > "$HOME/.claude/settings.json"
-    printf "  Created ~/.claude/settings.json\n"
+if [ ! -f "$SETTINGS" ]; then
+    printf '{}\n' > "$SETTINGS"
+    printf "  Created %s\n" "$SETTINGS"
 else
     BAK_TS=$(date -u +%Y%m%dT%H%M%SZ)
-    cp ~/.claude/settings.json "$HOME/.claude/settings.json.bak-yas-${BAK_TS}"  # timeout: 5000
+    cp "$SETTINGS" "${SETTINGS}.bak-yas-${BAK_TS}"  # timeout: 5000
     printf "  Backed up → settings.json.bak-yas-%s\n" "$BAK_TS"
 fi
 
 _result=$(jq --arg cmd "\"$PYTHON_BIN\" \"$SCRIPT\"" \
     '.statusLine = {"async":true,"command":$cmd,"refreshInterval":1,"type":"command"}' \
-    ~/.claude/settings.json)  # timeout: 5000
+    "$SETTINGS")  # timeout: 5000
 [ $? -eq 0 ] && [ -n "$_result" ] || { printf "! jq failed — settings.json unchanged\n"; exit 1; }
 
-_tmp=$(mktemp "$HOME/.claude/settings.json.XXXXXXXXXX")
+_tmp=$(mktemp "${SETTINGS}.XXXXXXXXXX")
 printf '%s\n' "$_result" > "$_tmp" \
     || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
-mv "$_tmp" "$HOME/.claude/settings.json"  # timeout: 3000
+mv "$_tmp" "$SETTINGS"  # timeout: 3000
 printf "  settings.json updated\n"
 ```
 
-## Step 5: Validate and report
+## Step 6: Validate and report
 
 ```bash
-jq empty ~/.claude/settings.json  # timeout: 5000
+jq empty "$SETTINGS"  # timeout: 5000
 ```
 
 If invalid: restore backup, report error, stop.
@@ -120,6 +135,7 @@ If invalid: restore backup, report error, stop.
 Print:
 ```
   statusLine set → "$PYTHON_BIN" "$SCRIPT"
+  Config dir: $CLAUDE_CONFIG_DIR
   Done. Reload Claude Code to activate the statusline.
 ```
 
