@@ -102,3 +102,29 @@ def test_from_cwd_real_repo(tmp_path: Path) -> None:
     result = sl.GitInfo.from_cwd(str(tmp_path))
     assert result.modified == 1
     assert result.untracked == 1
+
+
+
+def test_dirty_uses_no_optional_locks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`_dirty` must pass --no-optional-locks so a SIGKILL on timeout can't
+    leave a stray .git/index.lock behind. Regression test for
+    https://github.com/tmck-code/yet-another-statusline/issues/33."""
+    captured: list[list[str]] = []
+
+    class FakeCompleted:
+        stdout = ''
+        stderr = ''
+        returncode = 0
+
+    def fake_run(cmd: list[str], **kwargs: object) -> FakeCompleted:
+        captured.append(cmd)
+        return FakeCompleted()
+
+    monkeypatch.setattr(sl.subprocess, 'run', fake_run)
+    sl.GitInfo._dirty(str(tmp_path))
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert '--no-optional-locks' in cmd, cmd
+    # Must precede the `status` subcommand — it's a top-level git option.
+    assert cmd.index('--no-optional-locks') < cmd.index('status'), cmd

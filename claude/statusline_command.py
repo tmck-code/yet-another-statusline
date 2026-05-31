@@ -869,8 +869,10 @@ class GitInfo:
             return modified, untracked, deleted, renamed
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'status', '--porcelain=v1', '-z',
-                 '--untracked-files=normal'],
+                # --no-optional-locks: skip the index refresh write, so a
+                # SIGKILL on timeout can't leave a stray .git/index.lock.
+                ['git', '--no-optional-locks', '-C', repo, 'status',
+                 '--porcelain=v1', '-z', '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,
             )
         except Exception:
