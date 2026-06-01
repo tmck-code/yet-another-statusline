@@ -50,6 +50,7 @@ from yas.constants import (
     GLYPH_REPLYING,
     GLYPH_SKILLS,
     GLYPH_SUBAGENT_ROW,
+    GLYPH_SUBAGENT_DONE,
     GLYPH_TASKS,
     GLYPH_TASK_ACTIVE,
     GLYPH_TASK_DONE,
@@ -562,7 +563,11 @@ class Renderer:
 
     def subagent_row(self, sub: RunningSubagent, width: int, session_inout: int = 0) -> str:
         now     = time.time()
-        dur     = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
+        is_done = sub.end_ts > 0
+        if is_done:
+            dur = max(0.0, sub.end_ts - sub.first_timestamp)
+        else:
+            dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
         out_s   = fmt_tok(sub.output)
         tok_s   = fmt_tok(sub.total_input)
@@ -585,12 +590,20 @@ class Renderer:
             if _visible_width(desc_text) > desc_budget:
                 desc_text = (desc_text[:desc_budget - 1] + '…') if desc_budget > 0 else ''
 
-            left1 = (
-                f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
-                f'{self.SKILLS}{type_text}{self.R}'
-                f' {self.LABEL}·{self.R} '
-                f'{self.CTX}{desc_text}{self.R}'
-            )
+            if is_done:
+                left1 = (
+                    f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
+                    f'{self.CTX_DIM}{type_text}{self.R}'
+                    f' {self.CTX_DIM}·{self.R} '
+                    f'{self.CTX_DIM}{desc_text}{self.R}'
+                )
+            else:
+                left1 = (
+                    f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
+                    f'{self.SKILLS}{type_text}{self.R}'
+                    f' {self.LABEL}·{self.R} '
+                    f'{self.CTX}{desc_text}{self.R}'
+                )
             left1_w = head1_w + _visible_width(desc_text)
             pad1    = max(1, target_w - left1_w)
             line1   = f'{left1}{" " * pad1}'  # right side empty; pad keeps equal widths
@@ -622,18 +635,32 @@ class Renderer:
 
             def cluster(show_tpm: bool, show_share: bool, show_out: bool) -> str:
                 frags: list[str] = []
-                if show_tpm:
-                    frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
-                if show_share:
-                    frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
-                # tok and ↑out are one space-grouped field (no · between them).
-                tok_seg = f'{ctx_clr}{tok_field}{self.R}'
-                if show_out:
-                    tok_seg += f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
-                frags.append(tok_seg)
-                frags.append(f'{self.CTX}{dur_s}{self.R}')
-                frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
-                return sep.join(frags)
+                if is_done:
+                    dim = self.CTX_DIM
+                    if show_tpm:
+                        frags.append(f'{dim}{tpm_str}{self.R}{dim} t/m{self.R}')
+                    if show_share:
+                        frags.append(f'{dim}{GLYPH_PIE} {share_str}{self.R}')
+                    tok_seg = f'{dim}{tok_field}{self.R}'
+                    if show_out:
+                        tok_seg += f' {out_pad}{dim}↑ {self.R}{dim}{out_s}{self.R}'
+                    frags.append(tok_seg)
+                    frags.append(f'{dim}{dur_s}{self.R}')
+                    frags.append(f'{dim}{short_model.rjust(6)}{self.R}')
+                    return f' {dim}·{self.R} '.join(frags)
+                else:
+                    if show_tpm:
+                        frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
+                    if show_share:
+                        frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
+                    # tok and ↑out are one space-grouped field (no · between them).
+                    tok_seg = f'{ctx_clr}{tok_field}{self.R}'
+                    if show_out:
+                        tok_seg += f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
+                    frags.append(tok_seg)
+                    frags.append(f'{self.CTX}{dur_s}{self.R}')
+                    frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
+                    return sep.join(frags)
 
             show_tpm, show_share, show_out = tpm is not None, share is not None, True
 
@@ -668,12 +695,20 @@ class Renderer:
             )
             right_n_w = _visible_width(right_n)
 
-            left_n = (
-                f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
-                f'{self.SKILLS}{type_text}{self.R}'
-                f'  {model_clr}{short_model}{self.R}'
-                f'  {self.CTX}{tool_verb}{self.R}'
-            )
+            if is_done:
+                left_n = (
+                    f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
+                    f'{self.CTX_DIM}{type_text}{self.R}'
+                    f'  {self.CTX_DIM}{short_model}{self.R}'
+                    f'  {self.CTX_DIM}{tool_verb}{self.R}'
+                )
+            else:
+                left_n = (
+                    f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
+                    f'{self.SKILLS}{type_text}{self.R}'
+                    f'  {model_clr}{short_model}{self.R}'
+                    f'  {self.CTX}{tool_verb}{self.R}'
+                )
             left_n_w = _visible_width(left_n)
             pad_n    = max(1, target_w - left_n_w - right_n_w)
             return f'{left_n}{" " * pad_n}{right_n}'

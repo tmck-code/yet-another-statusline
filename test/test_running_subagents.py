@@ -86,18 +86,23 @@ def test_fresh_entry_included(tmp_home: Path) -> None:
     assert sub.description == 'find X'
 
 
-def test_stale_entry_excluded(tmp_home: Path) -> None:
+def test_stale_entry_included_in_from_session(tmp_home: Path) -> None:
+    # from_session no longer drops stale agents — stale-filtering is delegated
+    # to RunningSubagents.visible(), so from_session returns every agent found
+    # on disk regardless of mtime age.
     now = time.time()
     stale_mtime = now - RunningSubagents.STALE_SECONDS - 1
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-stale', mtime=stale_mtime)
 
     result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
-    assert result.subagents == []
+    assert len(result.subagents) == 1
+    assert result.subagents[0].mtime == stale_mtime
 
 
-def test_stale_window_is_20_seconds() -> None:
-    assert RunningSubagents.STALE_SECONDS == 20
+def test_stale_seconds_is_alias_for_liveness_window() -> None:
+    # STALE_SECONDS is kept for backward compat; it aliases LIVENESS_WINDOW_SECONDS (30 s)
+    assert RunningSubagents.STALE_SECONDS == RunningSubagents.LIVENESS_WINDOW_SECONDS
 
 
 def test_project_dir_with_leading_slash_produces_correct_slug(tmp_home: Path) -> None:
@@ -246,3 +251,65 @@ def test_last_activity_thinking_only(tmp_home: Path) -> None:
     result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.last_activity == ('thinking', '', {})
+
+
+def _assistant_line_with_stop_reason(
+    msg_id: str,
+    stop_reason: str,
+    *,
+    timestamp: str | None = None,
+    output_tokens: int    = 1,
+) -> str:
+    d: dict = {
+        'type': 'assistant',
+        'message': {
+            'id': msg_id,
+            'stop_reason': stop_reason,
+            'usage': {
+                'input_tokens': 0,
+                'cache_creation_input_tokens': 0,
+                'cache_read_input_tokens': 0,
+                'output_tokens': output_tokens,
+            },
+        },
+    }
+    if timestamp:
+        d['timestamp'] = timestamp
+    return json.dumps(d) + '\n'
+
+
+def test_end_ts_set_when_end_turn_present(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    end_turn_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-done',
+        jsonl_lines=[
+            _assistant_line('m1', input_tokens=10, output_tokens=5, timestamp='2026-05-22T17:50:00.000Z'),
+            _assistant_line_with_stop_reason('m2', 'end_turn', timestamp=end_turn_ts, output_tokens=3),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts > 0
+    # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
+    assert 1779472799 < sub.end_ts < 1779472801
+
+
+def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-running',
+        jsonl_lines=[
+            _assistant_line('m1', input_tokens=10, output_tokens=5, timestamp='2026-05-22T17:50:00.000Z'),
+            _assistant_line('m2', input_tokens=5,  output_tokens=2, timestamp='2026-05-22T17:55:00.000Z'),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts == 0.0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from yas.config import Config
@@ -12,6 +13,7 @@ from yas.constants import (
     RESET,
 )
 from yas.info import SessionView
+from yas.info.subagents import read_last_prompt_ts
 from yas.render.pill import Pill
 from yas.renderer import Renderer
 from yas.render.text import _visible_width
@@ -89,6 +91,8 @@ def build_narrow(
 
     tasks     = view.tasks
     subagents = view.subagents
+    last_prompt_ts = read_last_prompt_ts(session.session_id)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     if pill_pct:
         rows: list[RowSpec] = [
@@ -109,8 +113,8 @@ def build_narrow(
         for line in r.task_row(tasks, width, compact=True):
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
-    if subagents.subagents:
-        for sub in subagents.subagents:
+    if visible_subs:
+        for sub in visible_subs:
             for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
@@ -172,13 +176,15 @@ def build_medium(
         sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
     tasks     = view.tasks
     subagents = view.subagents
+    last_prompt_ts = read_last_prompt_ts(session.session_id)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
     rows: list[RowSpec] = [top_row, content_row, sep_row]
     if tasks.is_visible():
         for line in r.task_row(tasks, width):
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
-    if subagents.subagents:
-        for sub in subagents.subagents:
+    if visible_subs:
+        for sub in visible_subs:
             for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
@@ -300,9 +306,11 @@ def build_wide(
             rows.append(RowSpec('content', content=line))
         pending_ups = ()
 
-    if subagents.subagents:
+    last_prompt_ts = read_last_prompt_ts(session.session_id)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
+    if visible_subs:
         rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
-        for sub in subagents.subagents:
+        for sub in visible_subs:
             for line in r.subagent_row(sub, width, session_inout=session_inout).split('\n'):
                 rows.append(RowSpec('content', content=line))
         pending_ups = ()

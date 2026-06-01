@@ -4,12 +4,33 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from yas.constants import CLAUDE_DIR
+
+
+def read_last_prompt_ts(session_id: str) -> float | None:
+    '''Return the last UserPromptSubmit timestamp for session_id, or None.
+
+    Reads the yas-last-prompt.json state file (a JSON map of session_id →
+    float epoch seconds) from CLAUDE_DIR.  Returns None when the file is
+    missing, unreadable, contains invalid JSON, or does not include an entry
+    for session_id.  Never raises.
+    '''
+    try:
+        state = CLAUDE_DIR / 'yas-last-prompt.json'
+        text = state.read_text()
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        val = data.get(session_id)
+        if val is None:
+            return None
+        return float(val)
+    except Exception:
+        return None
 
 
 def _parse_iso_to_epoch(ts: str) -> float:
@@ -32,13 +53,23 @@ class RunningSubagent:
     cache_read_in: int                   = 0
     total_input:   int                   = 0
     last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
+    end_ts:        float                 = 0.0  # end_turn timestamp; Done iff end_ts > 0
+    mtime:         float                 = 0.0  # transcript last-modified time (st_mtime)
 
 
 @dataclass
 class RunningSubagents:
     subagents: list[RunningSubagent] = field(default_factory=list)
 
-    STALE_SECONDS = 20
+    # Cohort grace: seconds after the last end_ts before a fully-Done section retires
+    COHORT_GRACE_SECONDS = 20
+    # Janitor horizon: total-silence threshold to sweep a dirty cohort (no end_turn);
+    # also the recency-window fallback when no prompt-marker is available
+    JANITOR_HORIZON_SECONDS = 60
+    # Liveness window: silence threshold for "still writing" vs "idle/done" (straggler keep)
+    LIVENESS_WINDOW_SECONDS = 30
+    # Keep the old name as an alias so existing code that references it still works
+    STALE_SECONDS = LIVENESS_WINDOW_SECONDS
 
     @classmethod
     def from_session(cls, session_id: str, project_dir: str) -> RunningSubagents:
@@ -56,7 +87,6 @@ class RunningSubagents:
         subagents_dir = CLAUDE_DIR / 'projects' / project_slug / session_id / 'subagents'
         if not subagents_dir.is_dir():
             return cls()
-        now = time.time()
         subagents: list[RunningSubagent] = []
         try:
             for meta in subagents_dir.glob('*.meta.json'):
@@ -74,12 +104,10 @@ class RunningSubagents:
                     continue
                 try:
                     mtime = jsonl.stat().st_mtime
-                    if now - mtime > cls.STALE_SECONDS:
-                        continue
                 except OSError:
                     continue
 
-                billed_in, cache_read_in, output, first_ts, model, last_activity = cls._parse_transcript(jsonl)
+                billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts = cls._parse_transcript(jsonl)
                 subagents.append(RunningSubagent(
                     agent_type      = agent_type,
                     description     = description,
@@ -90,19 +118,72 @@ class RunningSubagents:
                     cache_read_in   = cache_read_in,
                     total_input     = billed_in + cache_read_in,
                     last_activity   = last_activity,
+                    end_ts          = end_ts,
+                    mtime           = mtime,
                 ))
         except OSError:
             pass
         subagents.sort(key=lambda s: s.first_timestamp)
         return cls(subagents=subagents)
 
+    def visible(self, now: float, last_prompt_ts: float | None) -> list[RunningSubagent]:
+        '''Compute the turn-scoped cohort visible in the statusline.
+
+        When last_prompt_ts is provided (from the prompt-boundary hook), an
+        agent is a candidate if it started this turn (first_timestamp >=
+        last_prompt_ts) OR it is still being written (transcript written within
+        LIVENESS_WINDOW_SECONDS), which keeps stragglers from the previous turn
+        that haven't finished yet.  A still-running agent (end_ts == 0) that is
+        actively writing is always included regardless.
+
+        When last_prompt_ts is None (hook unavailable), fall back to the
+        JANITOR_HORIZON_SECONDS recency window: include any agent written within
+        60 s, or still running (end_ts == 0).
+
+        After computing candidates, retirement rules apply:
+        - If all candidates are Done (end_ts > 0): hide once
+          now - max(end_ts) > COHORT_GRACE_SECONDS (20 s clean-retire).
+        - Otherwise (dirty cohort): hide once every member's transcript has
+          been silent for JANITOR_HORIZON_SECONDS (60 s janitor sweep).
+        '''
+        if last_prompt_ts is not None:
+            # Turn-scoped membership (Tasks 3.2 + 3.3)
+            candidates = [
+                sub for sub in self.subagents
+                if sub.first_timestamp >= last_prompt_ts
+                or now - sub.mtime <= self.LIVENESS_WINDOW_SECONDS
+            ]
+        else:
+            # No-marker fallback (Task 3.4): recency window
+            candidates = [
+                sub for sub in self.subagents
+                if now - sub.mtime <= self.JANITOR_HORIZON_SECONDS
+                or sub.end_ts == 0
+            ]
+
+        if not candidates:
+            return []
+
+        # Retirement logic (Task 3.3)
+        if all(sub.end_ts > 0 for sub in candidates):
+            # Fully-Done cohort: retire once the grace window expires
+            if now - max(sub.end_ts for sub in candidates) > self.COHORT_GRACE_SECONDS:
+                return []
+        else:
+            # Dirty cohort: janitor sweep when all transcripts have gone silent
+            if all(now - sub.mtime > self.JANITOR_HORIZON_SECONDS for sub in candidates):
+                return []
+
+        return candidates
+
     @staticmethod
-    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]]]:
+    def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float]:
         seen: set[str] = set()
         billed_in    = 0
         cache_read_in = 0
         output       = 0
         first_ts     = 0.0
+        end_ts       = 0.0
         model        = ''
         last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
         try:
@@ -145,6 +226,13 @@ class RunningSubagents:
                             last_activity = ('thinking', '', {})
                         elif kind == 'text':
                             last_activity = ('text', '', {})
+                    try:
+                        if msg.get('stop_reason') == 'end_turn':
+                            ts = d.get('timestamp', '')
+                            if ts:
+                                end_ts = _parse_iso_to_epoch(ts)
+                    except (ValueError, TypeError):
+                        pass
         except OSError:
             pass
-        return billed_in, cache_read_in, output, first_ts, model, last_activity
+        return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts

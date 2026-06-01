@@ -1,4 +1,15 @@
 {
   "description": "yas plugin hooks",
-  "hooks": {}
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_PATH}/hooks/yas-prompt-hook.py"
+          }
+        ]
+      }
+    ]
+  }
 }

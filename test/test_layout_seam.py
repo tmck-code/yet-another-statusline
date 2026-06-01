@@ -35,16 +35,18 @@ def _tick() -> TickRecord:
 
 
 def _make_sub() -> subagents_mod.RunningSubagent:
+    now = time.time()
     return subagents_mod.RunningSubagent(
         agent_type      = 'Explore',
         description     = 'test desc',
         billed_in       = 1000,
         output          = 100,
-        first_timestamp = time.time() - 10,
+        first_timestamp = now - 10,
         model           = 'claude-sonnet-4-6',
         cache_read_in   = 0,
         total_input     = 1000,
         last_activity   = ('tool_use', 'Bash', {'command': 'pytest'}),
+        mtime           = now - 5,
     )
 
 

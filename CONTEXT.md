@@ -67,6 +67,21 @@ At width ≤100 cols the pair collapses to a single row (description and tool ar
 The ` <N>K` token figure is coloured by the **Compaction-Risk Zone** (green ≤50K, yellow ≤80K, orange ≤150K, red >150K) — the same thresholds as the main context bar. In the wide continuation row it renders bare (no glyph); the hourglass glyph (`GLYPH_HOURGLASS`, nf-fa-hourglass_half) prefixes it only in the width ≤100 single-line collapse.
 
 Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
+
+**Done state**: When a subagent finishes with `stop_reason == "end_turn"` its transcript captures `end_ts` (the epoch of that final line). A Done agent renders with `✓` instead of `▶`, dimmed styling throughout (marker, description, all stats), and a *frozen* elapsed time (`end_ts − first_timestamp` rather than `now − first_timestamp`). Running agents are byte-for-byte unchanged.
+
+**Cohort retirement**: Subagents are shown as a *cohort* scoped to the current user turn (bounded by the `UserPromptSubmit` hook writing `~/.claude/yas-last-prompt.json`). Membership rules:
+- When the turn marker is available: include agents whose `first_timestamp ≥ last_prompt_ts`, plus any still-writing stragglers from the previous turn (transcript written within the liveness window).
+- When the turn marker is absent (hook not installed): fall back to a 60s recency window — include any agent written within 60 s, or still running (`end_ts == 0`).
+
+Once the cohort is computed, retirement applies:
+- **Clean retire** (all Done): hide the section 20 s after the last `end_ts` — the whole cohort vanishes together after a brief "done" beat.
+- **Dirty sweep** (janitor): if no cohort member's transcript has been written for 60 s and no member has a clean `end_turn`, the section is hidden (dead agents without a clean exit are swept).
+
+**Three time constants**:
+- `COHORT_GRACE_SECONDS = 20` — how long a fully-Done cohort stays visible after the last `end_ts` (clean retire).
+- `JANITOR_HORIZON_SECONDS = 60` — silence threshold for the dirty-cohort sweep; also the recency window for the no-marker fallback.
+- `LIVENESS_WINDOW_SECONDS = 30` — a still-writing agent is kept even if it started before the current turn boundary, bridging the gap between turns.
 _Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
 
 **Average t/m (per-subagent)**:
