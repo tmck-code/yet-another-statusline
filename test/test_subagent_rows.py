@@ -33,15 +33,20 @@ def _make_sub(
     cache_read_in: int = 0,
     total_input: int = 12345,
     last_activity: tuple = ('tool_use', 'Bash', {'command': 'pytest -q'}),
-) -> subagents_mod.RunningSubagent:
+    mtime: float | None = None,
+) -> RunningSubagent:
+    now = time.time()
     if first_timestamp is None:
-        first_timestamp = time.time() - 47
-    return subagents_mod.RunningSubagent(
+        first_timestamp = now - 47
+    if mtime is None:
+        mtime = now - 5
+    return RunningSubagent(
         agent_type      = agent_type,
         description     = description,
         billed_in       = billed_in,
         output          = output,
         first_timestamp = first_timestamp,
+        mtime           = mtime,
         model           = model,
         cache_read_in   = cache_read_in,
         total_input     = total_input,
@@ -135,7 +140,7 @@ def test_subagent_row_dur_no_timestamp_fallback() -> None:
 
 # B. build_wide integration
 
-def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[subagents_mod.RunningSubagent]) -> str:
+def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent]) -> str:
     monkeypatch.setattr(
         subagents_mod.RunningSubagents, 'from_session',
         classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)),
@@ -395,3 +400,108 @@ def test_subagent_row_wide_model_right_justified() -> None:
     _, line2 = _r.subagent_row(
         sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
     assert strip_ansi(line2).rstrip().endswith(' haiku')
+
+
+# G. Done row treatment (group 5)
+
+def _make_done_sub(**kwargs) -> RunningSubagent:
+    """Subagent that has finished: end_ts > 0, ran for ~90s."""
+    now = time.time()
+    defaults = dict(
+        agent_type='general-purpose',
+        description='Draft claude-light Theme literal',
+        billed_in=12345,
+        output=678,
+        first_timestamp=now - 120.0,
+        end_ts=now - 30.0,  # Done 30s ago; elapsed frozen at 90s
+        model='claude-sonnet-4-6',
+        cache_read_in=0,
+        total_input=12345,
+        last_activity=('tool_use', 'Bash', {'command': 'pytest -q'}),
+    )
+    defaults.update(kwargs)
+    return RunningSubagent(**defaults)
+
+
+def test_done_row_wide_shows_checkmark() -> None:
+    out = _r.subagent_row(_make_done_sub(), 140)
+    line1, _ = out.split('\n')
+    assert '✓' in strip_ansi(line1)
+
+
+def test_done_row_wide_no_running_marker() -> None:
+    out = _r.subagent_row(_make_done_sub(), 140)
+    line1, _ = out.split('\n')
+    assert '▶' not in strip_ansi(line1)
+
+
+def test_done_row_narrow_shows_checkmark() -> None:
+    out = _r.subagent_row(_make_done_sub(), 80)
+    assert '\n' not in out
+    assert '✓' in strip_ansi(out)
+
+
+def test_done_row_narrow_no_running_marker() -> None:
+    out = _r.subagent_row(_make_done_sub(), 80)
+    assert '▶' not in strip_ansi(out)
+
+
+def test_running_row_still_has_running_marker() -> None:
+    out = _r.subagent_row(_make_sub(), 140)
+    line1, _ = out.split('\n')
+    assert '▶' in strip_ansi(line1)
+    assert '✓' not in strip_ansi(line1)
+
+
+def test_running_row_narrow_still_has_running_marker() -> None:
+    out = _r.subagent_row(_make_sub(), 80)
+    assert '▶' in strip_ansi(out)
+    assert '✓' not in strip_ansi(out)
+
+
+def _extract_dur(text: str) -> str:
+    """Pull the first duration token (e.g. '1m30s', '47s', '1h01m') out of text."""
+    import re
+    m = re.search(r'\d+h\d{2}m|\d+m\d{2}s|\d+s', text)
+    return m.group(0) if m else ''
+
+
+def test_done_row_elapsed_is_frozen_wide() -> None:
+    """Duration in two renders of a Done row must be identical (elapsed is frozen)."""
+    now = time.time()
+    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
+    out1 = _r.subagent_row(sub, 140)
+    time.sleep(0.05)
+    out2 = _r.subagent_row(sub, 140)
+    _, line2_a = out1.split('\n')
+    _, line2_b = out2.split('\n')
+    assert _extract_dur(strip_ansi(line2_a)) == _extract_dur(strip_ansi(line2_b))
+
+
+def test_done_row_elapsed_is_frozen_narrow() -> None:
+    """Narrow: frozen elapsed does not increase between two renders."""
+    now = time.time()
+    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
+    out1 = _r.subagent_row(sub, 80)
+    time.sleep(0.05)
+    out2 = _r.subagent_row(sub, 80)
+    assert _extract_dur(strip_ansi(out1)) == _extract_dur(strip_ansi(out2))
+
+
+def test_done_row_frozen_duration_value_wide() -> None:
+    """Elapsed shown for Done row equals end_ts - first_timestamp (90s → 1m30s)."""
+    now = time.time()
+    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
+    _, line2 = _r.subagent_row(sub, 160).split('\n')
+    assert '1m30s' in strip_ansi(line2)
+
+
+def test_done_row_uses_ctx_dim_styling() -> None:
+    """Done row identity line must contain CTX_DIM escape; running row must not (in line1)."""
+    done_out    = _r.subagent_row(_make_done_sub(), 140)
+    running_out = _r.subagent_row(_make_sub(), 140)
+    done_line1, _    = done_out.split('\n')
+    running_line1, _ = running_out.split('\n')
+    assert _r.CTX_DIM in done_line1
+    # Running line1 uses CTX (not CTX_DIM) — verify CTX_DIM is absent (or they differ)
+    assert _r.CTX_DIM not in running_line1 or _r.CTX_DIM == _r.CTX

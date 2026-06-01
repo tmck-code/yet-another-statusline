@@ -68,6 +68,7 @@ GLYPH_BURN_SLOW = ''  # nf-oct-flame (shown when the burn rate is _not_ too f
 GLYPH_FOLDER   = ''     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = ''     # nf-fa-tasks         (subagent list)
 GLYPH_SUBAGENT_ROW = '▶'  # U+25B6           (per-row Running Subagent marker)
+GLYPH_SUBAGENT_DONE = '✓'  # U+2713           (Done subagent row marker)
 GLYPH_TASKS    = '\U000f08a8'  # nf-md-clipboard-check-outline (Task Row marker)
 GLYPH_TASK_PENDING = '\ue640'      # nf-fa-circle_o          (pending task)
 GLYPH_TASK_ACTIVE  = '\U000f0117'  # nf-md-arrow_right_thick (in_progress task)

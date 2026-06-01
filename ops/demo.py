@@ -160,13 +160,19 @@ def write_subagents(
     project_dir: Path,
     subagents:   list[tuple[object, ...]],
     *,
-    age_seconds: float = 0.0,
+    age_seconds:  float = 0.0,
+    mtime_age:    float = 0.0,
 ) -> None:
-    """Each subagent entry: (agentType, description, billed_in, output_tokens[, action]).
+    """Each subagent entry: (agentType, description, billed_in, output_tokens[, action[, done_seconds_ago]]).
 
     action is (tool_name, input_dict) or None; if absent or None, content is omitted.
     age_seconds shifts the recorded start timestamp into the past so that duration
     and t/m rate are non-zero when rendered.
+    done_seconds_ago (6th element, float > 0) marks the agent as Done: appends an
+    end_turn line with a timestamp done_seconds_ago in the past, and sets the file
+    mtime to match.
+    mtime_age shifts the mtime of every non-Done agent's jsonl into the past by
+    that many seconds (used to simulate idle/dirty cohort agents).
     """
     # Match Claude Code's projects/ dir convention (cross-platform).
     # See statusline_command.py:RunningSubagents.from_session for full notes.
@@ -180,7 +186,9 @@ def write_subagents(
     _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
     for i, row in enumerate(subagents, 1):
         agent_type_raw, description_raw, billed_in_raw, output_tokens_raw = row[:4]
-        action_raw = row[4] if len(row) > 4 else None
+        action_raw    = row[4] if len(row) > 4 else None
+        done_secs_raw = row[5] if len(row) > 5 else None
+        done_secs     = float(done_secs_raw) if isinstance(done_secs_raw, (int, float)) and done_secs_raw > 0 else None
         agent_type    = str(agent_type_raw)
         description   = str(description_raw)
         billed_in     = int(billed_in_raw) if isinstance(billed_in_raw, (int, float)) else 0
@@ -220,7 +228,30 @@ def write_subagents(
             jsonl.write_text(json.dumps(entry) + '\n')
         else:
             jsonl.write_text('')
-        os.utime(jsonl, (now, now))
+        if done_secs is not None:
+            # Append an end_turn line so _parse_transcript records end_ts.
+            done_ts = (datetime.now() - timedelta(seconds=done_secs)).astimezone().isoformat()
+            end_entry: dict[str, object] = {
+                'type':      'assistant',
+                'timestamp': done_ts,
+                'message': {
+                    'id':         f'msg_demo_done_{i}',
+                    'stop_reason': 'end_turn',
+                    'role':        'assistant',
+                    'usage': {
+                        'input_tokens':                0,
+                        'cache_creation_input_tokens': 0,
+                        'cache_read_input_tokens':     0,
+                        'output_tokens':               0,
+                    },
+                },
+            }
+            jsonl.write_text(jsonl.read_text() + json.dumps(end_entry) + '\n')
+            mtime_for_done = now - done_secs
+            os.utime(jsonl, (mtime_for_done, mtime_for_done))
+        else:
+            file_mtime = now - mtime_age
+            os.utime(jsonl, (file_mtime, file_mtime))
 
 
 def write_settings(claude_dir: Path, plugins: list[str]) -> None:
@@ -537,6 +568,7 @@ class ScenarioConfig:
     five_hour_pct: float                     = 30.0
     seven_day_pct: float                     = 20.0
     yas_toml:      str | None                = None
+    subagent_mtime_age: float                = 0.0
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -680,6 +712,50 @@ SCENARIOS: list[ScenarioConfig] = [
             'bg_shift = "purple"\n'
         ),
     ),
+    ScenarioConfig(
+        name        = 'cohort-all-running',
+        context_pct = 0.35,
+        subagents   = [
+            ('explore',         'Scan codebase for token tracking',   2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
+            ('general-purpose', 'Analyse sparkline bucket algorithm',  5_600,   720, ('Read', {'file_path': 'claude/statusline_command.py'})),
+            ('claude',          'Draft border-math refactor',          3_800,   540, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'x', 'new_string': 'y'})),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+    ),
+    ScenarioConfig(
+        name        = 'cohort-mixed',
+        context_pct = 0.42,
+        subagents   = [
+            ('explore',         'Scan codebase for token tracking',   2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'}), 45.0),
+            ('general-purpose', 'Analyse sparkline bucket algorithm',  5_600,   720, ('Read', {'file_path': 'claude/statusline_command.py'})),
+            ('claude',          'Draft border-math refactor',          3_800,   540, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'x', 'new_string': 'y'}), 30.0),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+    ),
+    ScenarioConfig(
+        name        = 'cohort-all-done-grace',
+        context_pct = 0.38,
+        subagents   = [
+            ('explore',         'Scan codebase for token tracking',   2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'}), 8.0),
+            ('general-purpose', 'Analyse sparkline bucket algorithm',  5_600,   720, ('Read', {'file_path': 'claude/statusline_command.py'}), 12.0),
+            ('claude',          'Draft border-math refactor',          3_800,   540, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'x', 'new_string': 'y'}), 5.0),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+    ),
+    ScenarioConfig(
+        name               = 'cohort-dirty-janitor',
+        context_pct        = 0.33,
+        subagents          = [
+            ('explore',         'Scan codebase for token tracking',   2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
+            ('general-purpose', 'Analyse sparkline bucket algorithm',  5_600,   720, ('Read', {'file_path': 'claude/statusline_command.py'})),
+        ],
+        five_hour_pct      = 30.0,
+        seven_day_pct      = 20.0,
+        subagent_mtime_age = 40.0,
+    ),
 ]
 
 
@@ -754,7 +830,7 @@ def render_scenario(
     write_settings(claude, cfg.plugins)
     if cfg.yas_toml is not None:
         (claude / 'yas.toml').write_text(cfg.yas_toml)
-    write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90)
+    write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90, mtime_age=cfg.subagent_mtime_age)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
 

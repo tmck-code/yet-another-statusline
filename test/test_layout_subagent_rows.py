@@ -19,8 +19,9 @@ SESSION = (Path(__file__).parent.parent / 'ops'
 
 
 def _make_sub(agent_type: str = 'Explore', first_timestamp: float | None = None) -> subagents_mod.RunningSubagent:
+    now = time.time()
     if first_timestamp is None:
-        first_timestamp = time.time() - 10
+        first_timestamp = now - 10
     return subagents_mod.RunningSubagent(
         agent_type      = agent_type,
         description     = 'test desc',
@@ -31,6 +32,7 @@ def _make_sub(agent_type: str = 'Explore', first_timestamp: float | None = None)
         cache_read_in   = 0,
         total_input     = 1000,
         last_activity   = ('tool_use', 'Bash', {'command': 'pytest'}),
+        mtime           = now - 5,
     )
 
 
