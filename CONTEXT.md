@@ -45,7 +45,7 @@ _Avoid_: "hue shift" (was the earlier term; **Shift** is canonical and matches t
 ### Theming
 
 **Theme**:
-The complete set of colour decisions the statusline draws with — decorative slots (border, path, branch, helper, label), the compaction traffic-light ladder, the rainbow border gradient stops, the per-model **Anchor** + warm/cool **Shift** tables, and the two **Pill Foreground** slots. Lives as a `Theme` dataclass instance in `claude/statusline/themes.py`. Selected at runtime via `--theme=name`, `CLAUDE_STATUSLINE_THEME`, or `~/.claude/statusline-theme` — in that priority order, falling back to `claude-dark`. See [docs/adr/0002-theme-system.md](docs/adr/0002-theme-system.md).
+The complete set of colour decisions the statusline draws with — decorative slots (border, path, branch, helper, label), the compaction traffic-light ladder, the rainbow border gradient stops, the per-model **Anchor** + warm/cool **Shift** tables, and the two **Pill Foreground** slots. Lives as a `Theme` dataclass instance in `claude/yas/themes.py`. Selected at runtime via `--theme=name`, `CLAUDE_STATUSLINE_THEME`, or `~/.claude/statusline-theme` — in that priority order, falling back to `claude-dark`. See [docs/adr/0002-theme-system.md](docs/adr/0002-theme-system.md).
 _Avoid_: "palette" as a synonym (a palette is a *source* — Catppuccin Latte, Solarized Light — and a **Theme** is the fully populated dataclass derived from one).
 
 **Pill Foreground**:
@@ -103,11 +103,11 @@ _Avoid_: "session tasks" (a session can span many generations; only the newest o
 A per-task duration. Live (`now − started_at`) while the task is `in_progress`; frozen (`completed_at − started_at`) once `completed`; absent for a `pending` task or one that was never started. Formatted by `fmt_duration` as `m:ss`, rolling to `h:mm:ss` at one hour. Reads `Task.started_at` / `Task.completed_at` (epoch seconds of the latest `→ in_progress` / `→ completed` transition).
 
 **Total Elapsed**:
-The **Task Checklist** header's wall-clock span for the current **Plan Generation**: earliest task `started_at` → `now` while any task is `in_progress`, else → the latest `completed_at`. Absent when no task in the generation ever started. Computed by `total_elapsed` (in `claude/statusline/tasks_view.py`) and formatted by `fmt_duration`.
+The **Task Checklist** header's wall-clock span for the current **Plan Generation**: earliest task `started_at` → `now` while any task is `in_progress`, else → the latest `completed_at`. Absent when no task in the generation ever started. Computed by `total_elapsed` (in `claude/yas/render/tasks_view.py`) and formatted by `fmt_duration`.
 _Avoid_: "sum of timers" (it is one continuous span, not the sum of per-task **Task Timer** values, which can overlap or leave gaps).
 
 **Active Window**:
-The active-anchored slice of at most 4 task rows chosen by `select_window` (returns a `WindowSlice`, in `claude/statusline/tasks_view.py`). Keeps the `in_progress` item visible with one completed item of lead context and biases toward upcoming `pending` items so the checklist tracks where work is heading rather than where it has been. There are no `+N done` / `+N more` collapse lines — each row's task number conveys position within the full plan. `WindowSlice.done_hidden` / `more_hidden` still report the clipped counts above/below for any caller that wants them.
+The active-anchored slice of at most 4 task rows chosen by `select_window` (returns a `WindowSlice`, in `claude/yas/render/tasks_view.py`). Keeps the `in_progress` item visible with one completed item of lead context and biases toward upcoming `pending` items so the checklist tracks where work is heading rather than where it has been. There are no `+N done` / `+N more` collapse lines — each row's task number conveys position within the full plan. `WindowSlice.done_hidden` / `more_hidden` still report the clipped counts above/below for any caller that wants them.
 _Avoid_: "scroll window" (nothing scrolls — the slice is recomputed each render from the active task's position).
 
 ### Rate limits
@@ -143,6 +143,19 @@ _Avoid_: "per-model env var" (none exists by design).
 The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. Full per-value reasons are written to stderr only when `YAS_DEBUG` is set. A rejected knob silently falls back to its default — the row is informational, never fatal.
 _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single failure message, and never aborts the render).
 
+### Derived session state
+
+**SessionView**:
+The lazy, pure-read view of all *derived* session state, built once per render from a parsed **SessionInfo** plus **Config** and consumed by the layout builders. Each field — `git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes` (**OpenSpec** changes), `elapsed`, `session_cost`, `session_inout` — is a `@cached_property` that reads its source on first access and caches, so a narrow render pays only for the fields it draws (no git subprocess, transcript scan, or openspec walk it never shows). Lives in `claude/yas/info/__init__.py`, below the render layer in the DAG: it imports the six filesystem readers, `metrics`, and `tokens` (cost compute only) but never `Renderer`. Holds no render geometry (the bar **fill**, the pill percentage, **Anchor**/**Shift**) — those stay render-side — and performs no disk writes.
+_Avoid_: "session model" (that is **SessionInfo**, the raw JSON parse; **SessionView** is the gathered layer above it) and "snapshot" (fields resolve at first access, not at one frozen instant — only `now` is frozen for time math).
+
+**Session In/Out** (`session_inout`):
+The **Session Share %** denominator carried on the **SessionView**: `(Billed Input + Cache Read + Output) + Σ(Running Subagent total_input + output)`. The one genuinely *derived* SessionView field — it composes the **Transcript Usage** and **Running Subagent** readers — so it lives in exactly one place rather than being recomputed per caller.
+
+**Tick Record** (`record_tick`):
+The per-render disk-write step, owned by `app` and kept off the **SessionView** so the view stays a pure read. It persists this tick's **Transcript Usage** to the **Day Total** ledger (`TokenLog.update`) and the rate log (`TokenRate.update`), then returns a `TickRecord` bundling `token_log`, `day_cost`, and the token rate. `app` threads the `TickRecord` into the wide layout builder, so **Day Total** and day-cost never masquerade as gathered facts. Sits beside the existing per-render payload write in `app.main` (the `statusline-output` index file) — the one place per-render side effects belong.
+_Avoid_: "gather the day total" (the **Day Total** is *written*, not gathered — it depends on this tick's persist, which is why it is a **Tick Record** value and not a **SessionView** field).
+
 ## Relationships
 
 - **Billed Input** + **Cache Read** + **Output** are the three columns shown twice in the tokens row — once for this session, once as **Day Total**.
@@ -161,3 +174,46 @@ _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single 
 
 - "input tokens" was ambiguous between raw `input_tokens` and the displayed **Billed Input** (which includes cache writes). Resolved: **Billed Input** is the canonical term for the `↓` column.
 - "context limit" was ambiguous between **Context Window Size** (per-model capacity) and the 150K **Compaction-Risk Zone** threshold. Resolved: these are distinct — the bar shows both.
+
+## Module map
+
+The statusline source lives in `claude/yas/` as a layered package with two subpackages. Each module owns one concern; imports only flow downward (earlier → later layers).
+
+**Top-level** (`claude/yas/`):
+
+| Module | Canonical concept |
+|--------|-------------------|
+| `constants` | ANSI colours, glyph/icon escape constants, width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
+| `session` | Session data model: `SessionInfo`, `Model`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, … |
+| `config` | `Config` — env/argv/toml resolution; no import-time singleton |
+| `metrics` | (see `yas/render/metrics`) |
+| `tokens` | `TokenAccounting`, `TokenLog`, `TokenRate`, `TickRecord`, cost computations |
+| `themes` | `Theme` dataclass, `THEMES` registry, `CLAUDE_DARK` default |
+| `renderer` | `Renderer` — all section helpers (path, model, tokens, context, plugins, …) |
+| `layout` | `RowSpec`, `LayoutSpec`, `build_narrow/medium/wide`, `render_layout` — builders consume a `SessionView` (and `TickRecord` for wide) |
+| `app` | `render`, `resolve_theme`, `main` — public entry points; `record_tick`/`TickRecord` construction and dispatch |
+
+**`yas/info/`** — data-gather layer (public face: `from yas.info import SessionView`):
+
+| Module | Canonical concept |
+|--------|-------------------|
+| `__init__` | `SessionView` — lazy `@cached_property` gather seam for all derived session state (`git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes`, `elapsed`, `session_cost`, `session_inout`); `_fmt_elapsed` pure formatter |
+| `git` | `GitInfo` — working-tree branch/dirty state |
+| `skills` | `LoadedSkills` — skill files on disk |
+| `subagents` | `RunningSubagents` — active sub-agent processes |
+| `tasks` | `Task`, `TaskList` — Claude task tracking |
+| `transcript` | `TranscriptUsage` — per-transcript token counts |
+| `openspec` | `OpenSpec` — active OpenSpec change |
+
+**`yas/render/`** — renderer building-blocks:
+
+| Module | Canonical concept |
+|--------|-------------------|
+| `gradient` | `GradientEngine`, rainbow palette helpers, `pill_gradient_fg` |
+| `pill` | `Pill` dataclass — model-effort coloured pill rendering |
+| `borders` | `BorderRenderer` — box-drawing elbow/fill math |
+| `text` | Terminal-width math (`_visible_width`, `_is_wide`), string helpers (`_middle_ellipsis`, `fmt_tok`, `fmt_dur`), `terminal_width` |
+| `metrics` | Derived session metrics: `burndown_delta`, `subagent_avg_tpm`, `subagent_share` |
+| `tasks_view` | Pure task-checklist maths (no ANSI/I/O): `fmt_duration`, `total_elapsed`, `select_window` → `WindowSlice` |
+
+`claude/statusline_command.py` is the frozen entrypoint: it imports `main` from `yas.app` and calls it under `__main__`.

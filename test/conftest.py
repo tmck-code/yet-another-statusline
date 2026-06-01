@@ -1,24 +1,19 @@
-import importlib.util
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Callable
 
 import pytest
 
 from helper import strip_ansi as _strip_ansi
+import yas.app as _sl_app
+import yas.config as _sl_config
+import yas.constants as _sl_constants
+import yas.session as _sl_session
+import yas.info.subagents as _sl_subagents
+import yas.tokens as _sl_tokens
 
 _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
-
-if 'statusline_command' not in sys.modules:
-    _spec = importlib.util.spec_from_file_location('statusline_command', _SRC)
-    assert _spec is not None and _spec.loader is not None
-    _mod  = importlib.util.module_from_spec(_spec)
-    sys.modules['statusline_command'] = _mod
-    _spec.loader.exec_module(_mod)
-
-import statusline_command as sl  # noqa: E402
 
 
 def _hooks_active() -> bool:
@@ -52,6 +47,12 @@ def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     # CLAUDE_DIR is a module-level constant frozen at import as HOME/'.claude'.
     # Patching HOME alone leaves it pointing at the real ~/.claude, so source
     # reads (token logs, subagents, theme, settings) would escape the sandbox.
-    monkeypatch.setattr(sl, 'HOME', tmp_path)
-    monkeypatch.setattr(sl, 'CLAUDE_DIR', tmp_path / '.claude')
+    # Patch each package module that carries its own copy.
+    claude_dir = tmp_path / '.claude'
+    monkeypatch.setattr(_sl_app,       'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_config,    'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_constants, 'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_session,   'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_subagents, 'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_tokens,    'CLAUDE_DIR', claude_dir)
     return tmp_path

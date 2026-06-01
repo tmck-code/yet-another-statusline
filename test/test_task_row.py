@@ -5,26 +5,35 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
+import yas.constants as constants
+import yas.layout as layout
+import yas.renderer as renderer_mod
+import yas.session as session_mod
+import yas.info.tasks as tasks_mod
+from yas.config import Config
+from yas.info import SessionView
+from yas.render.text import _visible_width
+from yas.constants import GLYPH_TASKS, GLYPH_TASK_ACTIVE, GLYPH_TASK_DONE, GLYPH_TASK_PENDING
+from yas.tokens import TickRecord, TokenLog
 from helper import strip_ansi
 
 
-_r = sl.Renderer()
+_r = renderer_mod.Renderer()
+
+SESSION = (Path(__file__).parent.parent / 'ops'
+           / 'session-info-example.json')
 
 
 def _row(*args, **kwargs) -> str:
     """Join task_row's list[str] return for single-line A/B-group assertions."""
     return '\n'.join(_r.task_row(*args, **kwargs))
 
-SESSION = (Path(__file__).parent.parent / 'claude' / 'statusline'
-           / 'session-info-example.json')
-
 
 def _make_tasks(
     tasks: list[tuple[str, str, str]] | None = None,
     last_event_ts: float | None = None,
     timestamps: list[tuple[float | None, float | None]] | None = None,
-) -> sl.TaskList:
+) -> tasks_mod.TaskList:
     """Build a TaskList directly (never via from_session).
 
     `tasks` is a list of (subject, active_form, status). `timestamps`, if
@@ -35,13 +44,13 @@ def _make_tasks(
     objs = []
     for i, (subj, af, status) in enumerate(tasks):
         started, completed = (timestamps[i] if timestamps else (None, None))
-        objs.append(sl.Task(
+        objs.append(tasks_mod.Task(
             id=i + 1, subject=subj, active_form=af, status=status,
             started_at=started, completed_at=completed,
         ))
     if last_event_ts is None:
         last_event_ts = time.time() - 5
-    return sl.TaskList(tasks=objs, last_event_ts=last_event_ts)
+    return tasks_mod.TaskList(tasks=objs, last_event_ts=last_event_ts)
 
 
 # A. task_row full-list formatting (wide/medium) — multi-line list output
@@ -59,7 +68,7 @@ def test_task_row_header_has_glyph_and_count() -> None:
         ('c', 'c', 'pending'),
     ]), 100)
     header = strip_ansi(out[0])
-    assert sl.GLYPH_TASKS in header
+    assert GLYPH_TASKS in header
     assert '1/3' in header
 
 
@@ -83,7 +92,7 @@ def test_task_row_header_elapsed_precedes_count_no_timer_glyph() -> None:
     header = strip_ansi(out[0])
     # Order: Total Elapsed first (leading column), then the done/total count.
     assert header.index('2:0') < header.index('1/2')
-    assert not hasattr(sl, 'GLYPH_TASK_TIMER')
+    assert not hasattr(constants, 'GLYPH_TASK_TIMER')
 
 
 def test_task_row_total_elapsed_absent_when_never_started() -> None:
@@ -92,7 +101,7 @@ def test_task_row_total_elapsed_absent_when_never_started() -> None:
         ('b', 'b', 'pending'),
     ]), 120)
     header = strip_ansi(out[0])
-    assert sl.GLYPH_TASKS in header
+    assert GLYPH_TASKS in header
     assert ':' not in header  # no timer at all
 
 
@@ -103,9 +112,9 @@ def test_task_row_item_state_glyphs() -> None:
         ('pend three', 'doing three', 'pending'),
     ]), 120)
     body = '\n'.join(strip_ansi(line) for line in out[1:])
-    assert sl.GLYPH_TASK_DONE in body
-    assert sl.GLYPH_TASK_ACTIVE in body
-    assert sl.GLYPH_TASK_PENDING in body
+    assert GLYPH_TASK_DONE in body
+    assert GLYPH_TASK_ACTIVE in body
+    assert GLYPH_TASK_PENDING in body
 
 
 def test_task_row_completed_shows_frozen_duration() -> None:
@@ -152,7 +161,7 @@ def test_task_row_timers_align_in_fixed_leading_column() -> None:
     ), 120)
     item_lines = out[1:]
     # Timers occupy a fixed leading column, so every item row shares one width.
-    widths = {sl._visible_width(strip_ansi(line)) for line in item_lines}
+    widths = {_visible_width(strip_ansi(line)) for line in item_lines}
     assert len(widths) == 1
     # Each timer renders before its subject text on the row.
     for line, subj in zip(item_lines, ('short', 'longer one', 'doing active')):
@@ -222,7 +231,7 @@ def test_task_row_fits_inner_width(width: int) -> None:
         timestamps=[(now - 30, None), (None, None)],
     ), width)
     for line in out:
-        assert sl._visible_width(line) <= width - 3
+        assert _visible_width(line) <= width - 3
 
 
 # B. task_row compact form (narrow)
@@ -269,19 +278,23 @@ def test_task_row_compact_drops_active_form() -> None:
 
 # C. build_wide / build_medium integration
 
-def _render(monkeypatch: pytest.MonkeyPatch, builder, tasks: sl.TaskList, width: int) -> str:
+def _render(monkeypatch: pytest.MonkeyPatch, builder, tasks: tasks_mod.TaskList, width: int) -> str:
     monkeypatch.setattr(
-        sl.TaskList, 'from_session',
+        tasks_mod.TaskList, 'from_session',
         classmethod(lambda cls, transcript_path: tasks),
     )
-    session = sl.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    spec    = builder(session, width, _r)
-    return '\n'.join(sl.render_layout(spec, _r))
+    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
+    view    = SessionView(session, Config())
+    if builder is layout.build_wide:
+        spec = builder(view, TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0), width, _r)
+    else:
+        spec = builder(view, width, _r)
+    return '\n'.join(layout.render_layout(spec, _r))
 
 
 def test_build_wide_no_tasks_no_glyph(monkeypatch: pytest.MonkeyPatch) -> None:
-    out = _render(monkeypatch, sl.build_wide, sl.TaskList(), 120)
-    assert sl.GLYPH_TASKS not in strip_ansi(out)
+    out = _render(monkeypatch, layout.build_wide, tasks_mod.TaskList(), 120)
+    assert GLYPH_TASKS not in strip_ansi(out)
 
 
 def test_build_wide_visible_tasks_show_row(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,9 +302,9 @@ def test_build_wide_visible_tasks_show_row(monkeypatch: pytest.MonkeyPatch) -> N
         ('A', 'Doing A', 'in_progress'),
         ('B', 'B', 'pending'),
     ])
-    out = _render(monkeypatch, sl.build_wide, tasks, 120)
+    out = _render(monkeypatch, layout.build_wide, tasks, 120)
     stripped = strip_ansi(out)
-    assert sl.GLYPH_TASKS in stripped
+    assert GLYPH_TASKS in stripped
     assert '0/2' in stripped
     assert 'Doing A' in stripped
 
@@ -301,10 +314,10 @@ def test_build_wide_stale_tasks_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
     # freshness cap hides the stale list.
     tasks = _make_tasks(
         [('A', 'doing a', 'completed'), ('B', 'doing b', 'completed')],
-        last_event_ts=time.time() - sl.TaskList.FRESHNESS_CAP - 10,
+        last_event_ts=time.time() - tasks_mod.TaskList.FRESHNESS_CAP - 10,
     )
-    out = _render(monkeypatch, sl.build_wide, tasks, 120)
-    assert sl.GLYPH_TASKS not in strip_ansi(out)
+    out = _render(monkeypatch, layout.build_wide, tasks, 120)
+    assert GLYPH_TASKS not in strip_ansi(out)
 
 
 def test_build_medium_visible_tasks_show_full_list(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,29 +326,29 @@ def test_build_medium_visible_tasks_show_full_list(monkeypatch: pytest.MonkeyPat
         ('A', 'Distinctive active text', 'in_progress'),
         ('B', 'B', 'pending'),
     ])
-    out = _render(monkeypatch, sl.build_medium, tasks, 90)
+    out = _render(monkeypatch, layout.build_medium, tasks, 90)
     stripped = strip_ansi(out)
-    assert sl.GLYPH_TASKS in stripped
+    assert GLYPH_TASKS in stripped
     assert '0/2' in stripped
     assert 'Distinctive active text' in stripped
 
 
 def test_build_medium_no_tasks_no_glyph(monkeypatch: pytest.MonkeyPatch) -> None:
-    out = _render(monkeypatch, sl.build_medium, sl.TaskList(), 90)
-    assert sl.GLYPH_TASKS not in strip_ansi(out)
+    out = _render(monkeypatch, layout.build_medium, tasks_mod.TaskList(), 90)
+    assert GLYPH_TASKS not in strip_ansi(out)
 
 
 def test_build_narrow_shows_compact_line(monkeypatch: pytest.MonkeyPatch) -> None:
     # D7: narrow now renders a single compact line (glyph + done/total +
     # the active live timer), with no per-item subject text.
     tasks = _make_tasks([('A', 'Distinctive active text', 'in_progress')])
-    out = _render(monkeypatch, sl.build_narrow, tasks, 60)
+    out = _render(monkeypatch, layout.build_narrow, tasks, 60)
     stripped = strip_ansi(out)
-    assert sl.GLYPH_TASKS in stripped
+    assert GLYPH_TASKS in stripped
     assert '0/1' in stripped
     assert 'Distinctive active text' not in stripped
 
 
 def test_build_narrow_no_tasks_no_glyph(monkeypatch: pytest.MonkeyPatch) -> None:
-    out = _render(monkeypatch, sl.build_narrow, sl.TaskList(), 60)
-    assert sl.GLYPH_TASKS not in strip_ansi(out)
+    out = _render(monkeypatch, layout.build_narrow, tasks_mod.TaskList(), 60)
+    assert GLYPH_TASKS not in strip_ansi(out)

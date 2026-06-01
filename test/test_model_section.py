@@ -1,14 +1,22 @@
-import statusline_command as sl
+import yas.renderer as renderer
+import yas.layout as layout_mod
+from yas.config import Config
+from yas.info import SessionView
+from yas.constants import (
+    GLYPH_BURN_FAST,
+    MEDIUM_WIDTH,
+    NARROW_WIDTH,
+    DEFAULT_MAX_WIDTH as MAX_WIDTH,
+    PILL_LEFT,
+    PILL_RIGHT,
+    PILL_BR,
+)
+from yas.info.git import GitInfo
+from yas.session import Effort, Model, RateBucket, RateLimits, SessionInfo, Thinking
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
-RateLimits = sl.RateLimits
-RateBucket = sl.RateBucket
-SessionInfo = sl.SessionInfo
-Model = sl.Model
-Thinking = sl.Thinking
-Effort = sl.Effort
+Renderer = renderer.Renderer
 
 _NOW = 1_000_000_000.0
 
@@ -31,8 +39,8 @@ def test_model_right_section_pill_inactive_plain_text() -> None:
     _helper, right, w = r.model_right_section('Sonnet 4.6', '', RateLimits())
     stripped = strip_ansi(right)
     assert 'Sonnet 4.6' in stripped
-    assert sl.PILL_LEFT not in stripped
-    assert sl.PILL_RIGHT not in stripped
+    assert PILL_LEFT not in stripped
+    assert PILL_RIGHT not in stripped
     assert w == _visible_width(right)
 
 
@@ -40,8 +48,8 @@ def test_model_right_section_pill_active_wraps_with_caps() -> None:
     r = Renderer()
     _helper, right, w = r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
     stripped = strip_ansi(right)
-    assert stripped.startswith(sl.PILL_LEFT)
-    assert stripped.endswith(sl.PILL_RIGHT)
+    assert stripped.startswith(PILL_LEFT)
+    assert stripped.endswith(PILL_RIGHT)
     assert 'Opus 4.7 1M' in stripped
     assert 'high' in stripped
     assert w == _visible_width(right)
@@ -67,7 +75,7 @@ class TestSingleRowGuarantee:
     _vsep_w = 5
 
     def _wide_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
-        git    = sl.GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
+        git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
         helper, right, right_w = r.model_right_section(
             'Sonnet 4.6', '', RateLimits()
         )
@@ -78,7 +86,7 @@ class TestSingleRowGuarantee:
         return path, helper, right, right_w
 
     def _medium_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
-        git    = sl.GitInfo(branch='feat/long', commit='abc1234', modified=3)
+        git    = GitInfo(branch='feat/long', commit='abc1234', modified=3)
         _rate, right, right_w = r.model_right_section_compact(
             'Sonnet 4.6', RateLimits(), max_right_width=max(8, width // 2),
         )
@@ -90,8 +98,8 @@ class TestSingleRowGuarantee:
 
     def test_wide_path_fits_target_at_borderline(self) -> None:
         r = Renderer()
-        for width in (sl.MEDIUM_WIDTH, 100, sl.MAX_WIDTH):
-            git    = sl.GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
+        for width in (MEDIUM_WIDTH, 100, MAX_WIDTH):
+            git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
             helper, _right, right_w = r.model_right_section('Sonnet 4.6', '', RateLimits())
             helper_w = _visible_width(helper)
             target_w = (width - 4) - self._vsep_w - helper_w - right_w
@@ -100,8 +108,8 @@ class TestSingleRowGuarantee:
 
     def test_medium_path_fits_target_at_borderline(self) -> None:
         r = Renderer()
-        for width in (sl.NARROW_WIDTH, 68, sl.MEDIUM_WIDTH - 1):
-            git    = sl.GitInfo(branch='feat/long', commit='abc1234', modified=3)
+        for width in (NARROW_WIDTH, 68, MEDIUM_WIDTH - 1):
+            git    = GitInfo(branch='feat/long', commit='abc1234', modified=3)
             _rate, _right, right_w = r.model_right_section_compact(
                 'Sonnet 4.6', RateLimits(), max_right_width=max(8, width // 2),
             )
@@ -146,7 +154,7 @@ class TestNarrowPillOnRight:
         r = Renderer()
         width = 50
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, width, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), width, r)
         pill = next(row.pill for row in spec.rows if row.pill is not None)
         assert pill.end == width, 'pill must end at right edge'
         assert pill.start > 1,   'pill must not start at left edge'
@@ -154,7 +162,7 @@ class TestNarrowPillOnRight:
     def test_content_row_uses_right_pill_when_thinking_active(self) -> None:
         r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, 50, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
         content_rows = [row for row in spec.rows if row.kind == 'content']
         model_row = content_rows[0]
         assert model_row.right_pill != '', 'model row must use right_pill when pill active'
@@ -163,24 +171,24 @@ class TestNarrowPillOnRight:
     def test_no_pill_when_thinking_disabled(self) -> None:
         r = Renderer()
         session = _narrow_session('Sonnet 4.6', thinking=False)
-        spec = sl.build_narrow(session, 50, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
         assert all(row.pill is None for row in spec.rows), 'no pill when thinking disabled'
 
     def test_rendered_top_border_starts_with_normal_corner(self) -> None:
         r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, 50, r)
-        lines = sl.render_layout(spec, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
+        lines = layout_mod.render_layout(spec, r)
         top = strip_ansi(lines[0])
         assert top.startswith('╭'), 'top-left corner must be ╭ when pill is on right'
 
     def test_rendered_separator_ends_with_pill_bottom(self) -> None:
         r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, 50, r)
-        lines = sl.render_layout(spec, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
+        lines = layout_mod.render_layout(spec, r)
         sep = strip_ansi(lines[2])
-        assert sep.endswith(sl.PILL_BR), 'separator must end with PILL_BR when pill is on right'
+        assert sep.endswith(PILL_BR), 'separator must end with PILL_BR when pill is on right'
 
 
 class TestModelRightSectionWideBurndown:
@@ -201,7 +209,7 @@ class TestModelRightSectionWideBurndown:
         rate = self._make_rate(60.0, 150, 60.0, 5040)
         helper, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
         stripped = strip_ansi(helper)
-        assert sl.GLYPH_BURN_FAST in stripped  # at least one over-burn trend
+        assert GLYPH_BURN_FAST in stripped  # at least one over-burn trend
 
     def test_wide_seven_day_idle_suppresses_block(self) -> None:
         import time
@@ -226,7 +234,7 @@ class TestModelRightSectionWideBurndown:
         helper, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
         stripped = strip_ansi(helper)
         assert '60.0%' in stripped
-        assert sl.GLYPH_BURN_FAST not in stripped
+        assert GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
 
     def test_wide_helper_text_width_is_positive(self) -> None:
@@ -245,7 +253,7 @@ class TestModelRightSectionCompactBurndown:
         rate = RateLimits(five_hour=RateBucket(used_percentage=60.0, resets_at=0))
         rate_text, _right, _w = self._r.model_right_section_compact('Sonnet 4.6', rate, max_right_width=40)
         stripped = strip_ansi(rate_text)
-        assert sl.GLYPH_BURN_FAST not in stripped
+        assert GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
         assert '·' not in stripped
 
@@ -277,7 +285,7 @@ class TestNarrowLayoutNoBurndown:
 
     def test_narrow_no_up_arrow(self) -> None:
         out, _w = self._r.model_section_compact('Sonnet 4.6', self._narrow_rate(), max_width=55)
-        assert sl.GLYPH_BURN_FAST not in strip_ansi(out)
+        assert GLYPH_BURN_FAST not in strip_ansi(out)
 
     def test_narrow_no_down_arrow(self) -> None:
         out, _w = self._r.model_section_compact('Sonnet 4.6', self._narrow_rate(), max_width=55)

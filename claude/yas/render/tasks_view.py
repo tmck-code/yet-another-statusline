@@ -4,8 +4,6 @@ These isolate the testable maths behind `Renderer.task_row`: duration
 formatting, the generation's Total Elapsed wall-clock span, and the
 active-anchored window selection. `Renderer.task_row` composes ANSI/colour
 around their results. See `task-checklist-timers` design D3/D4/D6/D9.
-
-Loaded via `importlib` from `statusline_command.py`, mirroring `themes.py`.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from statusline_command import Task, TaskList
+    from yas.info.tasks import Task, TaskList
 
 
 @dataclass

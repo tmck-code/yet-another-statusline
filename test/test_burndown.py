@@ -1,13 +1,15 @@
 import time
 
 
-import statusline_command as sl
+import yas.render.metrics as metrics
+from yas.constants import (
+    FIVE_HOUR_MINUTES,
+    SEVEN_DAY_MINUTES,
+    FIVE_HOUR_WARMUP_MINUTES,
+    SEVEN_DAY_WARMUP_MINUTES,
+)
 
-burndown_delta = sl.burndown_delta
-FIVE_HOUR_MINUTES = sl.FIVE_HOUR_MINUTES
-SEVEN_DAY_MINUTES = sl.SEVEN_DAY_MINUTES
-FIVE_HOUR_WARMUP_MINUTES = sl.FIVE_HOUR_WARMUP_MINUTES
-SEVEN_DAY_WARMUP_MINUTES = sl.SEVEN_DAY_WARMUP_MINUTES
+burndown_delta = metrics.burndown_delta
 
 
 def _resets_at(minutes_from_now: float, now: float = 0.0) -> int:

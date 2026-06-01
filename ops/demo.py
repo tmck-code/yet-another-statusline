@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-WRAPPER_DIR = Path(__file__).resolve().parent
-FIXTURE_PATH = WRAPPER_DIR / 'session-info-example.json'
-STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline_command.py'
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURE_PATH = REPO_ROOT / 'ops' / 'session-info-example.json'
+STATUSLINE_SCRIPT = REPO_ROOT / 'claude' / 'statusline_command.py'
 
 
 SKILLS_PROGRESSION: tuple[list[str], ...] = (

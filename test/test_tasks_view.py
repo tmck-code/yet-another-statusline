@@ -1,15 +1,10 @@
 """Tests for the pure view helpers in tasks_view.py (D3/D4/D6).
 
 These cover duration formatting, the generation Total Elapsed span, and the
-active-anchored window selection. The helpers are bound onto the
-`statusline_command` module by Foundation, mirroring `themes.py`.
+active-anchored window selection.
 """
-import statusline_command as sl
-
-fmt_duration = sl.fmt_duration
-total_elapsed = sl.total_elapsed
-select_window = sl.select_window
-WindowSlice = sl.WindowSlice
+from yas.info.tasks import Task, TaskList
+from yas.render.tasks_view import WindowSlice, fmt_duration, select_window, total_elapsed
 
 
 def _task(
@@ -18,8 +13,8 @@ def _task(
     *,
     started_at: float | None = None,
     completed_at: float | None = None,
-) -> 'sl.Task':
-    return sl.Task(
+) -> 'Task':
+    return Task(
         id          = tid,
         subject     = f'task {tid}',
         active_form = f'doing task {tid}',
@@ -62,12 +57,12 @@ def test_fmt_duration_just_below_rollover() -> None:
 # ---- §4.3 total_elapsed ----------------------------------------------------
 
 def test_total_elapsed_none_when_nothing_started() -> None:
-    tl = sl.TaskList(tasks=[_task(1, 'pending'), _task(2, 'pending')])
+    tl = TaskList(tasks=[_task(1, 'pending'), _task(2, 'pending')])
     assert total_elapsed(tl, now=1000.0) is None
 
 
 def test_total_elapsed_live_while_in_progress() -> None:
-    tl = sl.TaskList(tasks=[
+    tl = TaskList(tasks=[
         _task(1, 'completed', started_at=100.0, completed_at=150.0),
         _task(2, 'in_progress', started_at=200.0),
     ])
@@ -76,7 +71,7 @@ def test_total_elapsed_live_while_in_progress() -> None:
 
 
 def test_total_elapsed_frozen_when_all_complete() -> None:
-    tl = sl.TaskList(tasks=[
+    tl = TaskList(tasks=[
         _task(1, 'completed', started_at=100.0, completed_at=150.0),
         _task(2, 'completed', started_at=160.0, completed_at=240.0),
     ])
@@ -85,7 +80,7 @@ def test_total_elapsed_frozen_when_all_complete() -> None:
 
 
 def test_total_elapsed_ignores_never_started_tasks() -> None:
-    tl = sl.TaskList(tasks=[
+    tl = TaskList(tasks=[
         _task(1, 'pending'),
         _task(2, 'completed', started_at=500.0, completed_at=560.0),
     ])
@@ -94,7 +89,7 @@ def test_total_elapsed_ignores_never_started_tasks() -> None:
 
 def test_total_elapsed_fallback_when_started_but_no_completed() -> None:
     # started, nothing in_progress, nothing completed -> graceful now - earliest
-    tl = sl.TaskList(tasks=[_task(1, 'pending', started_at=100.0)])
+    tl = TaskList(tasks=[_task(1, 'pending', started_at=100.0)])
     assert total_elapsed(tl, now=250.0) == 150.0
 
 
@@ -107,7 +102,7 @@ def _assert_budget(ws: 'WindowSlice', budget: int = 4) -> None:
 
 def test_select_window_short_plan_returns_all() -> None:
     tasks = [_task(1, 'completed'), _task(2, 'in_progress'), _task(3, 'pending')]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert ws.items == tasks
     assert ws.done_hidden == 0
@@ -118,7 +113,7 @@ def test_select_window_short_plan_returns_all() -> None:
 def test_select_window_exactly_budget_returns_all() -> None:
     tasks = [_task(i, 'pending') for i in range(1, 5)]
     tasks[2].status = 'in_progress'
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert ws.items == tasks
     assert ws.done_hidden == 0
@@ -128,7 +123,7 @@ def test_select_window_exactly_budget_returns_all() -> None:
 
 def test_select_window_long_plan_keeps_active_and_budget() -> None:
     # 20 tasks, active in the middle, completed before, pending after.
-    tasks: list[sl.Task] = []
+    tasks: list[Task] = []
     for i in range(1, 21):
         if i < 10:
             tasks.append(_task(i, 'completed'))
@@ -136,7 +131,7 @@ def test_select_window_long_plan_keeps_active_and_budget() -> None:
             tasks.append(_task(i, 'in_progress'))
         else:
             tasks.append(_task(i, 'pending'))
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     active = tl.active
     assert active in ws.items, 'in_progress task must be in the window'
@@ -151,7 +146,7 @@ def test_select_window_long_plan_keeps_active_and_budget() -> None:
 
 def test_select_window_active_at_start_long() -> None:
     tasks = [_task(1, 'in_progress')] + [_task(i, 'pending') for i in range(2, 21)]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert tl.active in ws.items
     assert ws.done_hidden == 0  # nothing completed above
@@ -160,7 +155,7 @@ def test_select_window_active_at_start_long() -> None:
 
 def test_select_window_active_at_end_long() -> None:
     tasks = [_task(i, 'completed') for i in range(1, 20)] + [_task(20, 'in_progress')]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert tl.active in ws.items
     assert ws.more_hidden == 0  # nothing pending below
@@ -169,7 +164,7 @@ def test_select_window_active_at_end_long() -> None:
 
 def test_select_window_no_active_shows_first_pendings() -> None:
     tasks = [_task(i, 'pending') for i in range(1, 21)]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert ws.items[0].id == 1, 'no active -> window from the start'
     assert ws.done_hidden == 0
@@ -180,7 +175,7 @@ def test_select_window_no_active_shows_first_pendings() -> None:
 
 def test_select_window_all_complete_shows_last_completeds() -> None:
     tasks = [_task(i, 'completed') for i in range(1, 21)]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert ws.items[-1].id == 20, 'all complete -> window the last completeds'
     assert ws.more_hidden == 0
@@ -190,7 +185,7 @@ def test_select_window_all_complete_shows_last_completeds() -> None:
 
 
 def test_select_window_single_task() -> None:
-    tl = sl.TaskList(tasks=[_task(1, 'in_progress')])
+    tl = TaskList(tasks=[_task(1, 'in_progress')])
     ws = select_window(tl)
     assert len(ws.items) == 1
     assert ws.done_hidden == 0 and ws.more_hidden == 0
@@ -202,7 +197,7 @@ def test_select_window_seven_tasks_clips_to_budget() -> None:
     tasks = [_task(i, 'completed') for i in range(1, 4)]
     tasks += [_task(4, 'in_progress')]
     tasks += [_task(i, 'pending') for i in range(5, 8)]
-    tl = sl.TaskList(tasks=tasks)
+    tl = TaskList(tasks=tasks)
     ws = select_window(tl)
     assert tl.active in ws.items
     _assert_budget(ws)
@@ -223,7 +218,7 @@ def test_select_window_budget_holds_across_active_positions() -> None:
                 tasks.append(_task(i + 1, 'in_progress'))
             else:
                 tasks.append(_task(i + 1, 'pending'))
-        tl = sl.TaskList(tasks=tasks)
+        tl = TaskList(tasks=tasks)
         ws = select_window(tl)
         assert tl.active in ws.items, f'active_pos={active_pos}'
         _assert_budget(ws)

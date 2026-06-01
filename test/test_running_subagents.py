@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 
-import statusline_command as sl
+from yas.info.subagents import RunningSubagents
 
 
 SESSION_ID = 'sess-abc'
@@ -70,8 +70,8 @@ def _assistant_line(
 
 
 def test_missing_directory_returns_empty(tmp_home: Path) -> None:
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
-    assert result == sl.RunningSubagents(subagents=[])
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    assert result == RunningSubagents(subagents=[])
 
 
 def test_fresh_entry_included(tmp_home: Path) -> None:
@@ -79,7 +79,7 @@ def test_fresh_entry_included(tmp_home: Path) -> None:
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-1', agent_type='Explore', description='find X', mtime=now)
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert len(result.subagents) == 1
     sub = result.subagents[0]
     assert sub.agent_type  == 'Explore'
@@ -88,16 +88,16 @@ def test_fresh_entry_included(tmp_home: Path) -> None:
 
 def test_stale_entry_excluded(tmp_home: Path) -> None:
     now = time.time()
-    stale_mtime = now - sl.RunningSubagents.STALE_SECONDS - 1
+    stale_mtime = now - RunningSubagents.STALE_SECONDS - 1
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-stale', mtime=stale_mtime)
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert result.subagents == []
 
 
 def test_stale_window_is_20_seconds() -> None:
-    assert sl.RunningSubagents.STALE_SECONDS == 20
+    assert RunningSubagents.STALE_SECONDS == 20
 
 
 def test_project_dir_with_leading_slash_produces_correct_slug(tmp_home: Path) -> None:
@@ -105,7 +105,7 @@ def test_project_dir_with_leading_slash_produces_correct_slug(tmp_home: Path) ->
     sdir = _subagents_dir(tmp_home)
     _write_agent(sdir, 'agent-2', mtime=now)
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert len(result.subagents) == 1
 
 
@@ -121,7 +121,7 @@ def test_token_totals_sum_across_assistant_entries(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.billed_in == 6 + 14052 + 1 + 2824
     assert sub.output    == 4 + 1528
@@ -139,7 +139,7 @@ def test_duplicate_message_id_deduped(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.billed_in == 10
     assert sub.output    == 20
@@ -158,7 +158,7 @@ def test_first_timestamp_extracted(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     # First timestamp wins (2026-05-22T17:38:31Z)
     assert sub.first_timestamp > 0
@@ -172,7 +172,7 @@ def test_subagents_sorted_by_first_timestamp_ascending(tmp_home: Path) -> None:
     _write_agent(sdir, 'agent-late',  jsonl_lines=[_assistant_line('a', timestamp='2026-05-22T18:00:00Z')], mtime=now)
     _write_agent(sdir, 'agent-early', jsonl_lines=[_assistant_line('b', timestamp='2026-05-22T17:00:00Z')], mtime=now)
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     assert [s.first_timestamp for s in result.subagents] == sorted(s.first_timestamp for s in result.subagents)
 
 
@@ -195,7 +195,7 @@ def test_fresh_entry_with_model_and_live_fields(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.model         == 'claude-sonnet-4-6'
     assert sub.billed_in     == 150   # input_tokens + cache_creation
@@ -223,7 +223,7 @@ def test_last_activity_text_after_tool_use(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.last_activity == ('text', '', {})
 
@@ -243,6 +243,6 @@ def test_last_activity_thinking_only(tmp_home: Path) -> None:
         mtime=now,
     )
 
-    result = sl.RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.last_activity == ('thinking', '', {})

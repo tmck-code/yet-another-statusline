@@ -1,6 +1,6 @@
 import pytest
 
-from statusline_command import subagent_avg_tpm, subagent_share
+from yas.render.metrics import subagent_avg_tpm, subagent_share
 
 
 class TestSubagentAvgTpm:

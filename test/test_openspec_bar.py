@@ -1,8 +1,8 @@
-import statusline_command as sl
+import yas.renderer as renderer
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
+Renderer = renderer.Renderer
 
 
 def test_openspec_bar_visible_width() -> None:

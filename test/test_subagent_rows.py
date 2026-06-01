@@ -5,13 +5,21 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
+import yas.layout as layout
+import yas.renderer as renderer_mod
+import yas.session as session_mod
+import yas.info.subagents as subagents_mod
+from yas.config import Config
+from yas.info import SessionView
+from yas.info.subagents import RunningSubagent
+from yas.render.text import _visible_width, fmt_tok
+from yas.tokens import TickRecord, TokenLog
 from helper import strip_ansi
 
 
-_r = sl.Renderer()
+_r = renderer_mod.Renderer()
 
-SESSION = (Path(__file__).parent.parent / 'claude' / 'statusline'
+SESSION = (Path(__file__).parent.parent / 'ops'
            / 'session-info-example.json')
 
 
@@ -25,10 +33,10 @@ def _make_sub(
     cache_read_in: int = 0,
     total_input: int = 12345,
     last_activity: tuple = ('tool_use', 'Bash', {'command': 'pytest -q'}),
-) -> sl.RunningSubagent:
+) -> subagents_mod.RunningSubagent:
     if first_timestamp is None:
         first_timestamp = time.time() - 47
-    return sl.RunningSubagent(
+    return subagents_mod.RunningSubagent(
         agent_type      = agent_type,
         description     = description,
         billed_in       = billed_in,
@@ -76,14 +84,14 @@ def test_subagent_row_duration_seconds() -> None:
 @pytest.mark.parametrize('width', [80, 100])
 def test_subagent_row_fits_inner_width_narrow(width: int) -> None:
     out = _r.subagent_row(_make_sub(), width)
-    assert sl._visible_width(out) <= width - 3
+    assert _visible_width(out) <= width - 3
 
 
 @pytest.mark.parametrize('width', [120, 160])
 def test_subagent_row_fits_inner_width_wide(width: int) -> None:
     line1, line2 = _r.subagent_row(_make_sub(), width).split('\n')
-    assert sl._visible_width(line1) <= width - 3
-    assert sl._visible_width(line2) <= width - 3
+    assert _visible_width(line1) <= width - 3
+    assert _visible_width(line2) <= width - 3
 
 
 def test_subagent_row_long_description_elides() -> None:
@@ -127,14 +135,16 @@ def test_subagent_row_dur_no_timestamp_fallback() -> None:
 
 # B. build_wide integration
 
-def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[sl.RunningSubagent]) -> str:
+def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[subagents_mod.RunningSubagent]) -> str:
     monkeypatch.setattr(
-        sl.RunningSubagents, 'from_session',
-        classmethod(lambda cls, sid, pdir: sl.RunningSubagents(subagents=subs)),
+        subagents_mod.RunningSubagents, 'from_session',
+        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)),
     )
-    session = sl.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    spec    = sl.build_wide(session, 120, _r)
-    return '\n'.join(sl.render_layout(spec, _r))
+    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
+    view    = SessionView(session, Config())
+    tick    = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
+    spec    = layout.build_wide(view, tick, 120, _r)
+    return '\n'.join(layout.render_layout(spec, _r))
 
 
 def test_build_wide_no_subagents_no_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,7 +181,7 @@ def test_subagent_row_wide_continuation_starts_with_indent() -> None:
 
 def test_subagent_row_wide_equal_visible_widths() -> None:
     line1, line2 = _r.subagent_row(_make_sub(), 140).split('\n')
-    assert sl._visible_width(line1) == sl._visible_width(line2)
+    assert _visible_width(line1) == _visible_width(line2)
 
 
 def test_subagent_row_wide_continuation_uses_ctx_dim() -> None:
@@ -225,7 +235,7 @@ def test_subagent_activity_long_arg_truncated() -> None:
     out = strip_ansi(_r.subagent_activity(act))
     # Extract the arg portion between '[' and ']'
     arg = out.split('[', 1)[1].rstrip(']')
-    assert sl._visible_width(arg) == 37  # 36 chars + ellipsis
+    assert _visible_width(arg) == 37  # 36 chars + ellipsis
 
 
 def test_subagent_activity_thinking() -> None:
@@ -244,7 +254,7 @@ def test_subagent_activity_empty() -> None:
 
 # E. Burn-metric cluster (tasks 5.1–5.3)
 
-def _make_established_sub(**kwargs) -> sl.RunningSubagent:
+def _make_established_sub(**kwargs) -> RunningSubagent:
     """Subagent running for 60s with enough tokens to produce valid tpm."""
     defaults = dict(
         first_timestamp=time.time() - 60,
@@ -267,7 +277,7 @@ def test_burn_cluster_wide_shows_tpm_and_share() -> None:
     assert '%' in plain
 
 
-def _pressure_sub() -> sl.RunningSubagent:
+def _pressure_sub() -> RunningSubagent:
     """Wide stat fields + a max-length (36-char) activity, so the narrowest
     wide widths are forced to shed stats. tpm/share both have valid data."""
     return _make_sub(
@@ -316,7 +326,7 @@ def test_burn_cluster_tok_dur_model_never_drop() -> None:
         plain = strip_ansi(line2)
         assert re.search(r'\d+m\d{2}s', plain), f'width={w} dropped elapsed'
         assert 'sonnet' in plain, f'width={w} dropped model'
-        assert sl.fmt_tok(sub.total_input) in plain, f'width={w} dropped token count'
+        assert fmt_tok(sub.total_input) in plain, f'width={w} dropped token count'
 
 
 def test_burn_cluster_widening_only_adds_stats() -> None:

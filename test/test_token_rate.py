@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
+import yas.tokens as tokens
 
 
 NOW = 1_000_000.0  # fixed "now" for all tests
@@ -30,16 +30,16 @@ def _write_row(path: Path, ts: float, session_id: str, total_in: int, total_out:
 
 def setup_rate(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> Path:
     """Patch time and constants to deterministic values; return log path."""
-    monkeypatch.setattr(sl, 'time', FakeTime)
-    monkeypatch.setattr(sl.TokenRate, 'WINDOW', 60.0)
-    monkeypatch.setattr(sl.TokenRate, 'KEEP', 300.0)
+    monkeypatch.setattr(tokens, 'time', FakeTime)
+    monkeypatch.setattr(tokens.TokenRate, 'WINDOW', 60.0)
+    monkeypatch.setattr(tokens.TokenRate, 'KEEP', 300.0)
     return _log_path(tmp_home)
 
 
 def test_single_sample_returns_zero(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """Empty log + first update returns 0."""
     setup_rate(monkeypatch, tmp_home)
-    result = sl.TokenRate.update('sess-1', 100, 200)
+    result = tokens.TokenRate.update('sess-1', 100, 200)
     assert result == 0
 
 
@@ -48,7 +48,7 @@ def test_two_samples_in_window_return_delta(monkeypatch: pytest.MonkeyPatch, tmp
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 30, 'sess-1', 100, 200)
 
-    result = sl.TokenRate.update('sess-1', 150, 250)
+    result = tokens.TokenRate.update('sess-1', 150, 250)
     # delta = (150 + 250) - (100 + 200) = 100
     assert result == 100
 
@@ -58,7 +58,7 @@ def test_stale_rows_pruned_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_home: 
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 9999, 'sess-1', 1, 1)
 
-    sl.TokenRate.update('sess-1', 0, 0)
+    tokens.TokenRate.update('sess-1', 0, 0)
 
     content = log.read_text()
     assert f'{NOW - 9999:.3f}' not in content
@@ -67,7 +67,7 @@ def test_stale_rows_pruned_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_home: 
 def test_history_no_samples_returns_zeros(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """history with no samples for the session returns [0]*n_buckets."""
     setup_rate(monkeypatch, tmp_home)
-    result = sl.TokenRate.history('sess-1', 5, 60.0)
+    result = tokens.TokenRate.history('sess-1', 5, 60.0)
     assert result == [0, 0, 0, 0, 0]
 
 
@@ -80,7 +80,7 @@ def test_history_two_samples_same_bucket(monkeypatch: pytest.MonkeyPatch, tmp_ho
     _write_row(log, NOW - 1.0, 'sess-1', 100, 200)
     _write_row(log, NOW - 0.5, 'sess-1', 115, 215)
 
-    result = sl.TokenRate.history('sess-1', 5, 60.0)
+    result = tokens.TokenRate.history('sess-1', 5, 60.0)
     assert sum(result) == 30  # (115+215) - (100+200) = 30
     non_zero = [v for v in result if v != 0]
     assert len(non_zero) == 1
@@ -102,11 +102,11 @@ def test_history_snaps_bucket_boundaries(monkeypatch: pytest.MonkeyPatch, tmp_ho
 
     # now=T: use the baseline NOW
     FakeTime._now = NOW
-    result_t0 = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_t0 = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     # now=T + 0.4*bucket_size: still in the same bucket for last_bucket
     FakeTime._now = NOW + 0.4 * bucket_size
-    result_t1 = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_t1 = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     nz0 = [i for i, v in enumerate(result_t0) if v != 0]
     nz1 = [i for i, v in enumerate(result_t1) if v != 0]
@@ -136,7 +136,7 @@ def test_history_out_of_window_sample_excluded(monkeypatch: pytest.MonkeyPatch, 
     _write_row(log, mid_too_old + 0.5, 'sess-1', 1100, 1100)
 
     FakeTime._now = NOW
-    result = sl.TokenRate.history('sess-1', 5, 60.0)
+    result = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     # The on-edge pair (delta=80) must appear in index 0.
     assert result[0] == 80, f'expected 80 at index 0, got {result}'
@@ -160,10 +160,10 @@ def test_history_same_nonzero_indices_within_bucket(monkeypatch: pytest.MonkeyPa
     _write_row(log, NOW - 5.0, 'sess-1', 80, 80)
 
     FakeTime._now = NOW
-    result_a = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_a = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     FakeTime._now = NOW + 0.4 * bucket_size
-    result_b = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_b = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     nz_a = [i for i, v in enumerate(result_a) if v != 0]
     nz_b = [i for i, v in enumerate(result_b) if v != 0]
@@ -184,10 +184,10 @@ def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyP
     _write_row(log, NOW - 17.0, 'sess-1', 70, 70)
 
     FakeTime._now = NOW
-    result_t = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_t = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     FakeTime._now = NOW + bucket_size
-    result_t1 = sl.TokenRate.history('sess-1', 5, 60.0)
+    result_t1 = tokens.TokenRate.history('sess-1', 5, 60.0)
 
     nz_t  = {i for i, v in enumerate(result_t)  if v != 0}
     nz_t1 = {i for i, v in enumerate(result_t1) if v != 0}
@@ -202,8 +202,8 @@ def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyP
 
 
 def test_recently_active_no_log(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    monkeypatch.setattr(sl, 'time', FakeTime)
-    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    monkeypatch.setattr(tokens, 'time', FakeTime)
+    in_a, out_a = tokens.TokenRate.recently_active('sess-1', window=10.0)
     assert not in_a and not out_a
 
 
@@ -212,7 +212,7 @@ def test_recently_active_detects_growth(monkeypatch: pytest.MonkeyPatch, tmp_hom
     FakeTime._now = NOW
     _write_row(log, NOW - 5.0, 'sess-1', 100, 50)
     _write_row(log, NOW - 1.0, 'sess-1', 200, 50)  # in grew, out same
-    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    in_a, out_a = tokens.TokenRate.recently_active('sess-1', window=10.0)
     assert in_a
     assert not out_a
 
@@ -222,7 +222,7 @@ def test_recently_active_both_grow(monkeypatch: pytest.MonkeyPatch, tmp_home: Pa
     FakeTime._now = NOW
     _write_row(log, NOW - 5.0, 'sess-1', 100, 50)
     _write_row(log, NOW - 1.0, 'sess-1', 200, 80)
-    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    in_a, out_a = tokens.TokenRate.recently_active('sess-1', window=10.0)
     assert in_a and out_a
 
 
@@ -231,5 +231,5 @@ def test_recently_active_stale_data(monkeypatch: pytest.MonkeyPatch, tmp_home: P
     FakeTime._now = NOW
     _write_row(log, NOW - 20.0, 'sess-1', 100, 50)
     _write_row(log, NOW - 15.0, 'sess-1', 200, 80)
-    in_a, out_a = sl.TokenRate.recently_active('sess-1', window=10.0)
+    in_a, out_a = tokens.TokenRate.recently_active('sess-1', window=10.0)
     assert not in_a and not out_a

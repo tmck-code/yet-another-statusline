@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
+import yas.info.git as git
 
 
 
@@ -27,7 +27,7 @@ def test_find_repo_walks_upward(tmp_path: Path) -> None:
     deep = tmp_path / 'a' / 'b' / 'c'
     deep.mkdir(parents=True)
 
-    repo, gitdir = sl.GitInfo._find_repo(str(deep))
+    repo, gitdir = git.GitInfo._find_repo(str(deep))
     assert repo == str(tmp_path)
     assert gitdir == str(tmp_path / '.git')
 
@@ -36,7 +36,7 @@ def test_find_repo_no_git_returns_empty(tmp_path: Path) -> None:
     """_find_repo returns ('', '') when no .git is found."""
     deep = tmp_path / 'x' / 'y'
     deep.mkdir(parents=True)
-    repo, gitdir = sl.GitInfo._find_repo(str(deep))
+    repo, gitdir = git.GitInfo._find_repo(str(deep))
     assert repo == ''
     assert gitdir == ''
 
@@ -45,7 +45,7 @@ def test_find_repo_no_git_returns_empty(tmp_path: Path) -> None:
 def test_read_head_ref_branch(tmp_path: Path) -> None:
     """_read_head parses ref: HEAD and returns branch + 9-char commit."""
     gitdir = _make_git_dir(tmp_path, branch='main', commit='abcdef1234567890')
-    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    branch, commit = git.GitInfo._read_head(str(gitdir))
     assert branch == 'main'
     assert commit == 'abcdef123'  # first 9 chars
 
@@ -58,7 +58,7 @@ def test_read_head_detached(tmp_path: Path) -> None:
     gitdir.mkdir()
     (gitdir / 'HEAD').write_text(sha + '\n')
 
-    branch, commit = sl.GitInfo._read_head(str(gitdir))
+    branch, commit = git.GitInfo._read_head(str(gitdir))
     assert branch == f'd:{sha[:7]}'
     assert commit == ''
 
@@ -66,8 +66,8 @@ def test_read_head_detached(tmp_path: Path) -> None:
 
 def test_from_cwd_non_repo(tmp_path: Path) -> None:
     """from_cwd returns an empty GitInfo when no .git exists."""
-    result = sl.GitInfo.from_cwd(str(tmp_path))
-    assert result == sl.GitInfo(branch='', commit='', modified=0, untracked=0)
+    result = git.GitInfo.from_cwd(str(tmp_path))
+    assert result == git.GitInfo(branch='', commit='', modified=0, untracked=0)
 
 
 
@@ -99,7 +99,7 @@ def test_from_cwd_real_repo(tmp_path: Path) -> None:
     # Create an untracked file (untracked count = 1)
     (tmp_path / 'untracked.txt').write_text('new\n')
 
-    result = sl.GitInfo.from_cwd(str(tmp_path))
+    result = git.GitInfo.from_cwd(str(tmp_path))
     assert result.modified == 1
     assert result.untracked == 1
 
@@ -120,8 +120,8 @@ def test_dirty_uses_no_optional_locks(monkeypatch: pytest.MonkeyPatch, tmp_path:
         captured.append(cmd)
         return FakeCompleted()
 
-    monkeypatch.setattr(sl.subprocess, 'run', fake_run)
-    sl.GitInfo._dirty(str(tmp_path))
+    monkeypatch.setattr(git.subprocess, 'run', fake_run)
+    git.GitInfo._dirty(str(tmp_path))
 
     assert len(captured) == 1
     cmd = captured[0]

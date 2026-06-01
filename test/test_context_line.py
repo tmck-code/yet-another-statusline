@@ -1,10 +1,9 @@
-import statusline_command as sl
+import yas.renderer as renderer
+from yas.constants import CLR_ALERT
+from yas.session import ContextWindow
+from yas.render.text import _visible_width
 
-_visible_width = sl._visible_width
-Renderer = sl.Renderer
-ContextWindow = sl.ContextWindow
-CLR_ALERT = sl.CLR_ALERT
-SOFT_LIMIT = sl.SOFT_LIMIT
+Renderer = renderer.Renderer
 
 
 def test_context_line_under_soft_limit() -> None:

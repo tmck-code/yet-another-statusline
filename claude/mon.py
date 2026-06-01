@@ -12,7 +12,9 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-# Add claude/ dir to sys.path so sibling modules are importable.
+# Add claude/ dir to sys.path so sibling mon.* modules are importable.
+# The statusline package is resolved via pytest/install pythonpath; mon.* is not
+# installed, so the manual insert is still required for mon submodules.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mon.discovery import discover
@@ -27,7 +29,8 @@ from mon.layout import (
     aggregate_day_cost,
 )
 from mon.tui import parse_args, enter_alt_screen, exit_alt_screen
-from statusline_command import render, resolve_theme, MIN_WIDTH
+from yas.app import render, resolve_theme
+from yas.constants import MIN_WIDTH
 
 _CURSOR_HOME = '\x1b[H'
 _DIM  = '\033[38;5;240m'

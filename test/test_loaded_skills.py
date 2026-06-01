@@ -2,7 +2,8 @@
 import json
 from pathlib import Path
 
-import statusline_command as sl
+import yas.info.skills as skills
+from yas.info.skills import LoadedSkills
 
 
 def _skill_line(skill_name: str) -> str:
@@ -23,8 +24,11 @@ def _read_skill_line(skill_name: str) -> str:
 
 def test_missing_file_returns_empty() -> None:
     """Missing file returns empty LoadedSkills."""
-    result = sl.LoadedSkills.from_transcript('')
-    assert result == sl.LoadedSkills(names=[])
+    result = LoadedSkills.from_transcript('')
+    assert result == LoadedSkills(names=[])
+
+    result2 = skills.LoadedSkills.from_transcript('')
+    assert result2 == skills.LoadedSkills(names=[])
 
 
 def test_skill_tool_call_extracts_name(tmp_path: Path) -> None:
@@ -32,8 +36,11 @@ def test_skill_tool_call_extracts_name(tmp_path: Path) -> None:
     p = tmp_path / 'transcript.jsonl'
     p.write_text(_skill_line('python-style') + '\n')
 
-    result = sl.LoadedSkills.from_transcript(str(p))
+    result = LoadedSkills.from_transcript(str(p))
     assert 'python-style' in result.names
+
+    result2 = skills.LoadedSkills.from_transcript(str(p))
+    assert 'python-style' in result2.names
 
 
 def test_read_skill_md_extracts_name(tmp_path: Path) -> None:
@@ -41,8 +48,11 @@ def test_read_skill_md_extracts_name(tmp_path: Path) -> None:
     p = tmp_path / 'transcript.jsonl'
     p.write_text(_read_skill_line('tdd') + '\n')
 
-    result = sl.LoadedSkills.from_transcript(str(p))
+    result = LoadedSkills.from_transcript(str(p))
     assert 'tdd' in result.names
+
+    result2 = skills.LoadedSkills.from_transcript(str(p))
+    assert 'tdd' in result2.names
 
 
 def test_duplicates_collapsed_order_preserved(tmp_path: Path) -> None:
@@ -54,6 +64,10 @@ def test_duplicates_collapsed_order_preserved(tmp_path: Path) -> None:
         _skill_line('tdd') + '\n'  # duplicate
     )
 
-    result = sl.LoadedSkills.from_transcript(str(p))
+    result = LoadedSkills.from_transcript(str(p))
     assert result.names.count('tdd') == 1
     assert result.names.index('tdd') < result.names.index('python-style')
+
+    result2 = skills.LoadedSkills.from_transcript(str(p))
+    assert result2.names.count('tdd') == 1
+    assert result2.names.index('tdd') < result2.names.index('python-style')

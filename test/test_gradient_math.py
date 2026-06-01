@@ -1,8 +1,11 @@
 import re
-import statusline_command as sl
+import yas.render.gradient as gradient
+import yas.renderer as renderer_mod
+from yas.constants import CLR_BORDER_OFF
 
 
-_r = sl.Renderer()
+_r = renderer_mod.Renderer()
+_ge = gradient.GradientEngine()
 
 
 
@@ -49,7 +52,7 @@ def test_grad_at_start_of_full_bar() -> None:
 
 def test_grad_at_past_zero_fill() -> None:
     # fill=0.0 → fill <= 0 → CLR_BORDER_OFF immediately
-    assert _r.grad_at(9, width=10, fill=0.0) == sl.CLR_BORDER_OFF
+    assert _r.grad_at(9, width=10, fill=0.0) == CLR_BORDER_OFF
 
 
 # spark_rgb dim factor
