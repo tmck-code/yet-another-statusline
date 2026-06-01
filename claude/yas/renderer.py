@@ -41,6 +41,7 @@ from yas.constants import (
     GLYPH_BURN_SLOW,
     GLYPH_CONTINUATION,
     GLYPH_FOLDER,
+    GLYPH_CACHE,
     GLYPH_HELPER,
     GLYPH_HOURGLASS,
     GLYPH_MODEL,
@@ -351,6 +352,12 @@ class Renderer:
         if pct >= 70:
             return self.warn
         return self.safe
+
+    def cache_section(self, remaining: float, elapsed_pct: int) -> tuple[str, int]:
+        dur    = fmt_dur(remaining)
+        colour = self.fill_colour(elapsed_pct)
+        text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
+        return text, _visible_width(text)
 
     def risk_zone_color(self, tokens: int) -> str:
         if tokens <= 50_000:
