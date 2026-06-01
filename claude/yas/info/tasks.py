@@ -21,6 +21,8 @@ class Task:
     subject: str
     active_form: str
     status: str  # 'pending' | 'in_progress' | 'completed'
+    started_at: float | None = None    # epoch secs of latest → in_progress (D1)
+    completed_at: float | None = None  # epoch secs of latest → completed (D1)
 
 
 @dataclass
@@ -60,6 +62,12 @@ class TaskList:
                         name = c.get('name', '')
                         inp  = c.get('input') or {}
                         if name == 'TaskCreate':
+                            # D2: a TaskCreate folded while all known tasks are
+                            # completed (and at least one exists) opens a new
+                            # generation — discard prior tasks, restart ids at 1.
+                            if by_id and all(t.status == 'completed' for t in by_id.values()):
+                                by_id = {}
+                                next_id = 1
                             subj = inp.get('subject', '') or ''
                             af   = inp.get('activeForm', '') or subj
                             by_id[next_id] = Task(id=next_id, subject=subj, active_form=af, status='pending')
@@ -75,6 +83,12 @@ class TaskList:
                                 continue
                             new_status = inp.get('status')
                             if new_status in ('pending', 'in_progress', 'completed'):
+                                # D1: capture per-task timestamps on transitions.
+                                if new_status == 'in_progress':
+                                    t.started_at = ts
+                                    t.completed_at = None
+                                elif new_status == 'completed':
+                                    t.completed_at = ts
                                 t.status = new_status
                             if 'activeForm' in inp and inp['activeForm']:
                                 t.active_form = inp['activeForm']
@@ -113,6 +127,10 @@ class TaskList:
             return False
         if now is None:
             now = time.time()
+        # D5: pinned visible while any task is in_progress, regardless of cap —
+        # a long-running step emits no event but its live timer proves freshness.
+        if any(t.status == 'in_progress' for t in self.tasks):
+            return True
         age = now - self.last_event_ts
         if age > self.FRESHNESS_CAP:
             return False

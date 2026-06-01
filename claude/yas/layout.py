@@ -87,6 +87,7 @@ def build_narrow(
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
+    tasks     = view.tasks
     subagents = view.subagents
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     if pill_pct:
@@ -104,6 +105,10 @@ def build_narrow(
             RowSpec('content', content=full),
             RowSpec('separator_dim'),
         ]
+    if tasks.is_visible():
+        for line in r.task_row(tasks, width, compact=True):
+            rows.append(RowSpec('content', content=line))
+        rows.append(RowSpec('separator_dim'))
     if subagents.subagents:
         for sub in subagents.subagents:
             for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
@@ -169,7 +174,8 @@ def build_medium(
     subagents = view.subagents
     rows: list[RowSpec] = [top_row, content_row, sep_row]
     if tasks.is_visible():
-        rows.append(RowSpec('content', content=r.task_row(tasks, width, compact=True)))
+        for line in r.task_row(tasks, width):
+            rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if subagents.subagents:
         for sub in subagents.subagents:
@@ -290,7 +296,8 @@ def build_wide(
 
     if tasks.is_visible():
         rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
-        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
+        for line in r.task_row(tasks, width):
+            rows.append(RowSpec('content', content=line))
         pending_ups = ()
 
     if subagents.subagents:

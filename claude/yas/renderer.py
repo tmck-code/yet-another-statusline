@@ -51,6 +51,9 @@ from yas.constants import (
     GLYPH_SKILLS,
     GLYPH_SUBAGENT_ROW,
     GLYPH_TASKS,
+    GLYPH_TASK_ACTIVE,
+    GLYPH_TASK_DONE,
+    GLYPH_TASK_PENDING,
     GLYPH_THINKING,
     ICON_COST,
     ICON_TOK_RATE,
@@ -71,6 +74,7 @@ from yas.render.gradient import (
 from yas.info.git import GitInfo
 from yas.render.metrics import burndown_delta, subagent_avg_tpm, subagent_share
 from yas.render.pill import Pill
+from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
 from yas.info.tasks import TaskList
@@ -674,36 +678,126 @@ class Renderer:
             pad_n    = max(1, target_w - left_n_w - right_n_w)
             return f'{left_n}{" " * pad_n}{right_n}'
 
-    def task_row(self, tasks: TaskList, width: int, compact: bool = False) -> str:
+    def task_row(self, tasks: TaskList, width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()
         c_glyph = rainbow_at(step, 9)
         done    = tasks.completed
         total   = tasks.total
         count_s = f'{done}/{total}'
+        now     = time.time()
 
-        head = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}  {self.SKILLS}{count_s}{self.R}'
+        DIM = self.TOK_DIM       # dim grey for frozen timers + collapse lines
+        BRT = self.white_brt     # bright for the live timer
+
+        glyph_s = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}'
+        count_p = f'{self.SKILLS}{count_s}{self.R}'
+
+        # --- compact branch (narrow): glyph + done/total + active live timer ---
         if compact:
-            return head
-
-        if done == total:
-            text = ''
-        else:
+            head = f'{glyph_s}  {count_p}'
             active = tasks.active
-            if active is not None:
-                text = active.active_form or active.subject
+            if active is not None and active.started_at is not None:
+                live = fmt_duration(now - active.started_at)
+                return [f'{head}  {BRT}{BOLD}{live}{self.R}']
+            return [head]
+
+        # --- full-list branch (wide/medium): header + windowed items ---
+        elapsed   = total_elapsed(tasks, now)
+        elapsed_s = fmt_duration(elapsed) if elapsed is not None else ''
+
+        win = select_window(tasks)
+
+        # Per-item timer strings (plain, for column-width maths), glyphs and
+        # the 1-indexed task-number prefix. The number is kept separate from the
+        # subject so it can be tinted like the glyph/timer (not the subject), and
+        # it lets the window stay legible without `+N done` / `+N more` lines.
+        rows: list[tuple[str, str, str, str]] = []  # (glyph, num, subject, timer_plain)
+        for t in win.items:
+            if t.status == 'completed':
+                glyph = GLYPH_TASK_DONE
+                subj  = t.subject
+                timer = ''
+                if t.started_at is not None and t.completed_at is not None:
+                    timer = fmt_duration(t.completed_at - t.started_at)
+            elif t.status == 'in_progress':
+                glyph = GLYPH_TASK_ACTIVE
+                subj  = t.active_form or t.subject
+                timer = fmt_duration(now - t.started_at) if t.started_at is not None else ''
             else:
-                nxt = tasks.next_pending
-                text = nxt.subject if nxt else ''
+                glyph = GLYPH_TASK_PENDING
+                subj  = t.subject
+                timer = ''
+            rows.append((glyph, f'{t.id}. ', subj, timer))
 
-        if not text:
-            return head
+        # Fixed leading timer column = widest shown timer string, also covering
+        # the header's Total Elapsed so the per-task timers right-align under it.
+        timer_w = max(
+            (_visible_width(tm) for *_, tm in rows if tm),
+            default=0,
+        )
+        timer_w = max(timer_w, _visible_width(elapsed_s))
 
-        target_w = width - 4
-        head_w   = 3 + len(count_s) + 2  # glyph + '  ' + count + '  '
-        budget   = max(0, target_w - head_w)
-        if len(text) > budget:
-            text = (text[:budget - 1] + '…') if budget > 0 else ''
-        return f'{head}  {self.CTX}{text}{self.R}'
+        # Header order: Total Elapsed first (right-aligned in the timer column so
+        # it lines up with the per-task timers below), then glyph + done/total
+        # count. The leading elapsed is omitted when never started.
+        if elapsed_s:
+            head_pad = ' ' * max(0, timer_w - _visible_width(elapsed_s))
+            head     = f'{head_pad}{DIM}{elapsed_s}{self.R} {glyph_s}  {count_p}'
+        else:
+            head = f'{glyph_s}  {count_p}'
+
+        # Available width for the inner content of a content row.
+        inner_w = width - 3
+
+        out: list[str] = [head]
+
+        # Layout per item: [timer column] + gap + glyph(1) + '  ' + number + subject.
+        # The timer column is a fixed leading width (`timer_w`), right-aligned
+        # within itself so digits line up; a `gap` separates it from the glyph,
+        # and two spaces separate the glyph from the task number. Pending/untimed
+        # rows leave the timer column blank. The number+subject share a fixed
+        # field width (the number always shown, the subject padded/truncated) so
+        # all item rows share one total visible width.
+        gap         = 1 if timer_w else 0
+        field_w     = max(1, inner_w - 3 - gap - timer_w)  # col + gap + glyph + '  '
+
+        for (glyph, num, subj, timer), t in zip(rows, win.items):
+            if t.status == 'completed':
+                g_clr  = DIM
+                tm_clr = DIM
+            elif t.status == 'in_progress':
+                g_clr  = BRT + BOLD
+                tm_clr = BRT + BOLD
+            else:
+                g_clr  = DIM
+                tm_clr = ''
+
+            avail = max(1, field_w - _visible_width(num))
+            sw    = _visible_width(subj)
+            if sw > avail:
+                # Single-side ellipsis truncation by visible width.
+                acc = ''
+                for ch in subj:
+                    if _visible_width(acc + ch) > avail - 1:
+                        break
+                    acc += ch
+                subj = acc + '…'
+                subj_pad = max(0, avail - _visible_width(subj))
+            else:
+                subj_pad = avail - sw
+
+            line = ''
+            if timer_w:
+                tm_pad = max(0, timer_w - _visible_width(timer))
+                line += ' ' * tm_pad
+                line += f'{tm_clr}{timer}{self.R}' if timer else ' ' * _visible_width(timer)
+                line += ' ' * gap
+            # Glyph, two spaces, then the number tinted like the glyph/timer and
+            # the subject in the standard content colour.
+            line += f'{g_clr}{glyph}{self.R}  {g_clr}{num}{self.R}{self.CTX}{subj}{self.R}{" " * subj_pad}'
+            out.append(line)
+
+        return out
 
     RATE_W  = 6
     IN_W    = 6

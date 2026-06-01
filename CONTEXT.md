@@ -91,6 +91,25 @@ The statusline row that summarises **Task** progress. Format: glyph + `<complete
 The 2-minute staleness limit on the **Task Row**. If the most recent `TaskCreate` / `TaskUpdate` event in the session jsonl is older than 2 minutes, the row hides even if non-completed tasks remain — defending against the known stale-list problem where the agent moves on to unrelated work without cleaning up. The row reappears the moment a new task event lands. Distinct from the 20-second post-update grace window, which keeps the row visible briefly after everything flips to `completed` so the "done" beat is readable. See [docs/adr/0004-task-progress-row.md](docs/adr/0004-task-progress-row.md).
 _Avoid_: "task TTL" (suggests the tasks themselves expire — they don't, only the row's visibility does).
 
+**Task Checklist**:
+The rendered list of the current plan's tasks — a header leading with **Total Elapsed** (in the same leading column as the per-task timers below it) followed by the `GLYPH_TASKS` marker and `done/total` count, then one row per task (**Task Timer** in a fixed leading column + `GLYPH_TASK_PENDING` / `GLYPH_TASK_ACTIVE` / `GLYPH_TASK_DONE` marker + the task's 1-indexed number + subject). Shown in the wide and medium layouts; collapses to a single compact line in narrow. The displayed rows are the **Active Window** slice, not necessarily every task; the task numbers make the clipping legible without separate collapse lines.
+_Avoid_: "task list" when you mean the rendered block (the `TaskList` dataclass holds *all* tasks; the **Task Checklist** is what survives windowing).
+
+**Plan Generation**:
+The latest all-completed-delimited batch of tasks. A `TaskCreate` folded while *every* existing task is `completed` starts a new generation — ids restart at `#1` and the prior tasks are dropped; a create while *any* task is still open simply appends to the current generation. The header's `done/total` count and **Total Elapsed** consider only the latest generation. Implemented in `TaskList.from_session`.
+_Avoid_: "session tasks" (a session can span many generations; only the newest one is shown).
+
+**Task Timer**:
+A per-task duration. Live (`now − started_at`) while the task is `in_progress`; frozen (`completed_at − started_at`) once `completed`; absent for a `pending` task or one that was never started. Formatted by `fmt_duration` as `m:ss`, rolling to `h:mm:ss` at one hour. Reads `Task.started_at` / `Task.completed_at` (epoch seconds of the latest `→ in_progress` / `→ completed` transition).
+
+**Total Elapsed**:
+The **Task Checklist** header's wall-clock span for the current **Plan Generation**: earliest task `started_at` → `now` while any task is `in_progress`, else → the latest `completed_at`. Absent when no task in the generation ever started. Computed by `total_elapsed` (in `claude/yas/render/tasks_view.py`) and formatted by `fmt_duration`.
+_Avoid_: "sum of timers" (it is one continuous span, not the sum of per-task **Task Timer** values, which can overlap or leave gaps).
+
+**Active Window**:
+The active-anchored slice of at most 4 task rows chosen by `select_window` (returns a `WindowSlice`, in `claude/yas/render/tasks_view.py`). Keeps the `in_progress` item visible with one completed item of lead context and biases toward upcoming `pending` items so the checklist tracks where work is heading rather than where it has been. There are no `+N done` / `+N more` collapse lines — each row's task number conveys position within the full plan. `WindowSlice.done_hidden` / `more_hidden` still report the clipped counts above/below for any caller that wants them.
+_Avoid_: "scroll window" (nothing scrolls — the slice is recomputed each render from the active task's position).
+
 ### Rate limits
 
 **Five-Hour Limit**:
@@ -195,5 +214,6 @@ The statusline source lives in `claude/yas/` as a layered package with two subpa
 | `borders` | `BorderRenderer` — box-drawing elbow/fill math |
 | `text` | Terminal-width math (`_visible_width`, `_is_wide`), string helpers (`_middle_ellipsis`, `fmt_tok`, `fmt_dur`), `terminal_width` |
 | `metrics` | Derived session metrics: `burndown_delta`, `subagent_avg_tpm`, `subagent_share` |
+| `tasks_view` | Pure task-checklist maths (no ANSI/I/O): `fmt_duration`, `total_elapsed`, `select_window` → `WindowSlice` |
 
 `claude/statusline_command.py` is the frozen entrypoint: it imports `main` from `yas.app` and calls it under `__main__`.
