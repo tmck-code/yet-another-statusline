@@ -613,7 +613,10 @@ class Renderer:
             # from the identity line. When width is tight, stats are shed in
             # priority order — share % first, then ↑output, then the t/m rate.
             # The token count, elapsed, and model always remain.
-            tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, now)
+            # Freeze the rate clock once the agent is Done so t/m stops ticking
+            # down after it finishes — mirror the frozen duration above.
+            rate_now = sub.end_ts if is_done else now
+            tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, rate_now)
             share = subagent_share(sub.total_input + sub.output, session_inout)
 
             sep       = f' {self.LABEL}·{self.R} '
