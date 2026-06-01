@@ -358,6 +358,51 @@ def test_burn_cluster_narrow_row_unchanged() -> None:
         assert '%' not in plain, f'width={w} showed % in narrow row'
 
 
+def _tpm_value(line2: str) -> int:
+    """Parse the integer t/m rate out of a continuation line."""
+    m = re.search(r'([\d,]+) t/m', strip_ansi(line2))
+    assert m, f'no t/m rate in: {strip_ansi(line2)!r}'
+    return int(m.group(1).replace(',', ''))
+
+
+def test_burn_cluster_done_tpm_frozen_at_end_ts() -> None:
+    # A Done agent's t/m freezes on its frozen duration (end_ts - first_timestamp),
+    # not the live clock — it must not keep ticking down after the agent finished.
+    now = time.time()
+    sub = _make_established_sub(
+        first_timestamp=now - 120,  # live clock would read 2 min
+        total_input=3000,
+        billed_in=3000,
+        output=600,
+    )
+    sub.end_ts = now - 60           # frozen duration is 1 min
+    si  = sub.total_input + sub.output + 5000
+    _, line2 = _r.subagent_row(sub, 200, session_inout=si).split('\n')
+    # Frozen: 3600 tokens / 1 min = 3600; a live clock would halve it to ~1800.
+    assert _tpm_value(line2) == 3600
+
+
+def test_burn_cluster_done_tpm_stable_as_time_passes() -> None:
+    # Two renders of the same Done agent, separated by simulated elapsed time,
+    # report the identical t/m — the value does not drift after completion.
+    base = _make_established_sub(
+        first_timestamp=time.time() - 300,
+        total_input=4000, billed_in=4000, output=800,
+    )
+    base.end_ts = time.time() - 200
+    si  = base.total_input + base.output + 5000
+    first  = _tpm_value(_r.subagent_row(base, 200, session_inout=si).split('\n')[1])
+    # Re-render after pretending another minute elapsed; end_ts is fixed so the
+    # frozen duration — and thus t/m — is unchanged.
+    later = _make_sub(
+        first_timestamp=base.first_timestamp, total_input=base.total_input,
+        billed_in=base.billed_in, output=base.output,
+    )
+    later.end_ts = base.end_ts
+    second = _tpm_value(_r.subagent_row(later, 200, session_inout=si).split('\n')[1])
+    assert first == second
+
+
 # F. Single stat line + cost removal (burndown mockup match)
 
 def test_subagent_row_wide_no_cost() -> None:
