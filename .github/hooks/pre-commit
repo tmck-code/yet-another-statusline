@@ -10,11 +10,29 @@ TEST_STATUS=0
 
 printf '\n\033[1;97mRunning pre-commit checks on staged Python files:\033[0m\n%s\n\n' "$fpaths"
 
+# ruff and mypy ignore their [tool.*] `exclude` config for paths passed explicitly
+# on the command line, so we have to opt back in to those exclusions ourselves.
+
 printf '\033[1;93m> ruff check\033[0m\n'
-ruff check $fpaths || RUFF_STATUS=$?
+# ruff honours pyproject excludes for explicit paths only with --force-exclude.
+ruff check --force-exclude $fpaths || RUFF_STATUS=$?
 
 printf '\n\033[1;93m> mypy\033[0m\n'
-mypy $fpaths || MYPY_STATUS=$?
+# mypy has no --force-exclude, so drop paths matching [tool.mypy] exclude (regexes) first.
+mpaths=$(python3 - $fpaths <<'PY'
+import re, sys, pathlib, tomllib
+
+cfg = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+patterns = [re.compile(p) for p in cfg.get('tool', {}).get('mypy', {}).get('exclude', [])]
+kept = [p for p in sys.argv[1:] if not any(rx.search(p) for rx in patterns)]
+print(' '.join(kept))
+PY
+)
+if [ -n "$mpaths" ]; then
+	mypy $mpaths || MYPY_STATUS=$?
+else
+	printf 'no staged files to check (all excluded)\n'
+fi
 
 printf '\n\033[1;93m> pytest\033[0m\n'
 pytest test || TEST_STATUS=$?
