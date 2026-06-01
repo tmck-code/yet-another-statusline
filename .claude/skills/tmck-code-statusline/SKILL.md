@@ -72,7 +72,7 @@ Run all four before editing:
    ```
    Any hit on a line you plan to Edit triggers the **PUA refactor rule** below.
 3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count.
-4. **Baseline demo**: `make demo` (or `make statusline/test`, both run `uv run python ops/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on `$COLUMNS`). For static snapshot images, `make demo/img` (writes scenario PNGs into `demo/`, honours `COLUMNS=`). For a single piped frame when you need stdout, render one directly: `COLUMNS=160 uv run python claude/statusline_command.py < claude/statusline/session-info-example.json` (no transcript-derived rows; enough for border math).
+4. **Baseline demo**: `make demo` (or `make statusline/test`, both run `uv run python ops/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on `$COLUMNS`). For static snapshot images, `make demo/img` (writes scenario PNGs into `demo/`, honours `COLUMNS=`). For a single piped frame when you need stdout, render one directly: `COLUMNS=160 uv run python claude/statusline_command.py < ops/session-info-example.json` (no transcript-derived rows; enough for border math).
 
 ## PUA refactor rule (mandatory before editing)
 

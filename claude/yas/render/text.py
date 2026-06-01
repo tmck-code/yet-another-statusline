@@ -5,7 +5,7 @@ import os
 import shutil
 import subprocess
 
-from statusline.constants import (
+from yas.constants import (
     _ANSI_RE,
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,

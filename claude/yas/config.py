@@ -21,17 +21,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
-from statusline.constants import (
+from yas.constants import (
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
     DEFAULT_THEME,
 )
-from statusline.themes import THEMES
+from yas.themes import THEMES
 
 if TYPE_CHECKING:
-    from statusline.themes import Theme
+    from yas.themes import Theme
 
 
 _T = TypeVar('_T')

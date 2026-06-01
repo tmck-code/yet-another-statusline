@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from statusline.config import Config
-from statusline.info import SessionView
-from statusline.session import SessionInfo
+from yas.config import Config
+from yas.info import SessionView
+from yas.session import SessionInfo
 
-SESSION_FILE = Path(__file__).parent.parent / 'claude' / 'statusline' / 'session-info-example.json'
+SESSION_FILE = Path(__file__).parent.parent / 'ops' / 'session-info-example.json'
 
 
 def _view_with_transcript(transcript_path: str, now: float | None = None) -> SessionView:

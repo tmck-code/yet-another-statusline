@@ -22,7 +22,7 @@ RESET  = '\033[0m'
 
 REPO_ROOT  = Path(__file__).resolve().parent.parent
 STATUSLINE = Path('claude/statusline_command.py')
-INPUT_JSON = REPO_ROOT / 'claude' / 'statusline' / 'session-info-example.json'
+INPUT_JSON = REPO_ROOT / 'ops' / 'session-info-example.json'
 
 HYPERFINE_HINT = (
     'hyperfine not found, using the Python fallback timer.\n'

@@ -1,7 +1,7 @@
 import re
 
-import statusline.constants as constants
-import statusline.renderer as renderer_mod
+import yas.constants as constants
+import yas.renderer as renderer_mod
 from helper import strip_ansi
 
 

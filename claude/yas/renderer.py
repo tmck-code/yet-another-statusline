@@ -9,8 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from statusline.borders import BorderRenderer
-from statusline.constants import (
+from yas.render.borders import BorderRenderer
+from yas.constants import (
     BOLD,
     ITALIC,
     RESET,
@@ -64,7 +64,7 @@ from statusline.constants import (
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
 )
-from statusline.gradient import (
+from yas.render.gradient import (
     GradientEngine,
     model_key,
     paint_bg_span,
@@ -73,24 +73,24 @@ from statusline.gradient import (
     rainbow_step,
     _scale,
 )
-from statusline.git import GitInfo
-from statusline.metrics import burndown_delta, subagent_avg_tpm, subagent_share
-from statusline.openspec import OpenSpec
-from statusline.pill import Pill
-from statusline.session import ContextWindow, RateBucket, RateLimits, SessionInfo
-from statusline.skills import LoadedSkills
-from statusline.subagents import RunningSubagent, RunningSubagents
-from statusline.tasks import Task, TaskList
-from statusline.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
-from statusline.tokens import TokenAccounting, TokenRate
-from statusline.transcript import TranscriptUsage
+from yas.info.git import GitInfo
+from yas.render.metrics import burndown_delta, subagent_avg_tpm, subagent_share
+from yas.info.openspec import OpenSpec
+from yas.render.pill import Pill
+from yas.session import ContextWindow, RateBucket, RateLimits, SessionInfo
+from yas.info.skills import LoadedSkills
+from yas.info.subagents import RunningSubagent, RunningSubagents
+from yas.info.tasks import Task, TaskList
+from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
+from yas.tokens import TokenAccounting, TokenRate
+from yas.info.transcript import TranscriptUsage
 
 if TYPE_CHECKING:
-    from statusline.themes import ModelColors, Theme
+    from yas.themes import ModelColors, Theme
 
 # Runtime import of themes (the package module is always available when running
 # as a package; no importlib shim needed).
-from statusline.themes import CLAUDE_DARK, THEMES, ModelColors, Theme  # type: ignore[assignment]
+from yas.themes import CLAUDE_DARK, THEMES, ModelColors, Theme  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------

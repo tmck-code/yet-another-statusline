@@ -1,9 +1,9 @@
 """Session data-classes and parser helpers.
 
-Stdlib-only: no imports from statusline.constants or other package modules.
+Stdlib-only: no imports from yas.constants or other package modules.
 TokenAccounting (used by Model.cost_rates) is imported lazily inside the
 property so this module can be loaded before tokens.py exists; it will resolve
-once task 4.1 creates claude/statusline/tokens.py.
+once task 4.1 creates claude/yas/tokens.py.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class Model(NamedTuple):
 
     @property
     def cost_rates(self) -> tuple[float, float]:
-        from statusline.tokens import TokenAccounting  # wired up in task 4.1
+        from yas.tokens import TokenAccounting  # wired up in task 4.1
         return TokenAccounting.rates_for(self.display_name or self.id)
 
 

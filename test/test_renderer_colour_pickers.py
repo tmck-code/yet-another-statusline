@@ -1,5 +1,5 @@
-import statusline.renderer as renderer
-from statusline.constants import (
+import yas.renderer as renderer
+from yas.constants import (
     CLR_ALERT,
     CLR_GREEN_OK,
     CLR_PURPLE,

@@ -1,8 +1,8 @@
 import pytest
-import statusline.tokens as tokens
-from statusline.session import Model
-from statusline.tokens import TokenLog, compute_session_cost, compute_day_cost
-from statusline.transcript import TranscriptUsage
+import yas.tokens as tokens
+from yas.session import Model
+from yas.tokens import TokenLog, compute_session_cost, compute_day_cost
+from yas.info.transcript import TranscriptUsage
 
 
 

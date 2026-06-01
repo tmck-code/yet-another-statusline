@@ -4,11 +4,11 @@ import sys
 from pathlib import Path
 
 import statusline_command as sl
-import statusline.app as app
-import statusline.text as _text_mod
-import statusline.constants as _const_mod
+import yas.app as app
+import yas.render.text as _text_mod
+import yas.constants as _const_mod
 
-_EXAMPLE = Path(__file__).resolve().parent.parent / 'claude' / 'statusline' / 'session-info-example.json'
+_EXAMPLE = Path(__file__).resolve().parent.parent / 'ops' / 'session-info-example.json'
 _SCRIPT  = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
 
 
@@ -63,10 +63,10 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
         out = buf.getvalue()
         monkeypatch.delenv('YAS_FULL_WIDTH', raising=False)
         first_line = out.splitlines()[0] if out else ''
-        from statusline.text import _visible_width
+        from yas.render.text import _visible_width
         return _visible_width(first_line)
 
-    from statusline.constants import DEFAULT_MAX_WIDTH
+    from yas.constants import DEFAULT_MAX_WIDTH
     max_width = DEFAULT_MAX_WIDTH
 
     uncapped_w = _first_line_width({'YAS_FULL_WIDTH': '1'})
@@ -78,7 +78,7 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
 
 def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     import os
-    from statusline.constants import DEFAULT_MAX_WIDTH
+    from yas.constants import DEFAULT_MAX_WIDTH
 
     # tmp_home patches both HOME and CLAUDE_DIR for the in-process render; the
     # subprocess must read the same (empty) CLAUDE_DIR or its token/cost/sparkline

@@ -1,8 +1,8 @@
 """Token accounting, rate tracking, and daily-cost log helpers.
 
 Imports:
-  - statusline.session  for Model and usage types
-  - statusline.constants for CLAUDE_DIR
+  - yas.session  for Model and usage types
+  - yas.constants for CLAUDE_DIR
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-from statusline.constants import CLAUDE_DIR
-from statusline.session import Model
+from yas.constants import CLAUDE_DIR
+from yas.session import Model
 
 if TYPE_CHECKING:
     pass
@@ -132,7 +132,7 @@ class TokenLog:
 # ---------------------------------------------------------------------------
 
 def _token_window() -> float:
-    from statusline.config import Config
+    from yas.config import Config
     return Config.load().token_window
 
 

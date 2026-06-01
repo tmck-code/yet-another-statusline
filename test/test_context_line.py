@@ -1,7 +1,7 @@
-import statusline.renderer as renderer
-from statusline.constants import CLR_ALERT, DEFAULT_SOFT_LIMIT as SOFT_LIMIT
-from statusline.session import ContextWindow
-from statusline.text import _visible_width
+import yas.renderer as renderer
+from yas.constants import CLR_ALERT, DEFAULT_SOFT_LIMIT as SOFT_LIMIT
+from yas.session import ContextWindow
+from yas.render.text import _visible_width
 
 Renderer = renderer.Renderer
 

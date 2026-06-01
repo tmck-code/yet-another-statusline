@@ -15,20 +15,20 @@ from pathlib import Path
 
 import pytest
 
-import statusline.app as app
-import statusline.layout as layout
-import statusline.renderer as renderer_mod
-import statusline.session as session_mod
-from statusline.config import Config
-from statusline.constants import BG_LUM_THRESHOLD, NARROW_WIDTH, MEDIUM_WIDTH
-from statusline.info import SessionView
-from statusline.themes import THEMES, CLAUDE_DARK, Theme
-from statusline.tokens import TickRecord, TokenLog
+import yas.app as app
+import yas.layout as layout
+import yas.renderer as renderer_mod
+import yas.session as session_mod
+from yas.config import Config
+from yas.constants import BG_LUM_THRESHOLD, NARROW_WIDTH, MEDIUM_WIDTH
+from yas.info import SessionView
+from yas.themes import THEMES, CLAUDE_DARK, Theme
+from yas.tokens import TickRecord, TokenLog
 
 Theme    = Theme  # re-export for parametrize type hints
 
 FIXTURES = Path(__file__).parent / 'fixtures'
-SESSION  = (Path(__file__).parent.parent / 'claude' / 'statusline'
+SESSION  = (Path(__file__).parent.parent / 'ops'
             / 'session-info-example.json')
 
 
@@ -148,7 +148,7 @@ class _FrozenDatetime:
 
 @pytest.fixture
 def frozen(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    import statusline.renderer as _renderer_mod
+    import yas.renderer as _renderer_mod
     import time as _time_mod
     monkeypatch.setattr(_time_mod, 'time', lambda: float(FROZEN_EPOCH))
     monkeypatch.setattr(_renderer_mod.time, 'time', lambda: float(FROZEN_EPOCH))

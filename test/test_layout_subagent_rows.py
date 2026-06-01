@@ -5,17 +5,17 @@ from pathlib import Path
 import pytest
 
 import statusline_command as sl
-import statusline.layout as layout
-import statusline.renderer as renderer_mod
-import statusline.session as session_mod
-import statusline.subagents as subagents_mod
+import yas.layout as layout
+import yas.renderer as renderer_mod
+import yas.session as session_mod
+import yas.info.subagents as subagents_mod
 from helper import strip_ansi
-from statusline.config import Config
-from statusline.info import SessionView
-from statusline.tokens import TickRecord, TokenLog
+from yas.config import Config
+from yas.info import SessionView
+from yas.tokens import TickRecord, TokenLog
 
 _r = renderer_mod.Renderer()
-SESSION = (Path(__file__).parent.parent / 'claude' / 'statusline'
+SESSION = (Path(__file__).parent.parent / 'ops'
            / 'session-info-example.json')
 
 

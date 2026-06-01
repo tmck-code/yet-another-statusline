@@ -1,10 +1,10 @@
 import pytest
-import statusline.borders as borders
-import statusline.gradient as gradient
-import statusline.renderer as renderer_mod
-from statusline.constants import PILL_LEFT, PILL_RIGHT, PILL_TL, PILL_TR, PILL_BL, PILL_BR
-from statusline.pill import Pill
-from statusline.text import _visible_width
+import yas.render.borders as borders
+import yas.render.gradient as gradient
+import yas.renderer as renderer_mod
+from yas.constants import PILL_LEFT, PILL_RIGHT, PILL_TL, PILL_TR, PILL_BL, PILL_BR
+from yas.render.pill import Pill
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer_mod.Renderer

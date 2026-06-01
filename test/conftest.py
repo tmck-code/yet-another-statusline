@@ -6,12 +6,12 @@ from typing import Callable
 import pytest
 
 from helper import strip_ansi as _strip_ansi
-import statusline.app as _sl_app
-import statusline.config as _sl_config
-import statusline.constants as _sl_constants
-import statusline.session as _sl_session
-import statusline.subagents as _sl_subagents
-import statusline.tokens as _sl_tokens
+import yas.app as _sl_app
+import yas.config as _sl_config
+import yas.constants as _sl_constants
+import yas.session as _sl_session
+import yas.info.subagents as _sl_subagents
+import yas.tokens as _sl_tokens
 
 _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
 

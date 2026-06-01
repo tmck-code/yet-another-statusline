@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 
 
-import statusline.subagents as subagents
-from statusline.subagents import RunningSubagent, RunningSubagents
+import yas.info.subagents as subagents
+from yas.info.subagents import RunningSubagent, RunningSubagents
 
 
 SESSION_ID = 'sess-abc'

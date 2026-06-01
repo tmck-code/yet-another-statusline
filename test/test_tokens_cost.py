@@ -1,8 +1,8 @@
 from typing import Any
 
-import statusline.renderer as renderer
-from statusline.constants import ICON_TOK_RATE
-from statusline.text import _visible_width
+import yas.renderer as renderer
+from yas.constants import ICON_TOK_RATE
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer

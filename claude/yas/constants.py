@@ -24,10 +24,10 @@ SEVEN_DAY_WARMUP_MINUTES = 30
 
 
 class BarChars:
-    FILLED = '\u2588'
-    HEAVY  = '\u2586'
-    MID    = '\ue0b4'
-    EMPTY  = '\u2591'
+    FILLED = '█'
+    HEAVY  = '▆'
+    MID    = ''
+    EMPTY  = '░'
 
 
 RESET  = '\033[0m'
@@ -59,26 +59,26 @@ CLR_ALERT      = '\033[38;5;167m'
 # Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
 # chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
 # terminal.
-ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
+ICON_COST     = ''      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
-GLYPH_BURN_FAST = '\uef76'  # nf-cod-zap (shown when the burn rate is too fast)
-GLYPH_BURN_SLOW = '\uf490'  # nf-oct-flame (shown when the burn rate is _not_ too fast)
-GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
-GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
-GLYPH_SUBAGENT_ROW = '\u25b6'  # U+25B6           (per-row Running Subagent marker)
+GLYPH_BURN_FAST = ''  # nf-cod-zap (shown when the burn rate is too fast)
+GLYPH_BURN_SLOW = ''  # nf-oct-flame (shown when the burn rate is _not_ too fast)
+GLYPH_FOLDER   = ''     # nf-custom folder    (path row)
+GLYPH_SUBAGENT = ''     # nf-fa-tasks         (subagent list)
+GLYPH_SUBAGENT_ROW = '▶'  # U+25B6           (per-row Running Subagent marker)
 GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
 GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
-GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
-GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
+GLYPH_PLUGINS = ''      # nf-fa-plug          (plugins label)
+GLYPH_HELPER   = ''     # nf-mdi-star_circle  (5h rate-limit helper)
 GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
 GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
-GLYPH_CONTINUATION = '\u2514'  # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT
+GLYPH_CONTINUATION = '└'  # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT
 GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
-GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
-GLYPH_PIE          = '\uf200'  # nf-fa-pie_chart     (subagent session share)
-GLYPH_CONFIG_WARN  = '\u26a0'  # U+26A0 WARNING SIGN (config-error row marker)
+GLYPH_HOURGLASS    = ''  # nf-fa-hourglass_half (subagent context size)
+GLYPH_PIE          = ''  # nf-fa-pie_chart     (subagent session share)
+GLYPH_CONFIG_WARN  = '⚠'  # U+26A0 WARNING SIGN (config-error row marker)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
@@ -95,14 +95,14 @@ SPARK_FALL_TALL   = '\U0001fb50'  # tall fall (bot row, idx 8+)
 SPARK_RISE_TOP    = '\U0001fb4b'  # top-row rise (idx 9+)
 SPARK_FALL_TOP    = '\U0001fb40'  # top-row fall (idx 9+)
 
-PILL_TL    = '\u2597'  # U+2597 lower-right quadrant
-PILL_TOP   = '\u2584'  # U+2584 lower half block
-PILL_TR    = '\u2596'  # U+2596 lower-left quadrant
-PILL_LEFT  = '\u2590'  # U+2590 right half block
-PILL_RIGHT = '\u258c'  # U+258C left half block
-PILL_BL    = '\u259d'  # U+259D upper-right quadrant
-PILL_BOT   = '\u2580'  # U+2580 upper half block
-PILL_BR    = '\u2598'  # U+2598 upper-left quadrant
+PILL_TL    = '▗'  # U+2597 lower-right quadrant
+PILL_TOP   = '▄'  # U+2584 lower half block
+PILL_TR    = '▖'  # U+2596 lower-left quadrant
+PILL_LEFT  = '▐'  # U+2590 right half block
+PILL_RIGHT = '▌'  # U+258C left half block
+PILL_BL    = '▝'  # U+259D upper-right quadrant
+PILL_BOT   = '▀'  # U+2580 upper half block
+PILL_BR    = '▘'  # U+2598 upper-left quadrant
 
 RAINBOW_PALETTE = (
     196, 202, 208, 214, 220, 226, 190, 154, 118, 82,

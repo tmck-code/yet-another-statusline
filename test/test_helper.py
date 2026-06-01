@@ -2,10 +2,10 @@ from datetime import datetime, timezone, tzinfo
 
 import pytest
 
-import statusline.renderer as renderer
-from statusline.constants import FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, GLYPH_BURN_FAST, GLYPH_BURN_SLOW
-from statusline.session import RateBucket
-from statusline.text import _visible_width
+import yas.renderer as renderer
+from yas.constants import FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, GLYPH_BURN_FAST, GLYPH_BURN_SLOW
+from yas.session import RateBucket
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer

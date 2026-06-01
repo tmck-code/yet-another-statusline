@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 import statusline_command as sl
-import statusline.session as session
+import yas.session as session
 
 
 

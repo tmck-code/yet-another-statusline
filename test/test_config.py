@@ -17,16 +17,16 @@ from pathlib import Path
 
 import pytest
 
-import statusline.app as app
-import statusline.config as config
-import statusline.layout as layout_mod
-import statusline.renderer as renderer_mod
-from statusline.constants import GLYPH_CONFIG_WARN
-from statusline.layout import RowSpec, append_error_row
-from statusline.text import _visible_width
-from statusline.themes import CLAUDE_DARK
+import yas.app as app
+import yas.config as config
+import yas.layout as layout_mod
+import yas.renderer as renderer_mod
+from yas.constants import GLYPH_CONFIG_WARN
+from yas.layout import RowSpec, append_error_row
+from yas.render.text import _visible_width
+from yas.themes import CLAUDE_DARK
 
-SESSION = (Path(__file__).parent.parent / 'claude' / 'statusline'
+SESSION = (Path(__file__).parent.parent / 'ops'
            / 'session-info-example.json')
 
 # yas.toml parsing needs stdlib tomllib (Python 3.11+). On 3.10 the file is

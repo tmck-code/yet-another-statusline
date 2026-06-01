@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from statusline.config import Config
-from statusline.constants import (
+from yas.config import Config
+from yas.constants import (
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
     GLYPH_CONFIG_WARN,
     RESET,
 )
-from statusline.info import SessionView
-from statusline.pill import Pill
-from statusline.renderer import Renderer
-from statusline.text import _visible_width
-from statusline.tokens import TickRecord
+from yas.info import SessionView
+from yas.render.pill import Pill
+from yas.renderer import Renderer
+from yas.render.text import _visible_width
+from yas.tokens import TickRecord
 
 
 @dataclass

@@ -1,6 +1,6 @@
 import pytest
 import statusline_command as sl
-import statusline.renderer as renderer
+import yas.renderer as renderer
 
 _r = renderer.Renderer()
 

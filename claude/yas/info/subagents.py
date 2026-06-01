@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from statusline.constants import CLAUDE_DIR
+from yas.constants import CLAUDE_DIR
 
 
 def _parse_iso_to_epoch(ts: str) -> float:

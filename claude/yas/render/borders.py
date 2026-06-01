@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from statusline.constants import ITALIC, RESET
-from statusline.gradient import GradientEngine
-from statusline.pill import Pill
-from statusline.text import _visible_width
+from yas.constants import ITALIC, RESET
+from yas.render.gradient import GradientEngine
+from yas.render.pill import Pill
+from yas.render.text import _visible_width
 
 
 class BorderRenderer:

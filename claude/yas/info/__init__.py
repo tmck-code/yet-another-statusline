@@ -13,15 +13,15 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
-from statusline.config import Config
-from statusline.git import GitInfo
-from statusline.openspec import OpenSpec
-from statusline.session import SessionInfo
-from statusline.skills import LoadedSkills
-from statusline.subagents import RunningSubagents
-from statusline.tasks import TaskList
-from statusline.tokens import compute_session_cost
-from statusline.transcript import TranscriptUsage
+from yas.config import Config
+from yas.info.git import GitInfo
+from yas.info.openspec import OpenSpec
+from yas.session import SessionInfo
+from yas.info.skills import LoadedSkills
+from yas.info.subagents import RunningSubagents
+from yas.info.tasks import TaskList
+from yas.tokens import compute_session_cost
+from yas.info.transcript import TranscriptUsage
 
 
 # ---------------------------------------------------------------------------

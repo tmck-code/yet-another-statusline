@@ -1,6 +1,6 @@
 import pytest
 
-import statusline.config as config
+import yas.config as config
 
 
 def test_soft_limit_defaults_to_150k(monkeypatch: pytest.MonkeyPatch) -> None:

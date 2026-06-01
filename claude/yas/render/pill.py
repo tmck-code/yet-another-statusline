@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from statusline.constants import (
+from yas.constants import (
     PILL_BL,
     PILL_BOT,
     PILL_BR,
@@ -10,7 +10,7 @@ from statusline.constants import (
     PILL_TOP,
     PILL_TR,
 )
-from statusline.gradient import pill_gradient_fg
+from yas.render.gradient import pill_gradient_fg
 
 
 @dataclass

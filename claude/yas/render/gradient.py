@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from statusline.constants import (
+from yas.constants import (
     RAINBOW_PALETTE,
     BG_LUM_THRESHOLD,
     BarChars,
@@ -21,7 +21,7 @@ from statusline.constants import (
 )
 
 if TYPE_CHECKING:
-    from statusline.themes import Theme
+    from yas.themes import Theme
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +138,7 @@ class GradientEngine:
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
 
     def __init__(self, theme: 'Theme | None' = None) -> None:
-        from statusline.themes import CLAUDE_DARK
+        from yas.themes import CLAUDE_DARK
         t = theme if theme is not None else CLAUDE_DARK
         self.theme       = t
         self.GRAD_STOPS  = t.grad_stops

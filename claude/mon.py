@@ -29,8 +29,8 @@ from mon.layout import (
     aggregate_day_cost,
 )
 from mon.tui import parse_args, enter_alt_screen, exit_alt_screen
-from statusline.app import render, resolve_theme
-from statusline.constants import MIN_WIDTH
+from yas.app import render, resolve_theme
+from yas.constants import MIN_WIDTH
 
 _CURSOR_HOME = '\x1b[H'
 _DIM  = '\033[38;5;240m'

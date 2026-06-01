@@ -1,6 +1,6 @@
-import statusline.renderer as renderer
-from statusline.git import GitInfo
-from statusline.text import _visible_width
+import yas.renderer as renderer
+from yas.info.git import GitInfo
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer

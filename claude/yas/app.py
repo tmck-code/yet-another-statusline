@@ -4,16 +4,16 @@ import json
 import sys
 from datetime import datetime
 
-from statusline.config import Config
-from statusline.constants import CLAUDE_DIR, MIN_WIDTH, NARROW_WIDTH, MEDIUM_WIDTH
-from statusline.info import SessionView
-from statusline.layout import build_narrow, build_medium, build_wide, render_layout
-from statusline.renderer import Renderer
-from statusline.session import SessionInfo, _as_str
-from statusline.text import terminal_width
-from statusline.themes import CLAUDE_DARK, THEMES, Theme
-from statusline.tokens import TickRecord, TokenLog, TokenRate, compute_day_cost
-from statusline.transcript import TranscriptUsage
+from yas.config import Config
+from yas.constants import CLAUDE_DIR, MIN_WIDTH, NARROW_WIDTH, MEDIUM_WIDTH
+from yas.info import SessionView
+from yas.layout import build_narrow, build_medium, build_wide, render_layout
+from yas.renderer import Renderer
+from yas.session import SessionInfo, _as_str
+from yas.render.text import terminal_width
+from yas.themes import CLAUDE_DARK, THEMES, Theme
+from yas.tokens import TickRecord, TokenLog, TokenRate, compute_day_cost
+from yas.info.transcript import TranscriptUsage
 
 
 def record_tick(session: SessionInfo, usage: TranscriptUsage) -> TickRecord:

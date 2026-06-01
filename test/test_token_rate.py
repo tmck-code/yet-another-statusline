@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-import statusline.tokens as tokens
-from statusline.tokens import TokenRate
+import yas.tokens as tokens
+from yas.tokens import TokenRate
 
 
 NOW = 1_000_000.0  # fixed "now" for all tests

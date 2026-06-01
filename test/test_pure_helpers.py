@@ -1,8 +1,8 @@
-import statusline.constants as constants
-import statusline.gradient as gradient
-import statusline.text as text
-from statusline.gradient import rainbow_at
-from statusline.text import _is_wide
+import yas.constants as constants
+import yas.render.gradient as gradient
+import yas.render.text as text
+from yas.render.gradient import rainbow_at
+from yas.render.text import _is_wide
 
 
 class TestFmtTok:

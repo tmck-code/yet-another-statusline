@@ -1,4 +1,4 @@
-"""Tests for statusline.info — SessionView gather module."""
+"""Tests for yas.info — SessionView gather module."""
 from __future__ import annotations
 
 import json
@@ -8,21 +8,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from statusline.git import GitInfo
-from statusline.openspec import OpenSpec
-from statusline.subagents import RunningSubagent, RunningSubagents
-from statusline.transcript import TranscriptUsage
+from yas.info.git import GitInfo
+from yas.info.openspec import OpenSpec
+from yas.info.subagents import RunningSubagent, RunningSubagents
+from yas.info.transcript import TranscriptUsage
 
-SESSION_FILE = Path(__file__).parent.parent / 'claude' / 'statusline' / 'session-info-example.json'
+SESSION_FILE = Path(__file__).parent.parent / 'ops' / 'session-info-example.json'
 
 
 def _session():
-    from statusline.session import SessionInfo
+    from yas.session import SessionInfo
     return SessionInfo.from_dict(json.loads(SESSION_FILE.read_text()))
 
 
 def _cfg():
-    from statusline.config import Config
+    from yas.config import Config
     return Config()
 
 
@@ -32,7 +32,7 @@ def _cfg():
 
 def test_session_inout_sums_usage_and_subagents(monkeypatch):
     """session_inout = (billed_in + cache_read + out) + Σ(subagent total_input + output)."""
-    from statusline.info import SessionView
+    from yas.info import SessionView
 
     usage = TranscriptUsage(
         input_tokens                = 100,
@@ -76,7 +76,7 @@ def test_session_inout_sums_usage_and_subagents(monkeypatch):
 
 def test_session_inout_no_subagents(monkeypatch):
     """With no running subagents, session_inout equals transcript usage only."""
-    from statusline.info import SessionView
+    from yas.info import SessionView
 
     usage   = TranscriptUsage(
         input_tokens                = 400,
@@ -102,13 +102,13 @@ def test_session_inout_no_subagents(monkeypatch):
 
 def test_fmt_elapsed_none_returns_empty():
     """None mtime returns empty string."""
-    from statusline.info import _fmt_elapsed
+    from yas.info import _fmt_elapsed
     assert _fmt_elapsed(None, time.time()) == ''
 
 
 def test_fmt_elapsed_sub_hour():
     """mtime 5 minutes ago returns '5m'."""
-    from statusline.info import _fmt_elapsed
+    from yas.info import _fmt_elapsed
     now   = time.time()
     mtime = now - 300  # 5 minutes ago
     result = _fmt_elapsed(mtime, now)
@@ -117,7 +117,7 @@ def test_fmt_elapsed_sub_hour():
 
 def test_fmt_elapsed_multi_hour():
     """mtime 1h30m ago returns '1h30m'."""
-    from statusline.info import _fmt_elapsed
+    from yas.info import _fmt_elapsed
     now   = time.time()
     mtime = now - (90 * 60)  # 1h 30m ago
     result = _fmt_elapsed(mtime, now)
@@ -126,7 +126,7 @@ def test_fmt_elapsed_multi_hour():
 
 def test_fmt_elapsed_exact_one_hour():
     """mtime exactly 1h ago returns '1h0m'."""
-    from statusline.info import _fmt_elapsed
+    from yas.info import _fmt_elapsed
     now   = time.time()
     mtime = now - 3600
     result = _fmt_elapsed(mtime, now)
@@ -135,7 +135,7 @@ def test_fmt_elapsed_exact_one_hour():
 
 def test_fmt_elapsed_zero_minutes():
     """mtime 30 seconds ago (< 1m) returns '0m'."""
-    from statusline.info import _fmt_elapsed
+    from yas.info import _fmt_elapsed
     now   = time.time()
     mtime = now - 30
     result = _fmt_elapsed(mtime, now)
@@ -149,7 +149,7 @@ def test_fmt_elapsed_zero_minutes():
 def test_accessing_subagents_does_not_trigger_other_readers(monkeypatch):
     """Accessing only view.subagents must not call GitInfo.from_cwd,
     TranscriptUsage.from_transcript, or OpenSpec.from_cwd."""
-    from statusline.info import SessionView
+    from yas.info import SessionView
 
     git_call_count        = {'n': 0}
     transcript_call_count = {'n': 0}

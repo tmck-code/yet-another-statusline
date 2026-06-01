@@ -1,4 +1,4 @@
-from statusline.app import main
+from yas.app import main
 
 if __name__ == '__main__':
     main()

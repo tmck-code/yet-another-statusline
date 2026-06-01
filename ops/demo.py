@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIXTURE_PATH = REPO_ROOT / 'claude' / 'statusline' / 'session-info-example.json'
+FIXTURE_PATH = REPO_ROOT / 'ops' / 'session-info-example.json'
 STATUSLINE_SCRIPT = REPO_ROOT / 'claude' / 'statusline_command.py'
 
 

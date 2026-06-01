@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import statusline_command as sl
-import statusline.transcript as transcript
+import yas.info.transcript as transcript
 
 
 def _assistant_line(msg_id: str, input_tokens: int = 0, cache_creation: int = 0, cache_read: int = 0, output_tokens: int = 0) -> str:

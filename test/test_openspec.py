@@ -1,7 +1,7 @@
 """Tests for OpenSpec._find_root and OpenSpec.from_cwd."""
 from pathlib import Path
 
-import statusline.openspec as openspec_mod
+import yas.info.openspec as openspec_mod
 
 
 def test_find_root_walks_upward(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 import statusline_command as sl
-import statusline.tokens as tokens
-from statusline.session import Model
+import yas.tokens as tokens
+from yas.session import Model
 
 
 class TestModelCostRates:

@@ -2,7 +2,7 @@
 from pathlib import Path
 
 import statusline_command as sl
-import statusline.tokens as tokens
+import yas.tokens as tokens
 
 # Repoint symbols to the new module
 TokenLog = tokens.TokenLog

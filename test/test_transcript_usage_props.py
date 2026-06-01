@@ -1,5 +1,5 @@
 import statusline_command as sl
-import statusline.transcript as transcript
+import yas.info.transcript as transcript
 
 
 

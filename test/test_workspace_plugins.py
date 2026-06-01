@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import statusline_command as sl
-import statusline.session as session
+import yas.session as session
 
 
 def _write_settings(path: Path, plugins: dict[str, bool]) -> None:

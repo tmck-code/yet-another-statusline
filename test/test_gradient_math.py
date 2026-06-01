@@ -1,7 +1,7 @@
 import re
-import statusline.gradient as gradient
-import statusline.renderer as renderer_mod
-from statusline.constants import CLR_BORDER_OFF
+import yas.render.gradient as gradient
+import yas.renderer as renderer_mod
+from yas.constants import CLR_BORDER_OFF
 
 
 _r = renderer_mod.Renderer()

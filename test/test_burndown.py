@@ -1,8 +1,8 @@
 import time
 
 
-import statusline.metrics as metrics
-from statusline.constants import (
+import yas.render.metrics as metrics
+from yas.constants import (
     FIVE_HOUR_MINUTES,
     SEVEN_DAY_MINUTES,
     FIVE_HOUR_WARMUP_MINUTES,

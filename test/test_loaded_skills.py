@@ -2,8 +2,8 @@
 import json
 from pathlib import Path
 
-import statusline.skills as skills
-from statusline.skills import LoadedSkills
+import yas.info.skills as skills
+from yas.info.skills import LoadedSkills
 
 
 def _skill_line(skill_name: str) -> str:

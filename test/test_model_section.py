@@ -1,8 +1,8 @@
-import statusline.renderer as renderer
-import statusline.layout as layout_mod
-from statusline.config import Config
-from statusline.info import SessionView
-from statusline.constants import (
+import yas.renderer as renderer
+import yas.layout as layout_mod
+from yas.config import Config
+from yas.info import SessionView
+from yas.constants import (
     GLYPH_BURN_FAST,
     MEDIUM_WIDTH,
     NARROW_WIDTH,
@@ -11,9 +11,9 @@ from statusline.constants import (
     PILL_RIGHT,
     PILL_BR,
 )
-from statusline.git import GitInfo
-from statusline.session import Effort, Model, RateBucket, RateLimits, SessionInfo, Thinking
-from statusline.text import _visible_width
+from yas.info.git import GitInfo
+from yas.session import Effort, Model, RateBucket, RateLimits, SessionInfo, Thinking
+from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer

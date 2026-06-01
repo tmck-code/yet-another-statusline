@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import statusline_command as sl
-import statusline.tasks as tasks
+import yas.info.tasks as tasks
 
 
 def _iso(epoch: float) -> str:
