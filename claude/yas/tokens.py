@@ -55,7 +55,7 @@ class TokenAccounting:
             + usage.cache_read_input_tokens * rate_in * 0.1
             + usage.output_tokens * rate_out
         )
-        return cost / 1_000_000
+        return float(cost) / 1_000_000
 
     @staticmethod
     def day_cost(model: Model, token_log: 'TokenLog') -> float:

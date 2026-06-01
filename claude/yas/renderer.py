@@ -15,8 +15,6 @@ from yas.constants import (
     ITALIC,
     RESET,
     BarChars,
-    CLR_ALERT,
-    CLR_BORDER_OFF,
     CLR_CYAN,
     CLR_CYAN_DAY,
     CLR_CYAN_DAY_DIM,
@@ -41,7 +39,6 @@ from yas.constants import (
     FIVE_HOUR_WARMUP_MINUTES,
     GLYPH_BURN_FAST,
     GLYPH_BURN_SLOW,
-    GLYPH_CONFIG_WARN,
     GLYPH_CONTINUATION,
     GLYPH_FOLDER,
     GLYPH_HELPER,
@@ -52,11 +49,9 @@ from yas.constants import (
     GLYPH_RENAMED,
     GLYPH_REPLYING,
     GLYPH_SKILLS,
-    GLYPH_SUBAGENT,
     GLYPH_SUBAGENT_ROW,
     GLYPH_TASKS,
     GLYPH_THINKING,
-    GLYPH_TRASH,
     ICON_COST,
     ICON_TOK_RATE,
     PILL_LEFT,
@@ -75,22 +70,19 @@ from yas.render.gradient import (
 )
 from yas.info.git import GitInfo
 from yas.render.metrics import burndown_delta, subagent_avg_tpm, subagent_share
-from yas.info.openspec import OpenSpec
 from yas.render.pill import Pill
-from yas.session import ContextWindow, RateBucket, RateLimits, SessionInfo
-from yas.info.skills import LoadedSkills
-from yas.info.subagents import RunningSubagent, RunningSubagents
-from yas.info.tasks import Task, TaskList
+from yas.session import ContextWindow, RateBucket, RateLimits
+from yas.info.subagents import RunningSubagent
+from yas.info.tasks import TaskList
 from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
-from yas.tokens import TokenAccounting, TokenRate
-from yas.info.transcript import TranscriptUsage
+from yas.tokens import TokenRate
 
 if TYPE_CHECKING:
-    from yas.themes import ModelColors, Theme
+    from yas.themes import Theme
 
 # Runtime import of themes (the package module is always available when running
 # as a package; no importlib shim needed).
-from yas.themes import CLAUDE_DARK, THEMES, ModelColors, Theme  # type: ignore[assignment]
+from yas.themes import CLAUDE_DARK, Theme
 
 
 # ---------------------------------------------------------------------------

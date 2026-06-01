@@ -1,7 +1,5 @@
 import pytest
 
-import statusline_command as sl
-import yas.render.metrics as metrics
 from yas.render.metrics import subagent_avg_tpm, subagent_share
 
 

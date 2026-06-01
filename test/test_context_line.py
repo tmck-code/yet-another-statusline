@@ -1,5 +1,5 @@
 import yas.renderer as renderer
-from yas.constants import CLR_ALERT, DEFAULT_SOFT_LIMIT as SOFT_LIMIT
+from yas.constants import CLR_ALERT
 from yas.session import ContextWindow
 from yas.render.text import _visible_width
 

@@ -1,5 +1,3 @@
-import statusline_command as sl
-import yas.tokens as tokens
 from yas.session import Model
 
 

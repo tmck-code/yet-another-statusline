@@ -19,7 +19,6 @@ import pytest
 
 import yas.app as app
 import yas.config as config
-import yas.layout as layout_mod
 import yas.renderer as renderer_mod
 from yas.constants import GLYPH_CONFIG_WARN
 from yas.layout import RowSpec, append_error_row

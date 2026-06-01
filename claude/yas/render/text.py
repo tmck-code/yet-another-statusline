@@ -9,9 +9,6 @@ from yas.constants import (
     _ANSI_RE,
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
-    MIN_WIDTH,
-    NARROW_WIDTH,
-    MEDIUM_WIDTH,
 )
 
 

@@ -4,7 +4,6 @@ import os
 import time
 from pathlib import Path
 
-import pytest
 
 from yas.config import Config
 from yas.info import SessionView

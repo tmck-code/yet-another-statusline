@@ -3,7 +3,6 @@ import json
 import time
 from pathlib import Path
 
-import statusline_command as sl
 import yas.info.tasks as tasks
 
 

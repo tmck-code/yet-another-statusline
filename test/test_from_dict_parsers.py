@@ -2,7 +2,6 @@ from typing import Any
 
 import pytest
 
-import statusline_command as sl
 import yas.session as session
 
 

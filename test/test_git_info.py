@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
 import yas.info.git as git
 
 

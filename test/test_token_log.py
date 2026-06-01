@@ -1,7 +1,6 @@
 """Tests for TokenLog.update (disk I/O parser)."""
 from pathlib import Path
 
-import statusline_command as sl
 import yas.tokens as tokens
 
 # Repoint symbols to the new module

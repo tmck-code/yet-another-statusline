@@ -1,5 +1,4 @@
 import pytest
-import statusline_command as sl
 import yas.renderer as renderer
 
 _r = renderer.Renderer()

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
 import yas.layout as layout
 import yas.renderer as renderer_mod
 import yas.session as session_mod

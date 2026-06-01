@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 import yas.tokens as tokens
-from yas.tokens import TokenRate
 
 
 NOW = 1_000_000.0  # fixed "now" for all tests

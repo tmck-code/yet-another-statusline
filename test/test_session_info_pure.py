@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-import statusline_command as sl
 import yas.session as session
 
 

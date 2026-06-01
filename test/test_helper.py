@@ -5,7 +5,6 @@ import pytest
 import yas.renderer as renderer
 from yas.constants import FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, GLYPH_BURN_FAST, GLYPH_BURN_SLOW
 from yas.session import RateBucket
-from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer

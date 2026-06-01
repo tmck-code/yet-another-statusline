@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec

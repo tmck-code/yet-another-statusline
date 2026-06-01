@@ -1,4 +1,3 @@
-import statusline_command as sl
 import yas.info.transcript as transcript
 
 

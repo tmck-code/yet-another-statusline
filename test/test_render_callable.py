@@ -3,10 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import statusline_command as sl
 import yas.app as app
-import yas.render.text as _text_mod
-import yas.constants as _const_mod
 
 _EXAMPLE = Path(__file__).resolve().parent.parent / 'ops' / 'session-info-example.json'
 _SCRIPT  = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'

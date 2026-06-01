@@ -2,7 +2,6 @@
 import json
 from pathlib import Path
 
-import statusline_command as sl
 import yas.info.transcript as transcript
 
 

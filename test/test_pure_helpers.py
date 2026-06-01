@@ -1,5 +1,4 @@
 import yas.constants as constants
-import yas.render.gradient as gradient
 import yas.render.text as text
 from yas.render.gradient import rainbow_at
 from yas.render.text import _is_wide

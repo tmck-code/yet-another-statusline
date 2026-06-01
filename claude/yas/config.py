@@ -31,7 +31,7 @@ from yas.constants import (
 from yas.themes import THEMES
 
 if TYPE_CHECKING:
-    from yas.themes import Theme
+    pass
 
 
 _T = TypeVar('_T')
