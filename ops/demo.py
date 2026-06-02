@@ -903,8 +903,9 @@ def main() -> int:
             light_dir.mkdir(parents=True, exist_ok=True)
             dark_dir.mkdir(parents=True, exist_ok=True)
             kitchen_sink = next(c for c in SCENARIOS if c.name == 'kitchen-sink')
+            light_themes = {n for n in THEMES if THEMES[n].pill_fg_dark[0] <= 10}
             for theme_name in sorted(THEMES):
-                theme_dir = light_dir if 'light' in theme_name else dark_dir
+                theme_dir = light_dir if theme_name in light_themes else dark_dir
                 render_scenario(env, fixture, tmpdir, session_id, kitchen_sink, theme_dir, theme=theme_name)
 
         else:
