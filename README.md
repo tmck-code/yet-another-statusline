@@ -21,15 +21,11 @@ claude -p "/yas:init"
 
 A dummy session to demonstrate the layout:
 
-<!-- <img width="2946" height="1410" alt="yas-demo" src="https://github.com/user-attachments/assets/14256007-7d46-4712-8f15-5fc40a67d487" /> -->
 <img width="3084" height="1250" alt="yas-0 2 5" src="https://github.com/user-attachments/assets/94d318c7-d7b4-4ad0-a06c-90f303d7f9a7" />
-
 
 ## Layout Reference
 
-<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/65396fa1-791e-4750-837c-42e72b0673e0" />
-
-<!-- <img width="1835" height="884" alt="image" src="https://github.com/user-attachments/assets/4a410cd6-5afa-401d-b3f0-5b8726187a03" /> -->
+<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
 ## Widths
 
