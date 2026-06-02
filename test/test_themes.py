@@ -35,7 +35,11 @@ SESSION  = (Path(__file__).parent.parent / 'ops'
 # Schema validation
 
 EXPECTED_THEMES = {
-    'claude-dark', 'claude-light', 'catppuccin-latte', 'catppuccin-mocha',
+    'claude-dark', 'claude-light',
+    'catppuccin-mocha', 'catppuccin-latte',
+    'dracula', 'gruvbox-dark', 'gruvbox-light', 'nord',
+    'one-dark', 'one-light', 'palenight',
+    'solarized-dark', 'solarized-light', 'tokyo-night',
 }
 
 
@@ -85,19 +89,19 @@ def test_resolve_theme_defaults_to_claude_dark(
 def test_resolve_theme_cli_beats_env_and_file(
     monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
 ) -> None:
-    monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'catppuccin-mocha')
+    monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'dracula')
     (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
     (tmp_home / '.claude' / 'statusline-theme').write_text('claude-light\n')
-    assert app.resolve_theme('catppuccin-latte') is THEMES['catppuccin-latte']
+    assert app.resolve_theme('nord') is THEMES['nord']
 
 
 def test_resolve_theme_env_beats_file(
     monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
 ) -> None:
-    monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'catppuccin-mocha')
+    monkeypatch.setenv('CLAUDE_STATUSLINE_THEME', 'dracula')
     (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
     (tmp_home / '.claude' / 'statusline-theme').write_text('claude-light\n')
-    assert app.resolve_theme(None) is THEMES['catppuccin-mocha']
+    assert app.resolve_theme(None) is THEMES['dracula']
 
 
 def test_resolve_theme_file_used_when_no_env(

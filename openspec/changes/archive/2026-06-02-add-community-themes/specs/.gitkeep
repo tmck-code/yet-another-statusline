@@ -1,0 +1,12 @@
+# No spec changes required
+
+This change expands the set of available hardcoded themes but does not modify spec-level behavior.
+
+Theme selection is governed by the existing `statusline-config` specification, which:
+- Defines the precedence chain for resolving theme configuration
+- Specifies that theme names must be "known"
+- Requires valid theme names in precedence sources
+
+This change only expands what "known" theme names are allowed (from 4 to 13). The configuration resolution behavior and validation logic remain identical.
+
+Therefore, no new or modified spec files are required.
