@@ -814,6 +814,7 @@ def render_scenario(
     session_id: str,
     cfg:        ScenarioConfig,
     out_dir:    Path,
+    theme:      str | None = None,
 ) -> None:
     claude       = tmpdir / '.claude'
     project      = tmpdir / 'my-project'
@@ -862,8 +863,11 @@ def render_scenario(
     snap_env = dict(env)
     snap_env.setdefault('COLUMNS', str(SNAPSHOT_COLS))
     snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
+    if theme is not None:
+        snap_env['YAS_THEME'] = theme
     out = render_once(snap_env, json.dumps(raw))
-    dest = out_dir / f'{cfg.name}.txt'
+    stem = theme if theme is not None else cfg.name
+    dest = out_dir / f'{stem}.txt'
     dest.write_text('\n\n'+out+'\n\n')
     print(f'  wrote {dest}')
 
@@ -891,6 +895,17 @@ def main() -> int:
 
             for cfg in SCENARIOS:
                 render_scenario(env, fixture, tmpdir, session_id, cfg, out_dir)
+
+            sys.path.insert(0, str(REPO_ROOT / 'claude'))
+            from yas.themes import THEMES
+            light_dir = out_dir / 'themes' / 'light'
+            dark_dir  = out_dir / 'themes' / 'dark'
+            light_dir.mkdir(parents=True, exist_ok=True)
+            dark_dir.mkdir(parents=True, exist_ok=True)
+            kitchen_sink = next(c for c in SCENARIOS if c.name == 'kitchen-sink')
+            for theme_name in sorted(THEMES):
+                theme_dir = light_dir if 'light' in theme_name else dark_dir
+                render_scenario(env, fixture, tmpdir, session_id, kitchen_sink, theme_dir, theme=theme_name)
 
         else:
             payload = mutate_session_info(tmpdir, session_id, fixture)

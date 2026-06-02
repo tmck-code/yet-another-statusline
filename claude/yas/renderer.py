@@ -724,8 +724,8 @@ class Renderer:
         count_s = f'{done}/{total}'
         now     = time.time()
 
-        DIM = self.TOK_DIM       # dim grey for frozen timers + collapse lines
-        BRT = self.white_brt     # bright for the live timer
+        DIM = self.TOK_DIM  # dim grey for frozen timers + collapse lines
+        BRT = self.CTX      # accent for the active task (stays lighter than white_brt on light themes)
 
         glyph_s = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}'
         count_p = f'{self.SKILLS}{count_s}{self.R}'

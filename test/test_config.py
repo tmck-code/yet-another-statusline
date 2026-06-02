@@ -86,20 +86,20 @@ def test_legacy_theme_alias_used_alone(tmp_path: Path) -> None:
 
 def test_canonical_theme_beats_legacy_alias(tmp_path: Path) -> None:
     cfg = config.Config.load(
-        env={'YAS_THEME': 'catppuccin-mocha',
+        env={'YAS_THEME': 'dracula',
              'CLAUDE_STATUSLINE_THEME': 'claude-light'},
         config_dir=tmp_path,
     )
-    assert cfg.theme == 'catppuccin-mocha'
+    assert cfg.theme == 'dracula'
 
 
 def test_cli_theme_beats_env(tmp_path: Path) -> None:
     cfg = config.Config.load(
-        env={'YAS_THEME': 'catppuccin-mocha'},
+        env={'YAS_THEME': 'dracula'},
         config_dir=tmp_path,
-        argv=['--theme=catppuccin-latte'],
+        argv=['--theme=nord'],
     )
-    assert cfg.theme == 'catppuccin-latte'
+    assert cfg.theme == 'nord'
 
 
 # 4.3 Per-knob validation / fallback + error recording
