@@ -22,6 +22,9 @@ SEVEN_DAY_MINUTES        = 10080
 FIVE_HOUR_WARMUP_MINUTES = 5
 SEVEN_DAY_WARMUP_MINUTES = 30
 
+CACHE_TTL_SECONDS    = 300
+CACHE_TTL_1H_SECONDS = 3600
+
 
 class BarChars:
     FILLED = '█'
@@ -83,6 +86,7 @@ GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
 GLYPH_HOURGLASS    = ''  # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE          = ''  # nf-fa-pie_chart     (subagent session share)
 GLYPH_CONFIG_WARN  = '⚠'  # U+26A0 WARNING SIGN (config-error row marker)
+GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5

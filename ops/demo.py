@@ -309,6 +309,8 @@ def write_transcript(
     total_out: int,
     tasks: list[tuple[str, str, str]] | None = None,
     base_time: float | None = None,
+    cache_anchor_secs_ago: float | None = None,
+    cache_1h_tier: bool = False,
 ) -> None:
     if base_time is None:
         base_time = time.time()
@@ -332,7 +334,17 @@ def write_transcript(
         }
         if skill:
             msg['content'] = [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': skill}}]
-        msgs.append({'type': 'assistant', 'message': msg})
+        entry: dict[str, object] = {'type': 'assistant', 'message': msg}
+        if last and cache_anchor_secs_ago is not None and (share_cr > 0 or share_cc > 0):
+            _base = base_time if base_time is not None else time.time()
+            entry['timestamp'] = _iso(_base - cache_anchor_secs_ago)
+            if cache_1h_tier:
+                usage = msg['usage']
+                if isinstance(usage, dict):
+                    cc = usage.setdefault('cache_creation', {})
+                    if isinstance(cc, dict):
+                        cc['ephemeral_1h_input_tokens'] = max(1, share_cc)
+        msgs.append(entry)
     if tasks:
         times = _task_timeline(tasks, base_time)
         # TaskCreate stamped at the earliest started_at (start of the span), so
@@ -507,7 +519,12 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
             openspec_now = OPENSPEC_PROGRESSION[openspec_idx]
 
             tasks_now = task_state_for(pct)
-            write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now, base_time=task_base)
+            cache_offset = pct * 280.0  # ages anchor from 0 → 280s so countdown sweeps 300s → ~20s
+            write_transcript(
+                transcript_p, skills_now, total_in, total_cc, total_cr, total_out,
+                tasks=tasks_now, base_time=task_base,
+                cache_anchor_secs_ago=cache_offset,
+            )
             write_settings(claude, plugins_now)
             write_subagents(claude, session_id, project, subagent_now, age_seconds=pct * 120)
             write_openspec_changes(project, openspec_now)
@@ -569,6 +586,8 @@ class ScenarioConfig:
     seven_day_pct: float                     = 20.0
     yas_toml:      str | None                = None
     subagent_mtime_age: float                = 0.0
+    cache_anchor_secs_ago: float | None      = None
+    cache_1h_tier:         bool              = False
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -583,6 +602,7 @@ SCENARIOS: list[ScenarioConfig] = [
         plugins     = ['openspec@0.1.0'],
         five_hour_pct = 30.0,
         seven_day_pct = 20.0,
+        cache_anchor_secs_ago = 30.0,
     ),
     ScenarioConfig(
         name        = 'opus-thinking',
@@ -595,6 +615,7 @@ SCENARIOS: list[ScenarioConfig] = [
         plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
         five_hour_pct = 52.0,
         seven_day_pct = 41.0,
+        cache_anchor_secs_ago = 150.0,
     ),
     ScenarioConfig(
         name        = 'tasks',
@@ -615,6 +636,7 @@ SCENARIOS: list[ScenarioConfig] = [
         ],
         five_hour_pct = 22.0,
         seven_day_pct = 15.0,
+        cache_anchor_secs_ago = 90.0,
     ),
     ScenarioConfig(
         name        = 'openspec',
@@ -630,6 +652,7 @@ SCENARIOS: list[ScenarioConfig] = [
         ],
         five_hour_pct = 46.0,
         seven_day_pct = 37.0,
+        cache_anchor_secs_ago = 210.0,
     ),
     ScenarioConfig(
         name        = 'subagents',
@@ -677,6 +700,7 @@ SCENARIOS: list[ScenarioConfig] = [
         ],
         five_hour_pct = 58.0,
         seven_day_pct = 49.0,
+        cache_anchor_secs_ago = 265.0,
     ),
     ScenarioConfig(
         name        = 'full-context',
@@ -687,6 +711,7 @@ SCENARIOS: list[ScenarioConfig] = [
         plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
         five_hour_pct = 71.0,
         seven_day_pct = 62.0,
+        cache_anchor_secs_ago = 240.0,
     ),
     ScenarioConfig(
         name        = 'config-error',
@@ -827,7 +852,12 @@ def render_scenario(
     total_cr  = int(total_in * 12.0)
     total_out = int(ctx_size * cfg.context_pct * 0.12)
 
-    write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
+    write_transcript(
+        transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out,
+        tasks=cfg.tasks or None,
+        cache_anchor_secs_ago=cfg.cache_anchor_secs_ago,
+        cache_1h_tier=cfg.cache_1h_tier,
+    )
     write_settings(claude, cfg.plugins)
     yas_toml_path = claude / 'yas.toml'
     if cfg.yas_toml is not None:

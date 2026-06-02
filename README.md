@@ -62,7 +62,11 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `theme` | `YAS_THEME` (also `--theme` CLI) | `CLAUDE_STATUSLINE_THEME` | `[appearance].theme` | `claude-dark` |
 | `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
 
-- Valid `theme` values: `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha`.
+- Valid `theme` values (14 built-in themes):
+  - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
+  - **Light:** `claude-light`, `catppuccin-latte`, `gruvbox-light`, `one-light`, `solarized-light`
+
+  An unknown or unset `theme` falls back to `claude-dark`.
 - Valid `bg_shift` values: `warm` or `cool`.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
