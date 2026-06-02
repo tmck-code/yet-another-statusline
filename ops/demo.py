@@ -829,8 +829,11 @@ def render_scenario(
 
     write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
     write_settings(claude, cfg.plugins)
+    yas_toml_path = claude / 'yas.toml'
     if cfg.yas_toml is not None:
-        (claude / 'yas.toml').write_text(cfg.yas_toml)
+        yas_toml_path.write_text(cfg.yas_toml)
+    elif yas_toml_path.exists():
+        yas_toml_path.unlink()
     write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90, mtime_age=cfg.subagent_mtime_age)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)

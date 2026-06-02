@@ -8,40 +8,51 @@ model: haiku
 
 <objective>
 
-Write `statusLine.command` into `settings.json` (in `$CLAUDE_CONFIG_DIR`, defaulting to `~/.claude/`) pointing at this plugin's Python renderer.
+Write `statusLine.command` into `settings.json` (in `$CLAUDE_CONFIG_DIR`, defaulting to `~/.claude/`) pointing at the newest installed version of this plugin's Python renderer.
 
 Run once after `claude plugin install yas@yet-another-statusline`.
-Re-run after every upgrade — detects stale versioned path and rewrites.
+Re-run after every upgrade — it detects a stale versioned path and rewrites it.
 
 </objective>
 
 <workflow>
 
-## Step 1: Locate plugin root
+Run the **entire** block below as a **single** Bash invocation. It deliberately
+relies on shell variables (`$SCRIPT`, `$PYTHON_BIN`, …) set earlier in the same
+script — splitting it across calls loses that state and writes a broken command.
 
 ```bash
+set -u
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
 
+# ── 1. Locate the newest installed yas plugin root ──────────────────────────
+# Authoritative source: installed_plugins.json. Keep only roots whose renderer
+# actually exists on disk (drops orphaned/stale entries), then pick the highest
+# version via version-sort — not installedAt, which is the first-install time.
 PLUGIN_ROOT=$(jq -r '
     .plugins
     | to_entries[]
     | select(.key | ascii_downcase | contains("yas"))
     | .value[]
     | select(.installPath != null)
-    | [.installedAt, .installPath]
-    | @tsv
+    | .installPath
 ' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
-    | sort -rk1 | head -1 | cut -f2)  # timeout: 5000
+    | while IFS= read -r d; do
+        [ -f "$d/claude/statusline_command.py" ] && echo "$d"
+      done \
+    | sort -Vr | head -1)
 
+# Fallback: scan the cache for yas plugin.json, skip orphaned dirs, version-sort.
 if [ -z "$PLUGIN_ROOT" ]; then
     PLUGIN_ROOT=$(find "$CLAUDE_CONFIG_DIR/plugins/cache" -maxdepth 5 -name "plugin.json" 2>/dev/null \
             | xargs grep -l '"name"[[:space:]]*:[[:space:]]*"yas"' 2>/dev/null \
             | while IFS= read -r f; do
                 dir=$(dirname "$(dirname "$f")")
                 [ -f "$dir/.orphaned_at" ] && continue
-                echo "$dir"
+                [ -f "$dir/claude/statusline_command.py" ] && echo "$dir"
               done \
-            | sort -Vr | head -1)  # timeout: 10000
+            | sort -Vr | head -1)
 fi
 
 if [ -z "$PLUGIN_ROOT" ]; then
@@ -49,94 +60,69 @@ if [ -z "$PLUGIN_ROOT" ]; then
     exit 1
 fi
 
-SCRIPT="$PLUGIN_ROOT/claude/statusline_command.py"
-if [ ! -f "$SCRIPT" ]; then
-    printf "! statusline_command.py not found at %s\n" "$SCRIPT"
-    exit 1
-fi
-
+SCRIPT="$PLUGIN_ROOT/claude/statusline_command.py"  # existence already verified above
 printf "  Plugin root: %s\n" "$PLUGIN_ROOT"
-```
 
-## Step 2: Remove legacy statusline-info-* files
-
-Run unconditionally (even if already up-to-date).
-
-```bash
+# ── 2. Remove legacy statusline-info-* files (unconditional) ────────────────
 for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
     [ -e "$f" ] || continue
     rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
-done  # timeout: 5000
-```
+done
 
-## Step 3: Check if already current
-
-```bash
-jq --arg script "$SCRIPT" -e '
-    (.statusLine.command // "") | contains($script)
-' "$CLAUDE_CONFIG_DIR/settings.json" >/dev/null 2>&1  # timeout: 5000
-```
-
-If exit 0: print `statusLine already set to current version — skipping.` and stop.
-
-## Step 4: Detect Python interpreter
-
-```bash
+# ── 3. Detect a Python 3.10+ interpreter ────────────────────────────────────
 PYTHON_BIN=""
 for candidate in python python3; do
-    bin=$(which "$candidate" 2>/dev/null) || continue
+    bin=$(command -v "$candidate" 2>/dev/null) || continue
     version=$("$bin" --version 2>&1) || continue
     echo "$version" | grep -qE "Python 3\.(1[0-9]|[2-9][0-9])" && PYTHON_BIN="$bin" && break
-done  # timeout: 5000
-
+done
 if [ -z "$PYTHON_BIN" ]; then
     printf "! Python 3.10+ not found — install Python 3.10+ and re-run /yas:init\n"
     exit 1
 fi
-
 printf "  Python: %s\n" "$PYTHON_BIN"
-```
 
-## Step 5: Back up and write statusLine.command
+# ── 4. Skip only on an EXACT match (avoids 0.2.2-vs-0.2.20 substring traps) ──
+NEW_CMD="\"$PYTHON_BIN\" \"$SCRIPT\""
+OLD_CMD=$(jq -r '.statusLine.command // ""' "$SETTINGS" 2>/dev/null || printf '')
+if [ "$OLD_CMD" = "$NEW_CMD" ]; then
+    printf "  statusLine already set to current version — skipping.\n"
+    exit 0
+fi
 
-```bash
-SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
-
-# Create settings.json with empty object if missing (no backup needed for a new file)
+# ── 5. Back up, then write statusLine.command atomically ────────────────────
 if [ ! -f "$SETTINGS" ]; then
     printf '{}\n' > "$SETTINGS"
     printf "  Created %s\n" "$SETTINGS"
+    BAK=""
 else
-    BAK_TS=$(date -u +%Y%m%dT%H%M%SZ)
-    cp "$SETTINGS" "${SETTINGS}.bak-yas-${BAK_TS}"  # timeout: 5000
-    printf "  Backed up → settings.json.bak-yas-%s\n" "$BAK_TS"
+    BAK="${SETTINGS}.bak-yas-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "$SETTINGS" "$BAK"
+    printf "  Backed up → %s\n" "$(basename "$BAK")"
 fi
 
-_result=$(jq --arg cmd "\"$PYTHON_BIN\" \"$SCRIPT\"" \
+_result=$(jq --arg cmd "$NEW_CMD" \
     '.statusLine = {"async":true,"command":$cmd,"refreshInterval":1,"type":"command"}' \
-    "$SETTINGS")  # timeout: 5000
-[ $? -eq 0 ] && [ -n "$_result" ] || { printf "! jq failed — settings.json unchanged\n"; exit 1; }
+    "$SETTINGS")
+if [ $? -ne 0 ] || [ -z "$_result" ]; then
+    printf "! jq failed — settings.json unchanged\n"; exit 1
+fi
 
 _tmp=$(mktemp "${SETTINGS}.XXXXXXXXXX")
-printf '%s\n' "$_result" > "$_tmp" \
-    || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
-mv "$_tmp" "$SETTINGS"  # timeout: 3000
-printf "  settings.json updated\n"
-```
+printf '%s\n' "$_result" > "$_tmp" || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
+mv "$_tmp" "$SETTINGS"
 
-## Step 6: Validate and report
+# ── 6. Validate; restore the backup on corruption ───────────────────────────
+if ! jq empty "$SETTINGS" 2>/dev/null; then
+    printf "! settings.json invalid after write — restoring backup\n"
+    [ -n "$BAK" ] && cp "$BAK" "$SETTINGS"
+    exit 1
+fi
 
-```bash
-jq empty "$SETTINGS"  # timeout: 5000
-```
-
-If invalid: restore backup, report error, stop.
-
-Print:
-```
-  statusLine set → "$PYTHON_BIN" "$SCRIPT"
-  Config dir: $CLAUDE_CONFIG_DIR
-  Done. Reload Claude Code to activate the statusline.
+[ -n "$OLD_CMD" ] && [ "$OLD_CMD" != "$NEW_CMD" ] && printf "  Replaced stale path: %s\n" "$OLD_CMD"
+printf "  statusLine set → %s\n" "$NEW_CMD"
+printf "  Config dir: %s\n" "$CLAUDE_CONFIG_DIR"
+printf "  Done. Reload Claude Code to activate the statusline.\n"
 ```
 
 </workflow>
