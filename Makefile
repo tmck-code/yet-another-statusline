@@ -36,4 +36,13 @@ statusline/test:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: hooks bench pr-info demo demo/img test statusline/test mon/run
+# usage:
+# VERSION=0.X.Y make version/bump
+version/bump:
+	# update plugin.json
+	sed -i 's/$(shell uv version --short)/$(VERSION)/g' .claude-plugin/plugin.json
+	# update pyproject.toml & uv.lock
+	uv version $(VERSION)
+	@uv lock && uv sync --all-groups
+
+.PHONY: hooks bench pr-info demo demo/img test statusline/test mon/run version/bump

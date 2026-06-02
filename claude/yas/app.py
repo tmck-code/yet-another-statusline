@@ -65,7 +65,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding='utf-8')
     # Resolve config live so a freshly-set env var (e.g. YAS_FULL_WIDTH) or an
     # edited yas.toml takes effect on this invocation; CLI flags are top priority.
-    cfg      = Config.load(argv=sys.argv[1:])
+    cfg      = Config.load(argv=sys.argv[1:], config_dir=CLAUDE_DIR)
     bg_shift = cfg.bg_shift
     theme    = THEMES.get(cfg.theme, CLAUDE_DARK)
 

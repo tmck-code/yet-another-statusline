@@ -249,7 +249,20 @@ def build_wide(
 
     vsep_w   = 5
     helper_w = _visible_width(helper_text)
-    target_w = (width - 4) - vsep_w - helper_w - right_w
+
+    # Cache countdown section: glyph + time, vsep-delimited, sheds before path truncates.
+    cache_cd = view.cache_countdown
+    cache_section_w = 0      # vsep_w + glyph+space+time width; 0 when shed/hidden
+    cache_content   = ''     # rendered text (no vsep); empty when not shown
+    if cache_cd is not None:
+        _cache_txt, _cache_w = r.cache_section(*cache_cd)
+        _cache_section_w = vsep_w + _cache_w
+        # Width-shed: drop if path would get fewer than 5 visible chars.
+        if (width - 4) - vsep_w - helper_w - _cache_section_w - right_w >= 5:
+            cache_section_w = _cache_section_w
+            cache_content   = _cache_txt
+
+    target_w = (width - 4) - vsep_w - helper_w - cache_section_w - right_w
     line_path = r.fit_path(session.short_pwd, git, elapsed, target_w, compact_only=False)
     path_w   = _visible_width(line_path)
 
@@ -257,23 +270,41 @@ def build_wide(
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
-    path_div_col = 3 + path_w + 2
+    path_div_col  = 3 + path_w + 2
     vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
-    content = f'{line_path}{vsep}{helper_text}'
+
+    cache_div_col = path_div_col + helper_w + vsep_w if cache_section_w else None
+    cache_vsep    = r.vsep_block(cache_div_col, width, fill=fill, leader=False) if cache_div_col else ''
+
+    # Build the middle section: path | helper [ | cache ].
+    # The leading space before cache_vsep is the +1 in cache_div_col / _cache_section_w.
+    middle = f'{line_path}{vsep}{helper_text}'
+    if cache_section_w:
+        middle = f'{middle} {cache_vsep}{cache_content}'
+
+    # Single "section present" boolean drives ALL elbow math so border columns
+    # can never reference a missing │.
+    if cache_section_w:
+        path_row_downs: tuple[int, ...] = (path_div_col, cache_div_col)  # type: ignore[assignment]
+        path_row_ups:   tuple[int, ...] = (path_div_col, cache_div_col)  # type: ignore[assignment]
+    else:
+        path_row_downs = (path_div_col,)
+        path_row_ups   = (path_div_col,)
+
     if pill_pct:
         rows += [
-            RowSpec('top_border', downs=(path_div_col,), pill=pill),
-            RowSpec('content', content=content, right_pill=right_text),
+            RowSpec('top_border', downs=path_row_downs, pill=pill),
+            RowSpec('content', content=middle, right_pill=right_text),
         ]
     else:
-        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
-        content_full = f'{content}{" " * pad}{right_text}'
+        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + cache_section_w + (1 if cache_section_w else 0) + right_w))
+        content_full = f'{middle}{" " * pad}{right_text}'
         rows += [
-            RowSpec('top_border', downs=(path_div_col,)),
+            RowSpec('top_border', downs=path_row_downs),
             RowSpec('content', content=content_full),
         ]
 
-    rows.append(RowSpec('separator_dim', ups=(path_div_col,), pill=pill))
+    rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill))
     rows.append(RowSpec('content', content=line_context))
 
     tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
