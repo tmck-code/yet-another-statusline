@@ -35,6 +35,9 @@ warn_unused_configs = true
 disallow_subclassing_any = true
 
 [tool.ruff]
+# Honour `exclude` even when files are passed explicitly on the command line
+# (e.g. from the pre-commit hook). Without this, ruff checks any path you name.
+force-exclude = true
 # Exclude a variety of commonly ignored directories.
 exclude = [
     ".claude/",

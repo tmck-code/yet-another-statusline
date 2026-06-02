@@ -2,7 +2,28 @@
 
 set -euo pipefail
 
+# Staged, added/copied/modified Python files (relative to repo root).
 fpaths=$(git diff --name-only --cached --diff-filter=ACM | grep -E '\.py$' | tr '\n' ' ') || exit 0
+[ -n "${fpaths// /}" ] || exit 0
+
+# mypy ignores its `exclude` config for files named explicitly on the command
+# line, so filter the staged list against `[tool.mypy].exclude` ourselves
+# (those entries are regexes, matched with re.search just like mypy does).
+# ruff is handled natively via `force-exclude = true` in pyproject.toml.
+filter_mypy() {
+    python3 - "$@" <<'PY'
+import pathlib, re, sys, tomllib
+
+cfg = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+patterns = cfg.get("tool", {}).get("mypy", {}).get("exclude", [])
+regexes = [re.compile(p) for p in patterns]
+for f in sys.argv[1:]:
+    if not any(r.search(f) for r in regexes):
+        print(f)
+PY
+}
+
+mypy_files=$(filter_mypy $fpaths | tr '\n' ' ')
 
 RUFF_STATUS=0
 MYPY_STATUS=0
