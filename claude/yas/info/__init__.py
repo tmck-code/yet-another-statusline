@@ -101,6 +101,29 @@ class SessionView:
         return total
 
     @cached_property
+    def cache_countdown(self) -> tuple[float, int] | None:
+        """Remaining cache TTL as (seconds_remaining, elapsed_pct) or None.
+
+        Returns None when there is no cache anchor, the cache has already
+        expired, or the TTL is unknown. elapsed_pct is clamped to [0, 100]
+        and represents how much of the TTL has been consumed (0 = fresh,
+        100 = expired). Holds no ANSI or render geometry.
+
+        This is inspired/taken directly from the implementation by @rodboev here:
+        https://gist.github.com/rodboev/108ae70ea338bebd7e96304bc797d9b8
+        """
+        u = self.transcript_usage
+        cache_anchor_epoch = u.cache_anchor_epoch
+        cache_ttl = u.cache_ttl
+        if cache_anchor_epoch == 0.0 or cache_ttl == 0:
+            return None
+        remaining = cache_ttl - (self.now - cache_anchor_epoch)
+        if remaining <= 0:
+            return None
+        elapsed_pct = max(0, min(100, 100 - round(remaining * 100 / cache_ttl)))
+        return (remaining, elapsed_pct)
+
+    @cached_property
     def elapsed(self) -> str:
         transcript_path = self.session.transcript_path
         mtime: float | None = None
