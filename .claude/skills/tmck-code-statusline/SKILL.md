@@ -1,6 +1,6 @@
 ---
 name: tmck-code-statusline
-description: Edit the Claude Code statusline renderer safely. Use when touching claude/statusline/*.py (the statusline package), claude/statusline_command.py (the entry shim), claude/mon.py, or related tests under test/. Covers the layered renderer (GradientEngine / BorderRenderer / Renderer), the SessionView gather seam (info.py), the LayoutSpec/RowSpec layout pipeline, record_tick/TickRecord, Nerd Font PUA glyph hazards, border/elbow column math, and the demo-based visual check.
+description: Edit the Claude Code statusline renderer safely. Use when touching claude/yas/**/*.py (the yas package), claude/statusline_command.py (the entry shim), claude/mon.py, or related tests under test/. Covers the layered renderer (GradientEngine / BorderRenderer / Renderer), the SessionView gather seam (yas/info/__init__.py), the LayoutSpec/RowSpec layout pipeline, record_tick/TickRecord, Nerd Font PUA glyph hazards, border/elbow column math, and the demo-based visual check.
 
 ---
 
@@ -10,32 +10,39 @@ The statusline renderer is a single-pass terminal painter with hand-tuned column
 
 ## Architecture map (post-package-split)
 
-`claude/statusline_command.py` is now a 4-line shim: `from statusline.app import main`. The real code is the `statusline` package under `claude/statusline/`, split so each module compiles to a cached `.pyc` (the split exists for startup speed). Tests and the shim resolve it via `pythonpath = ["claude"]` (see `pyproject.toml`), so imports are `statusline.<module>`.
+`claude/statusline_command.py` is a 4-line shim: `from yas.app import main`. The real code is the **`yas`** package under `claude/yas/`, split so each module compiles to a cached `.pyc` (the split exists for startup speed). Tests, the shim, and `mon` resolve it via `pythonpath = ["claude"]` (see `pyproject.toml`), so imports are `yas.<module>` / `yas.info.<module>` / `yas.render.<module>`.
+
+The package is laid out in three layers:
+
+- **`claude/yas/`** (top level) — `app.py`, `layout.py`, `renderer.py`, `session.py`, `config.py`, `constants.py`, `themes.py`, `tokens.py`.
+- **`claude/yas/info/`** — the data-source / gather layer: `__init__.py` (the `SessionView` seam), `git.py`, `openspec.py`, `skills.py`, `subagents.py`, `tasks.py`, `transcript.py`.
+- **`claude/yas/render/`** — the pure painting/maths layer: `gradient.py`, `borders.py`, `pill.py`, `text.py`, `metrics.py`, `tasks_view.py`.
 
 Entry points live in **`app.py`**:
 - `render(session_info, width, *, bg_shift, theme) -> str` — the public callable (also what `mon.py` imports). Constructs `SessionInfo`, `Config`, `SessionView`, picks a `build_*` by width (wide also calls `record_tick`), renders the `LayoutSpec`.
-- `record_tick(session, usage) -> TickRecord` — the per-render write boundary. Runs `TokenLog.update` / `TokenRate.update` / `compute_day_cost` and bundles results into a `TickRecord`. Called by `render` before `build_wide`; receives `view.transcript_usage` (cached) so the transcript is scanned only once.
+- `record_tick(session, usage) -> TickRecord` — the per-render write boundary. Runs `TokenLog.update` / `TokenRate.update` / `compute_day_cost` and bundles results into a `TickRecord` (the dataclass itself lives in `tokens.py`). Called by `render` before `build_wide`; receives `view.transcript_usage` (cached) so the transcript is scanned only once.
 - `main()` — stdin → JSON → `render`, plus forces UTF-8 stdout and writes the per-session payload to `~/.claude/statusline-output/statusline.<session_id>.json` for the observer.
 - `resolve_theme(cli_name)` — CLI → `YAS_THEME` → … → `CLAUDE_DARK`.
 
-The renderer is layered across three modules:
+The renderer is layered across three modules (`render/gradient.py`, `render/borders.py`, top-level `renderer.py`):
 
-- **`gradient.py`** — pure colour/sparkline math. Module-level `rainbow_step/at/color`, `model_key`, `paint_bg_span`, `pill_gradient_fg`, plus the **`GradientEngine`** class (`gradient_rgb`, `gradient_color`, `grad_at`, `gradient_bar`, `spark_*`, `sparkline`). No I/O, no terminal state.
-- **`borders.py`** — **`BorderRenderer`** consumes a `GradientEngine`. Owns `border_top`, `border_bottom`, `border_separator`, `border_separator_dim`, `border_line`, `_dim_for_col`. All elbow / pill / fill / `right_pill` math lives here.
-- **`renderer.py`** — **`Renderer`** composes the two (`self.gradient`, `self.border`) and adds every section helper (`path_git`, `path_git_compact`, `fit_path`, `model_section_compact`, `model_right_section`, `model_right_section_compact`, `plugins_skills`, `subagent_activity`, `subagent_row`, `task_row`, `tokens_cost`, `context_bar`, `context_line`, `context_line_compact`, `openspec_bar`, `spec_gradient_bar`, `burndown_trend`, `helper`, the colour pickers, `vsep_block`, …). Keeps thin delegators (`gradient_color`, `border_top`, …) for backward-compat callers and tests. Module-level `LEVEL_PCT` and `TOOL_ARG_KEY` dicts live here too.
+- **`render/gradient.py`** — pure colour/sparkline math. Module-level `rainbow_step`, `rainbow_at`, `rainbow_color`, `model_key`, `_scale`, `paint_bg_span`, `pill_gradient_fg`, plus the **`GradientEngine`** class (`gradient_rgb`, `gradient_color`, `grad_at`, `gradient_bar`, `spark_*`, `sparkline`). No I/O, no terminal state.
+- **`render/borders.py`** — **`BorderRenderer`** consumes a `GradientEngine`. Owns `border_top`, `border_bottom`, `border_separator`, `border_separator_dim`, `border_line`, `_dim_for_col`. All elbow / pill / fill / `right_pill` math lives here.
+- **`renderer.py`** (top level) — **`Renderer`** composes the two (`self.gradient`, `self.border`) and adds every section helper (`path_git`, `path_git_compact`, `fit_path`, `model_section_compact`, `model_right_section`, `model_right_section_compact`, `plugins_skills`, `subagent_activity`, `subagent_row`, `task_row`, `tokens_cost`, `context_bar`, `context_line`, `context_line_compact`, `openspec_bar`, `spec_gradient_bar`, `burndown_trend`, `helper`, the colour pickers, `vsep_block`, …). Keeps thin delegators (`gradient_color`, `border_top`, …) for backward-compat callers and tests. Module-level `LEVEL_PCT` and `TOOL_ARG_KEY` dicts live here too.
 
 Supporting modules:
 
-- **`pill.py`** — `Pill` (`@dataclass`): the model-effort coloured pill. `active`, `gradient_fg(col)`, `border_char(col, edge)`, `border_fg(col)`. Border helpers accept `pill: Pill | None` and `pill_edge: 'top' | 'bottom'`.
-- **`constants.py`** — width thresholds (`MIN_WIDTH=40`, `NARROW_WIDTH=55`, `MEDIUM_WIDTH=80`, `DEFAULT_MAX_WIDTH=140`), `_ANSI_RE`, `BarChars`, all `CLR_*` colour codes, `RESET`/`BOLD`/`ITALIC`, the five-hour / seven-day limit constants, `RAINBOW_PALETTE`, and **every Nerd Font PUA glyph constant** (`ICON_COST`, `GLYPH_MODEL`, `SPARK_*`, `PILL_*`, …). This is the hoist target for the PUA rule below.
-- **`text.py`** — width/format primitives: `_visible_width`, `_is_wide`, `terminal_width`, `_middle_ellipsis`, `fmt_tok`, `fmt_dur`, `sparkline_width`.
-- **`tokens.py`** — `TokenAccounting` (static `rates_for`, `session_cost`, `day_cost`), plus `TokenLog` and `TokenRate` (the on-disk t/m rate history). Don't inline rate math elsewhere.
-- **`metrics.py`** — `burndown_delta`, `subagent_avg_tpm`, `subagent_share`.
-- **`session.py`** — `SessionInfo.from_dict` and every typed view of the stdin payload (`Model`, `Effort`, `Thinking`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, `RateBucket`, `CurrentUsage`, …) plus `_as_int/_as_float/_as_str` coercers.
+- **`render/pill.py`** — `Pill` (`@dataclass`): the model-effort coloured pill. `active`, `gradient_fg(col)`, `border_char(col, edge)`, `border_fg(col)`. Border helpers accept `pill: Pill | None` and `pill_edge: 'top' | 'bottom'`.
+- **`render/text.py`** — width/format primitives: `_visible_width`, `_is_wide`, `terminal_width`, `_middle_ellipsis`, `fmt_tok`, `fmt_dur`, `sparkline_width`.
+- **`render/metrics.py`** — `burndown_delta`, `subagent_avg_tpm`, `subagent_share`.
+- **`render/tasks_view.py`** — task-row geometry: `WindowSlice`, `fmt_duration`, `total_elapsed`, `select_window` (the windowing/elapsed maths behind `Renderer.task_row`).
+- **`constants.py`** — width thresholds (`MIN_WIDTH=40`, `NARROW_WIDTH=55`, `MEDIUM_WIDTH=80`, `DEFAULT_MAX_WIDTH=140`), `_ANSI_RE`, `BarChars`, all `CLR_*` colour codes, `RESET`/`BOLD`/`ITALIC`, the five-hour / seven-day limit constants, `RAINBOW_PALETTE`, `CLAUDE_DIR`, and **every Nerd Font PUA glyph constant** (`ICON_COST`, `GLYPH_MODEL`, `SPARK_*`, `PILL_*`, …). This is the hoist target for the PUA rule below.
+- **`tokens.py`** — `TokenAccounting` (static `rates_for`, `session_cost`, `day_cost`), `TokenLog` and `TokenRate` (the on-disk t/m rate history), the `TickRecord` dataclass, and module-level `compute_session_cost` / `compute_day_cost`. Don't inline rate math elsewhere.
+- **`session.py`** — `SessionInfo.from_dict` and every typed view of the stdin payload (`Model`, `OutputStyle`, `Effort`, `Thinking`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, `RateBucket`, `CurrentUsage`, …) plus `_as_int/_as_float/_as_str` coercers.
 - **`config.py`** — `Config` (frozen dataclass): merges `yas.toml`, env vars, and argv; `soft_limit_for(model_id, display_name)`.
-- **`git.py`** / **`openspec.py`** / **`skills.py`** / **`subagents.py`** / **`tasks.py`** / **`transcript.py`** — the `from_cwd` / `from_session` / `from_transcript` data sources (`GitInfo`, `OpenSpec`, `LoadedSkills`, `RunningSubagent(s)`, `Task`/`TaskList`, `TranscriptUsage`).
+- **`info/git.py`** / **`info/openspec.py`** / **`info/skills.py`** / **`info/subagents.py`** / **`info/tasks.py`** / **`info/transcript.py`** — the `from_cwd` / `from_session` / `from_transcript` data sources (`GitInfo`, `OpenSpec`, `LoadedSkills`, `RunningSubagent(s)`, `Task`/`TaskList`, `TranscriptUsage`). `info/subagents.py` also holds `read_last_prompt_ts` (the prompt-boundary marker) and the cohort-visibility logic (`RunningSubagents.visible`).
 - **`themes.py`** — `Theme`, `ModelColors`, the `THEMES` registry (`CLAUDE_DARK`, `CLAUDE_LIGHT`, `CATPPUCCIN_*`), `resolve`.
-- **`info.py`** — `SessionView` (lazy gather seam) and `_fmt_elapsed`. `SessionView` takes `session: SessionInfo`, `cfg: Config`, and an optional frozen `now: float`. Every derived field is a `@cached_property` — `git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes`, `session_cost`, `session_inout`, `elapsed` — so a narrow render pays only for the fields it reads. Module-level `_fmt_elapsed(mtime, now) -> str` is the pure elapsed formatter (split out of the old `elapsed_from_transcript` in `layout`). `info` sits below `renderer` / `layout` in the DAG and never imports them.
+- **`info/__init__.py`** — `SessionView` (lazy gather seam) and `_fmt_elapsed`. `SessionView` takes `session: SessionInfo`, `cfg: Config`, and an optional frozen `now: float`. Every derived field is a `@cached_property` — `git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes`, `session_cost`, `session_inout`, `elapsed` — so a narrow render pays only for the fields it reads. Module-level `_fmt_elapsed(mtime, now) -> str` is the pure elapsed formatter. `info` sits below `renderer` / `layout` in the DAG and never imports them.
 - **`layout.py`** — the layout pipeline (see below).
 - **`ops/demo.py`** — the hermetic visual harness (lives outside the package, under `ops/`; see checklists).
 
@@ -47,11 +54,13 @@ Supporting modules:
 
 - Section content (a row's text) → the corresponding `Renderer` helper in `renderer.py`.
 - Row order, conditional rows, elbow threading → the relevant `build_*` in `layout.py`. Never edit `render_layout` to special-case a layout; thread it through `RowSpec` instead.
-- New border style → `BorderRenderer` (`borders.py`), then a new `RowSpec.kind` branch in `render_layout`, then use it from a builder.
-- New gradient/sparkline maths → `GradientEngine` (`gradient.py`). Add a `Renderer` delegator only if existing tests/callers expect it on `Renderer`.
+- New border style → `BorderRenderer` (`render/borders.py`), then a new `RowSpec.kind` branch in `render_layout`, then use it from a builder.
+- New gradient/sparkline maths → `GradientEngine` (`render/gradient.py`). Add a `Renderer` delegator only if existing tests/callers expect it on `Renderer`.
+- New token/subagent metric maths → `render/metrics.py` (pure functions), called from a `Renderer` helper.
 - A new glyph/colour constant → `constants.py`.
 - A new field off the stdin payload → a typed view in `session.py`.
-- A new derived session value (git, skills, cost, elapsed, …) → add a `@cached_property` to `SessionView` in `info.py`. If it depends on the per-render `TokenLog`/`TokenRate` writes, put it in `TickRecord` / `record_tick` in `app.py` instead, and thread it into `build_wide` as a `TickRecord` field.
+- A new data source (a new on-disk reader) → a module under `info/`, then a `@cached_property` on `SessionView` that constructs it.
+- A new derived session value (git, skills, cost, elapsed, …) → add a `@cached_property` to `SessionView` in `info/__init__.py`. If it depends on the per-render `TokenLog`/`TokenRate` writes, put it in `TickRecord` (`tokens.py`) / `record_tick` (`app.py`) instead, and thread it into `build_wide` as a `TickRecord` field.
 
 ## Pre-edit checklist
 
@@ -68,7 +77,7 @@ Run all four before editing:
                cp = ord(c)
                if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD:
                    print(f'{path}:{ln}  U+{cp:05X}  {c!r}')
-   " claude/statusline/*.py
+   " claude/yas/*.py claude/yas/info/*.py claude/yas/render/*.py
    ```
    Any hit on a line you plan to Edit triggers the **PUA refactor rule** below.
 3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count.
@@ -92,7 +101,7 @@ GLYPH_MODEL    = '\U000f08b9' # nf-md monitor-dashboard  (model row)
 GLYPH_THINKING = '\U000f1a53' # nf-md brain              (thinking indicator)
 ```
 
-Import the constant where needed (`from statusline.constants import GLYPH_MODEL`) and reference it in f-strings: `f'{model_clr}{GLYPH_MODEL}  {model_name}...'`. Note that `Renderer.ICON_PATH` holds a *colour code*, not a glyph — don't reuse that namespace for glyphs. New glyph constants go in `constants.py` alongside `ICON_COST`/`GLYPH_MODEL`.
+Import the constant where needed (`from yas.constants import GLYPH_MODEL`) and reference it in f-strings: `f'{model_clr}{GLYPH_MODEL}  {model_name}...'`. Note that `Renderer.ICON_PATH` holds a *colour code*, not a glyph — don't reuse that namespace for glyphs. New glyph constants go in `constants.py` alongside `ICON_COST`/`GLYPH_MODEL`.
 
 Runtime cost is **zero** — `'\uefc8'` (in source) and the literal glyph compile to the identical `str` object; CPython interns and the `.pyc` cache eliminates parse cost after first load.
 
@@ -102,7 +111,7 @@ If the line has a PUA glyph and you genuinely can't refactor first (e.g., user i
 
 ```bash
 python3 << 'PY'
-path = 'claude/statusline/renderer.py'
+path = 'claude/yas/renderer.py'
 with open(path) as f:
     s = f.read()
 old = "...exact old text with raw glyph copied through Read...\n"
@@ -121,10 +130,10 @@ These are the things pytest won't catch — get them wrong and the box draws cro
 
 ### Width math
 
-- **Never** use `len()` for column math. Use `_visible_width` (`text.py`) — it strips ANSI escapes via `_ANSI_RE` (`constants.py`) and counts wide chars (BMP emoji `0x1F300–0x1FAFF`) as 2.
+- **Never** use `len()` for column math. Use `_visible_width` (`render/text.py`) — it strips ANSI escapes via `_ANSI_RE` (`constants.py`) and counts wide chars (BMP emoji `0x1F300–0x1FAFF`) as 2.
 - Nerd Font PUA chars count as width 1. Correct in a Nerd-Font terminal; would be wrong elsewhere, but elsewhere isn't supported.
 
-### Column indexing on borders (`borders.py`)
+### Column indexing on borders (`render/borders.py`)
 
 - `border_top(width, session_id='', downs=..., fill=..., pill=...)`, `border_separator(width, ups=...)`, `border_separator_dim(width, downs=..., ups=..., pill=..., pill_edge=...)`, `border_bottom(width, ups=...)` take **1-indexed visual positions** of the inline `│` they should attach an elbow to. Live on `BorderRenderer`; `Renderer` has matching delegators.
 - `border_line(content, width, fill=..., bg_lead='', bg_trail='', pill_flush=False, right_pill='')` wraps content as `│ <content>...│`. Content starts at visual column 2, which is **col-form 3** (1-indexed). `right_pill` paints a pill segment flush to the right edge.
@@ -180,12 +189,12 @@ Every `┬` in a top border must line up with a `│` in the row beneath it and 
    - Every `┬` in a top border lines up with a `│` in the row beneath it and a `┴` in the separator below.
    - Pill colours flow continuously across the top, sides, and bottom of the model row.
    - Resize the terminal narrower/wider during the run to verify the narrow ↔ medium ↔ wide thresholds.
-3. **Tests** — any behaviour change needs a test added or updated. Tests resolve the package via `pythonpath = ["claude"]` and import modules as `statusline.<module>`; `conftest.py` exposes a `strip_ansi` fixture (from `test/helper.py`) and a `tmp_home` fixture that patches `CLAUDE_DIR` across `app`/`config`/`constants`/`session`/`subagents`/`tokens`. Width-sensitive assertions go through `_visible_width`. Put new tests in the file that matches the layer touched: `test_gradient_math.py`, `test_borders.py`, `test_model_section.py`, `test_context_line.py`, `test_openspec_bar.py`, `test_tokens_cost.py`, `test_config.py`, `test_layout_seam.py`, `test_info.py` (denominator math, `_fmt_elapsed`, laziness), etc. Layout tests inject a `SessionView` directly — construct one with a known `SessionInfo` and `Config` rather than calling the builders with raw reader data.
+3. **Tests** — any behaviour change needs a test added or updated. Tests resolve the package via `pythonpath = ["claude"]` and import modules as `yas.<module>` / `yas.info.<module>` / `yas.render.<module>`; `conftest.py` exposes a `strip_ansi` fixture (from `test/helper.py`) and a `tmp_home` fixture that patches `CLAUDE_DIR` across `yas.app`/`yas.config`/`yas.constants`/`yas.session`/`yas.info.subagents`/`yas.tokens`. Width-sensitive assertions go through `_visible_width`. Put new tests in the file that matches the layer touched: `test_gradient_math.py`, `test_borders.py`, `test_model_section.py`, `test_context_line.py`, `test_openspec_bar.py`, `test_tokens_cost.py`, `test_config.py`, `test_layout_seam.py`, `test_subagent_rows.py`/`test_subagent_metrics.py`/`test_cohort_visibility.py` (subagents), `test_info.py` (denominator math, `_fmt_elapsed`, laziness), etc. Layout tests inject a `SessionView` directly — construct one with a known `SessionInfo` and `Config` rather than calling the builders with raw reader data.
 4. **`CONTEXT.md`** — if any displayed term changed (label, glyph meaning, what a number represents), update the glossary in the same change.
 
 ## Multi-session observer
 
-`claude/mon.py` aggregates every active session's statusline into a single alternate-screen TUI. It imports the public `render(session_info, width, *, bg_shift, theme)` callable from the `statusline` package. The supporting package at `claude/mon/` has four sub-modules: `discovery.py` (finds active sessions via `~/.claude/projects/*/*.jsonl` mtimes and indexes the `statusline.<session_id>.json` payloads that `app.main` writes under `~/.claude/statusline-output/`), `lifecycle.py` (classifies sessions as bright/dim/removed and applies the SGR-faint dim post-processing), `layout.py` (header/footer formatting, empty/narrow body stubs, overflow clipping, rate-limit and cost aggregation), and `tui.py` (alt-screen entry/exit, `RefreshClock`, SIGWINCH handler, CLI argument parsing). Launch it with `make mon/run`.
+`claude/mon.py` aggregates every active session's statusline into a single alternate-screen TUI. It imports the public `render` / `resolve_theme` callables from `yas.app`. The supporting package at `claude/mon/` has four sub-modules: `discovery.py` (finds active sessions via `~/.claude/projects/*/*.jsonl` mtimes and indexes the `statusline.<session_id>.json` payloads that `app.main` writes under `~/.claude/statusline-output/`), `lifecycle.py` (classifies sessions as bright/dim/removed and applies the SGR-faint dim post-processing), `layout.py` (header/footer formatting, empty/narrow body stubs, overflow clipping, rate-limit and cost aggregation), and `tui.py` (alt-screen entry/exit, `RefreshClock`, SIGWINCH handler, CLI argument parsing). Launch it with `make mon/run`.
 
 ## Sibling skills
 
