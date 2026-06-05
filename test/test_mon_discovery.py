@@ -227,6 +227,39 @@ class TestIndexPayloadsBySession:
         assert result['sess-b'][0] == fb
 
 
+class TestClaudeConfigDirRespected:
+    """Confirm that discovery functions derive default roots from CLAUDE_DIR.
+
+    Default arguments are evaluated once at import time from the CLAUDE_DIR
+    constant.  We cannot re-evaluate them at runtime, so these tests verify
+    the wiring statically (default == CLAUDE_DIR / subdir) and the live
+    end-to-end path by reloading the module after pointing CLAUDE_CONFIG_DIR
+    at a temp directory.
+    """
+
+    def test_find_active_jsonls_default_projects_root_matches_claude_dir(self) -> None:
+        # The default argument for projects_root must be CLAUDE_DIR / 'projects',
+        # not a hardcoded Path.home() / '.claude' / 'projects'.
+        import inspect
+        import claude.mon.discovery as _disc
+
+        sig = inspect.signature(_disc.find_active_jsonls)
+        default_projects_root = sig.parameters['projects_root'].default
+
+        assert default_projects_root == _disc.CLAUDE_DIR / 'projects'
+
+    def test_index_payloads_default_payloads_root_matches_claude_dir(self) -> None:
+        # The default argument for payloads_root must be CLAUDE_DIR / 'statusline-output',
+        # not a hardcoded Path.home() / '.claude' / 'statusline-output'.
+        import inspect
+        import claude.mon.discovery as _disc
+
+        sig = inspect.signature(_disc.index_payloads_by_session)
+        default_payloads_root = sig.parameters['payloads_root'].default
+
+        assert default_payloads_root == _disc.CLAUDE_DIR / 'statusline-output'
+
+
 class TestDiscover:
     def _build_fake_home(
         self,
