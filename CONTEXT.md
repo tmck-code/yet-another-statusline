@@ -27,11 +27,14 @@ _Avoid_: "Cache Read" (that is the `cache_read_input_tokens` token figure in the
 ### Context window
 
 **Context Window Size**:
-The model's per-session maximum, from the session JSON's `context_window.context_window_size`. Used as the divisor for the bar's fill ratio and as the limit displayed in `<used>/<limit>`. Varies by model (e.g. 200K, 1M).
+The model's per-session maximum, from the session JSON's `context_window.context_window_size`. Drives the secondary window-headroom figure shown in parentheses `(N%)` next to the bar — `used_tokens / context_window_size`, which equals the host's own `used_percentage` (Claude Code's `/context` value). Varies by model (e.g. 200K, 1M). It is *not* the bar's fill divisor; that is the **Soft Limit** (see **Compaction-Risk Zone**).
+
+**Used Tokens**:
+The single input-only token count that drives the bar's displayed figure, fill length, and colour — so they can never disagree. Taken from the host's `used_percentage` rescaled to an absolute count (`used_percentage/100 × context_window_size`), falling back to `total_input_tokens` when the host value is absent. Output tokens are excluded. Clamped to ≥ 0.
 
 **Compaction-Risk Zone**:
-Token consumption above 150K. Auto-compaction looms and output quality degrades regardless of how much **Context Window Size** remains. Drives the bar/percentage colour: green ≤50K, yellow ≤80K, orange ≤150K, red >150K.
-_Avoid_: "context full" — the bar can be 15% full on a 1M-context model and still be in the red zone.
+Token consumption above 150K (the **Soft Limit**). Auto-compaction looms and output quality degrades regardless of how much **Context Window Size** remains. Drives both the bar's *fill length* (`used_tokens / soft_limit`, full at the soft limit) and the bar/percentage *colour*: green ≤50K, yellow ≤80K, orange ≤150K, red >150K.
+_Avoid_: "context full" — the bar fills against the 150K soft limit, so it can read 100% while a 1M-context model still has window headroom (shown by the parenthetical `(N%)`).
 
 ### Thinking effort
 
@@ -178,13 +181,13 @@ _Avoid_: "gather the day total" (the **Day Total** is *written*, not gathered �
 ## Relationships
 
 - **Billed Input** + **Cache Read** + **Output** are the three columns shown twice in the tokens row — once for this session, once as **Day Total**.
-- The bar's *length* tracks **Context Window Size**; its *colour* tracks raw consumption against the **Compaction-Risk Zone**. These are deliberately decoupled.
+- The bar's *length* and *colour* both track raw consumption against the **Soft Limit** / **Compaction-Risk Zone** (length = `used_tokens / soft_limit`, full at 150K). The model's **Context Window Size** drives only the secondary `(N%)` headroom figure in parentheses — so a 1M-context model can show a full bar while still having window headroom.
 - The skills/plugins row is always rendered; when both lists are empty it shows `*none*` under each icon to preserve layout.
 
 ## Example dialogue
 
-> **Dev**: "Why is the bar red but only 15% full?"
-> **User**: "Because we're on a 1M-context model — the bar shows you have headroom, but the colour says we're in the **Compaction-Risk Zone**. Past 150K, quality degrades whether the window has room or not."
+> **Dev**: "The bar's nearly full but the `(15%)` next to it is tiny — what gives?"
+> **User**: "We're on a 1M-context model. The bar fills against the 150K **Soft Limit**, so it's near 100% and red — past 150K quality degrades whether the window has room or not. The `(15%)` is the window-headroom figure: only 15% of the 1M window is actually used."
 
 > **Dev**: "What's the difference between `↓ 124K` and the ` 58K` next to it?"
 > **User**: "First is **Billed Input** — fresh prompt plus cache writes. Second is **Cache Read** — cache hits, charged at a tenth of the input rate. They're separated because their per-token cost is wildly different."
@@ -192,7 +195,7 @@ _Avoid_: "gather the day total" (the **Day Total** is *written*, not gathered �
 ## Flagged ambiguities
 
 - "input tokens" was ambiguous between raw `input_tokens` and the displayed **Billed Input** (which includes cache writes). Resolved: **Billed Input** is the canonical term for the `↓` column.
-- "context limit" was ambiguous between **Context Window Size** (per-model capacity) and the 150K **Compaction-Risk Zone** threshold. Resolved: these are distinct — the bar shows both.
+- "context limit" was ambiguous between **Context Window Size** (per-model capacity) and the 150K **Compaction-Risk Zone** threshold. Resolved: these are distinct — the bar *fills* against the soft-limit threshold, while the window capacity shows as the parenthetical `(N%)` headroom figure.
 
 ## Module map
 

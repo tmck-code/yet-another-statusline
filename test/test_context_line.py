@@ -2,7 +2,7 @@ import re
 
 import yas.renderer as renderer
 from yas.constants import CLR_ALERT, CLR_WARN
-from yas.renderer import _ctx_fill_ratio
+from yas.renderer import _ctx_fill_ratio, _ctx_used_tokens
 from yas.session import ContextWindow
 from yas.render.text import _visible_width
 
@@ -78,8 +78,46 @@ def test_fill_ratio_host_supplied_renders_correct_label() -> None:
         total_output_tokens=99_000,
         context_window_size=200_000,
     )
-    out = r.context_line(ctx, available=76)
+    out = r.context_line(ctx, available=76, soft_limit=200_000)
     assert '43%' in _strip(out)
+
+
+def test_used_tokens_prefers_host_value() -> None:
+    # The effective token count is host used_percentage rescaled to the window,
+    # not the raw total_input_tokens field.
+    ctx = ContextWindow(
+        used_percentage=8.0,
+        total_input_tokens=428,
+        context_window_size=200_000,
+    )
+    assert _ctx_used_tokens(ctx) == 16_000
+
+
+def test_used_tokens_falls_back_to_input() -> None:
+    ctx = ContextWindow(used_percentage=None, total_input_tokens=12_345, context_window_size=200_000)
+    assert _ctx_used_tokens(ctx) == 12_345
+
+
+def test_used_tokens_negative_host_clamped() -> None:
+    ctx = ContextWindow(used_percentage=-5.0, total_input_tokens=428, context_window_size=200_000)
+    assert _ctx_used_tokens(ctx) == 0
+
+
+def test_label_and_fill_share_one_source() -> None:
+    # Reconciliation guard: the displayed token figure is derived from the same
+    # used_percentage that drives the fill, so they cannot disagree. Host says 8%
+    # of a 200k window (16.0K) → label shows "16.0K" and "(8%)" window-headroom.
+    r = Renderer()
+    ctx = ContextWindow(
+        used_percentage=8.0,
+        total_input_tokens=428,
+        context_window_size=200_000,
+    )
+    out = _strip(r.context_line(ctx, available=120, soft_limit=150_000))
+    assert '16.0K' in out
+    assert '(8%)' in out
+    # 16K / 150K soft limit ≈ 11%
+    assert '11%' in out
 
 
 def test_fill_ratio_fallback_input_only() -> None:
@@ -135,14 +173,51 @@ def test_fill_ratio_negative_used_percentage_clamped() -> None:
 
 
 def test_fill_ratio_zero_context_window_no_exception() -> None:
-    # Task 4.5: used_percentage=None, context_window_size=0 → fill 0.0, no ZeroDivisionError
+    # Task 4.5: used_percentage=None, context_window_size=0 → no ZeroDivisionError.
+    # The fill is now soft-limit-relative, so a zero window still yields a
+    # meaningful input-only ratio (80k / 200k = 0.40) rather than collapsing to 0.
     ctx = ContextWindow(
         used_percentage=None,
         total_input_tokens=80_000,
         context_window_size=0,
     )
     fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
+    assert abs(fill - 0.40) < 1e-9
+
+
+def test_fill_ratio_relative_to_soft_limit() -> None:
+    # The bar fills against soft_limit, not the model window: host says 75% of a
+    # 200k window (150k tokens), and with a 150k soft limit that is a full bar.
+    ctx = ContextWindow(
+        used_percentage=75.0,
+        total_input_tokens=10_000,
+        total_output_tokens=99_000,
+        context_window_size=200_000,
+    )
+    fill, pct = _ctx_fill_ratio(ctx, soft_limit=150_000)
+    assert abs(fill - 1.0) < 1e-9
+    assert abs(pct - 100.0) < 1e-9
+
+
+def test_fill_ratio_fallback_relative_to_soft_limit() -> None:
+    # Fallback path (no host value) also scales by soft_limit: 75k input against
+    # a 150k soft limit → 50%, regardless of the 200k window.
+    ctx = ContextWindow(
+        used_percentage=None,
+        total_input_tokens=75_000,
+        total_output_tokens=40_000,
+        context_window_size=200_000,
+    )
+    fill, pct = _ctx_fill_ratio(ctx, soft_limit=150_000)
+    assert abs(fill - 0.50) < 1e-9
+    assert abs(pct - 50.0) < 1e-9
+
+
+def test_fill_ratio_zero_soft_limit_no_exception() -> None:
+    ctx = ContextWindow(used_percentage=42.7, total_input_tokens=10_000, context_window_size=200_000)
+    fill, pct = _ctx_fill_ratio(ctx, soft_limit=0)
     assert fill == 0.0
+    assert pct == 0.0
     assert pct == 0.0
 
 
