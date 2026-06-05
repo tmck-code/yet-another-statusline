@@ -140,6 +140,43 @@ def test_fmt_elapsed_zero_minutes():
 
 
 # ---------------------------------------------------------------------------
+# session-elapsed-accuracy — elapsed derived from total_duration_ms
+# ---------------------------------------------------------------------------
+
+def test_elapsed_duration_under_one_hour():
+    """total_duration_ms=807000 (13m27s) → elapsed == '13m'."""
+    from yas.info import _fmt_duration_ms
+    assert _fmt_duration_ms(807_000) == '13m'
+
+
+def test_elapsed_duration_one_hour_or_more():
+    """total_duration_ms=5580000 (1h33m) → elapsed == '1h33m'."""
+    from yas.info import _fmt_duration_ms
+    assert _fmt_duration_ms(5_580_000) == '1h33m'
+
+
+def test_elapsed_duration_zero():
+    """total_duration_ms=0 → elapsed == '' (empty string)."""
+    from yas.info import _fmt_duration_ms
+    assert _fmt_duration_ms(0) == ''
+
+
+def test_elapsed_does_not_trigger_file_stat(monkeypatch):
+    """Accessing view.elapsed alone does NOT trigger a Path.stat call."""
+    from unittest.mock import patch
+
+    session = _session()
+    view = SessionView(session=session, cfg=_cfg())
+
+    # Patch Path.stat to detect any stat call.
+    with patch('pathlib.Path.stat', side_effect=AssertionError('unexpected Path.stat call')):
+        result = view.elapsed
+
+    # Result should be the formatted duration from the payload (807557ms → 0:13:27).
+    assert result == '0:13:27'
+
+
+# ---------------------------------------------------------------------------
 # Task 2.3 — laziness: accessing view.subagents must NOT trigger git / transcript / openspec
 # ---------------------------------------------------------------------------
 

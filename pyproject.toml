@@ -1,6 +1,6 @@
 [project]
 name = "yet-another-statusline"
-version = "0.2.8"
+version = "0.2.9"
 description = "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more"
 readme = "README.md"
 
@@ -25,6 +25,7 @@ exclude = [
     ".venv/",
     "openspec/",
     "test/",
+    "ops/",
 ]
 plugins = []
 disallow_untyped_defs = true  # no functions without type annotations
@@ -45,6 +46,7 @@ exclude = [
     ".ruff_cache",
     ".venv",
     "openspec/",
+    "ops/",
 ]
 
 line-length = 140

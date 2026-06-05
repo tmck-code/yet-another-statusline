@@ -124,8 +124,8 @@ def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> N
     separator_dim = spec.rows[2]
     assert top_border.kind == 'top_border'
     assert separator_dim.kind == 'separator_dim'
-    assert len(top_border.downs) == 1,  f'expected 1 down, got {top_border.downs}'
-    assert len(separator_dim.ups) == 1, f'expected 1 up, got {separator_dim.ups}'
+    assert len(top_border.downs) == 2,  f'expected 2 downs (path + elapsed), got {top_border.downs}'
+    assert len(separator_dim.ups) == 2, f'expected 2 ups (path + elapsed), got {separator_dim.ups}'
 
 
 def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,18 +163,18 @@ def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
     lines_shed = layout.render_layout(spec_shed, _r)
     assert not any(GLYPH_CACHE in ln for ln in lines_shed), \
         f'cache glyph present at width={min_keep - 1} (should be shed)'
-    assert len(spec_shed.rows[0].downs) == 1, \
-        f'expected 1 top_border down at shed width, got {spec_shed.rows[0].downs}'
+    assert len(spec_shed.rows[0].downs) == 2, \
+        f'expected 2 top_border downs (path + elapsed) at shed width, got {spec_shed.rows[0].downs}'
 
-    # 20 cols wider: cache present, two elbows.
+    # 20 cols wider: cache present, three elbows (path + elapsed + cache).
     view_keep = _view()
     view_keep.__dict__['cache_countdown'] = countdown
     spec_keep  = layout.build_wide(view_keep, _tick(), min_keep + 20, _r)
     lines_keep = layout.render_layout(spec_keep, _r)
     assert any(GLYPH_CACHE in ln for ln in lines_keep), \
         f'cache glyph absent at width={min_keep + 20} (should be kept)'
-    assert len(spec_keep.rows[0].downs) == 2, \
-        f'expected 2 top_border downs at keep width, got {spec_keep.rows[0].downs}'
+    assert len(spec_keep.rows[0].downs) == 3, \
+        f'expected 3 top_border downs (path + elapsed + cache) at keep width, got {spec_keep.rows[0].downs}'
 
 
 def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -> None:

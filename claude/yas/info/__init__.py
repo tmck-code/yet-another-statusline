@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from functools import cached_property
-from pathlib import Path
 
 from yas.config import Config
 from yas.info.git import GitInfo
@@ -27,20 +26,44 @@ from yas.info.transcript import TranscriptUsage
 # Elapsed formatting
 # ---------------------------------------------------------------------------
 
-def _fmt_elapsed(mtime: float | None, now: float) -> str:
-    """Format seconds-since-mtime into a human-readable string.
+def _fmt_duration_ms(ms: int) -> str:
+    """Format a duration in milliseconds into a human-readable string.
 
-    Returns '' for None mtime, 'Nm' for under an hour, 'HhMm' for >= 1 h.
+    Returns '' for zero ms, 'Nm' for under an hour, 'HhMm' for >= 1 h.
     """
-    if mtime is None:
+    if ms <= 0:
         return ''
-    delta = now - mtime
-    total_m = int(delta // 60)
+    total_m = ms // 60_000
     h = total_m // 60
     m = total_m % 60
     if h == 0:
         return f'{m}m'
     return f'{h}h{m}m'
+
+
+def _fmt_elapsed_clock(ms: int) -> str:
+    """Format a duration in milliseconds as H:MM:SS clock time.
+
+    Returns '' for zero or negative ms; otherwise H:MM:SS (e.g. '0:13:01').
+    """
+    if ms <= 0:
+        return ''
+    s   = ms // 1000
+    h   = s // 3600
+    m   = (s % 3600) // 60
+    sec = s % 60
+    return f'{h}:{m:02d}:{sec:02d}'
+
+
+def _fmt_elapsed(mtime: float | None, now: float) -> str:
+    """Format seconds-since-mtime as a human-readable string.
+
+    Kept as a wrapper around _fmt_duration_ms for backward-compatible callers.
+    Returns '' for None mtime, 'Nm' for under an hour, 'HhMm' for >= 1 h.
+    """
+    if mtime is None:
+        return ''
+    return _fmt_duration_ms(int(max(0, now - mtime) * 1000))
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +148,4 @@ class SessionView:
 
     @cached_property
     def elapsed(self) -> str:
-        transcript_path = self.session.transcript_path
-        mtime: float | None = None
-        if transcript_path:
-            try:
-                mtime = Path(transcript_path).stat().st_mtime
-            except OSError:
-                mtime = None
-        return _fmt_elapsed(mtime, self.now)
+        return _fmt_elapsed_clock(self.session.cost.total_duration_ms)
