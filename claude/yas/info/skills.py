@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from yas.constants import _sanitize
+
 
 @dataclass
 class LoadedSkills:
@@ -27,14 +29,14 @@ class LoadedSkills:
                 for ln in fh:
                     if '"Skill"' in ln:
                         for m in skill_pat.finditer(ln):
-                            name = m.group(1)
+                            name = _sanitize(m.group(1))
                             if name not in seen:
                                 seen[name] = None
                     if '"Read"' in ln and 'SKILL.md' in ln:
                         for m in read_pat.finditer(ln):
                             sm = skill_path_pat.search(m.group(1))
                             if sm:
-                                name = sm.group(1)
+                                name = _sanitize(sm.group(1))
                                 if name not in seen:
                                     seen[name] = None
         except OSError:

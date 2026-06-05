@@ -4,6 +4,10 @@ __pycache__
 *.local.*
 .temp/
 .claude/state/
+.claude/commands/
+.claude/skills/openspec*
+# demo files
+demo/
 
 # JetBrains IDEs
 .idea/

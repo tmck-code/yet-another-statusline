@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from yas.constants import _sanitize
+
 
 def _parse_iso_to_epoch(ts: str) -> float:
     try:
@@ -68,8 +70,8 @@ class TaskList:
                             if by_id and all(t.status == 'completed' for t in by_id.values()):
                                 by_id = {}
                                 next_id = 1
-                            subj = inp.get('subject', '') or ''
-                            af   = inp.get('activeForm', '') or subj
+                            subj = _sanitize(inp.get('subject', '') or '')
+                            af   = _sanitize(inp.get('activeForm', '') or '') or subj
                             by_id[next_id] = Task(id=next_id, subject=subj, active_form=af, status='pending')
                             next_id += 1
                             if ts > last_ts: last_ts = ts
@@ -91,9 +93,9 @@ class TaskList:
                                     t.completed_at = ts
                                 t.status = new_status
                             if 'activeForm' in inp and inp['activeForm']:
-                                t.active_form = inp['activeForm']
+                                t.active_form = _sanitize(inp['activeForm'])
                             if 'subject' in inp and inp['subject']:
-                                t.subject = inp['subject']
+                                t.subject = _sanitize(inp['subject'])
                             if ts > last_ts: last_ts = ts
         except OSError:
             return cls()

@@ -3,6 +3,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from yas.constants import _sanitize
+
 
 @dataclass
 class GitInfo:
@@ -56,6 +58,9 @@ class GitInfo:
             branch = head.rsplit('/', 1)[-1]
         elif head:
             branch = f'd:{head[:7]}'
+        # .git/HEAD is repo-supplied (attacker-controlled for a cloned repo);
+        # strip control chars so a crafted branch name can't inject escapes.
+        branch = _sanitize(branch)
         commit = ''
         if branch and not branch.startswith('d:'):
             ref = Path(gitdir) / 'refs' / 'heads' / branch
