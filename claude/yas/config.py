@@ -65,6 +65,14 @@ def _parse_bool(raw: object, origin: str) -> bool:
     raise ValueError('expected a boolean')
 
 
+def _parse_enable_flag(raw: object, origin: str) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if origin.startswith('env') or origin == 'cli':
+        return str(raw).strip().lower() not in ('0', 'false', 'no', 'off')
+    raise ValueError('expected a boolean')
+
+
 def _parse_theme(raw: object, origin: str) -> str:
     name = str(raw).strip()
     if name in THEMES:
@@ -190,6 +198,7 @@ class Config:
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
     bg_shift: str = 'warm'
+    enable_cost: bool = True
     soft_limit_models: tuple[tuple[str, int], ...] = ()
     errors: tuple[str, ...] = ()
     debug_lines: tuple[str, ...] = ()
@@ -255,6 +264,10 @@ class Config:
             + _env_sources(env, 'YAS_BG_SHIFT')
             + toml_src(appearance, 'bg_shift'),
             _parse_bg_shift, 'warm', errors, debug)
+        enable_cost = _resolve(
+            'enable_cost',
+            _env_sources(env, 'YAS_ENABLE_COST') + toml_src(layout, 'enable_cost'),
+            _parse_enable_flag, True, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
@@ -265,6 +278,7 @@ class Config:
             token_window=token_window,
             theme=theme,
             bg_shift=bg_shift,
+            enable_cost=enable_cost,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

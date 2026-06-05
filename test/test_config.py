@@ -352,3 +352,75 @@ def test_render_clean_config_no_warning(
     out = app.render(info, 50)
     lines = [strip_ansi(ln) for ln in out.split('\n') if ln.strip()]
     assert all(GLYPH_CONFIG_WARN not in ln for ln in lines)
+
+
+# 4.8 enable_cost knob
+
+def test_enable_cost_default_is_true(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.enable_cost is True
+
+
+def test_enable_cost_env_zero_disables(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_ENABLE_COST': '0'}, config_dir=tmp_path)
+    assert cfg.enable_cost is False
+
+
+@pytest.mark.parametrize('val', ['false', 'False', 'FALSE', 'no', 'off'])
+def test_enable_cost_env_falsy_strings(tmp_path: Path, val: str) -> None:
+    cfg = config.Config.load(env={'YAS_ENABLE_COST': val}, config_dir=tmp_path)
+    assert cfg.enable_cost is False
+
+
+@pytest.mark.parametrize('val', ['1', 'true', 'yes', 'on', 'anything'])
+def test_enable_cost_env_truthy_strings(tmp_path: Path, val: str) -> None:
+    cfg = config.Config.load(env={'YAS_ENABLE_COST': val}, config_dir=tmp_path)
+    assert cfg.enable_cost is True
+
+
+@requires_tomllib
+def test_enable_cost_toml_false(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nenable_cost = false\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.enable_cost is False
+
+
+@requires_tomllib
+def test_enable_cost_env_overrides_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nenable_cost = false\n')
+    cfg = config.Config.load(env={'YAS_ENABLE_COST': '1'}, config_dir=tmp_path)
+    assert cfg.enable_cost is True
+
+
+@requires_tomllib
+def test_enable_cost_toml_non_bool_rejected(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nenable_cost = "yes"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.enable_cost is True          # falls back to default
+    assert 'enable_cost' in cfg.errors
+
+
+def test_enable_cost_false_omits_cost_rows(
+    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+) -> None:
+    info = json.loads(SESSION.read_text())
+    cfg = config.Config(enable_cost=False)
+    monkeypatch.setattr(config.Config, 'load', classmethod(lambda cls, **kw: cfg))
+    out = app.render(info, 140)
+    lines = [strip_ansi(ln) for ln in out.split('\n') if ln.strip()]
+    assert not any('↓' in ln or '↑' in ln for ln in lines), (
+        'cost row glyphs (arrows) should not appear when enable_cost=False'
+    )
+
+
+def test_enable_cost_true_includes_cost_rows(
+    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+) -> None:
+    info = json.loads(SESSION.read_text())
+    cfg = config.Config(enable_cost=True)
+    monkeypatch.setattr(config.Config, 'load', classmethod(lambda cls, **kw: cfg))
+    out = app.render(info, 140)
+    lines = [strip_ansi(ln) for ln in out.split('\n') if ln.strip()]
+    assert any('↓' in ln or '↑' in ln for ln in lines), (
+        'cost row should be present when enable_cost=True'
+    )

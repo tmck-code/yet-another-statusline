@@ -231,12 +231,15 @@ def build_wide(
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
     )
-    line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
-        usage.billed_in, usage.cache_read, usage.out,
-        token_log.day_in, token_log.day_cache_read, token_log.day_out,
-        sess_cost, day_cost, tok_rate,
-        session.session_id, width, fill,
-    )
+    if view.cfg.enable_cost:
+        line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
+            usage.billed_in, usage.cache_read, usage.out,
+            token_log.day_in, token_log.day_cache_read, token_log.day_out,
+            sess_cost, day_cost, tok_rate,
+            session.session_id, width, fill,
+        )
+    else:
+        line_tokens, vsep_cols, spark_mark_col = [], (), None
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
@@ -307,10 +310,11 @@ def build_wide(
     rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill))
     rows.append(RowSpec('content', content=line_context))
 
-    tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
-    rows.append(RowSpec('separator_dim', downs=tokens_downs))
-    for lt in line_tokens:
-        rows.append(RowSpec('content', content=lt))
+    if line_tokens:
+        tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
+        rows.append(RowSpec('separator_dim', downs=tokens_downs))
+        for lt in line_tokens:
+            rows.append(RowSpec('content', content=lt))
 
     # First post-tokens separator threads `ups` back into the tokens vseps and
     # is drawn as the heavy "seam" marking the static->dynamic split. Only the
