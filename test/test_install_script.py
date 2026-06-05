@@ -249,3 +249,91 @@ def test_dry_run_does_not_touch_settings(full_dry_env):
     result = run_install('--full', '--dry-run', env_extra=env)
     assert result.returncode == 0, result.stderr
     assert not settings_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Uninstall tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def uninstall_env(tmp_path: Path) -> tuple[Path, dict]:
+    """Returns (config_dir, env_extra) with settings.json pre-wired."""
+    config_dir = tmp_path / 'claude_config'
+    config_dir.mkdir()
+    (config_dir / 'plugins').mkdir()
+    settings = {
+        'theme': 'dark',
+        'statusLine': {
+            'async': True,
+            'command': '"python3" "/some/path/statusline_command.py"',
+            'refreshInterval': 1,
+            'type': 'command',
+        },
+    }
+    (config_dir / 'settings.json').write_text(json.dumps(settings))
+    env = {
+        'CLAUDE_CONFIG_DIR': str(config_dir),
+        'HOME':              str(tmp_path),
+        'CLAUDE_PLUGIN_ROOT': '',
+    }
+    return config_dir, env
+
+
+def test_uninstall_removes_status_line(uninstall_env):
+    config_dir, env = uninstall_env
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    data = json.loads((config_dir / 'settings.json').read_text())
+    assert 'statusLine' not in data
+    assert data.get('theme') == 'dark'  # other keys preserved
+
+
+def test_uninstall_creates_backup(uninstall_env):
+    config_dir, env = uninstall_env
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    baks = list(config_dir.glob('settings.json.bak-yas-*'))
+    assert len(baks) == 1
+
+
+def test_uninstall_no_settings_is_noop(tmp_path):
+    config_dir = tmp_path / 'claude_config'
+    config_dir.mkdir()
+    env = {'CLAUDE_CONFIG_DIR': str(config_dir), 'HOME': str(tmp_path), 'CLAUDE_PLUGIN_ROOT': ''}
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'nothing to unwire' in result.stdout.lower()
+
+
+def test_uninstall_no_status_line_key_is_noop(tmp_path):
+    config_dir = tmp_path / 'claude_config'
+    config_dir.mkdir()
+    (config_dir / 'settings.json').write_text(json.dumps({'theme': 'dark'}))
+    env = {'CLAUDE_CONFIG_DIR': str(config_dir), 'HOME': str(tmp_path), 'CLAUDE_PLUGIN_ROOT': ''}
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'nothing to unwire' in result.stdout.lower()
+    # File is unchanged
+    data = json.loads((config_dir / 'settings.json').read_text())
+    assert data == {'theme': 'dark'}
+
+
+def test_uninstall_removes_legacy_files(uninstall_env):
+    config_dir, env = uninstall_env
+    legacy = config_dir / 'statusline-info-abc123'
+    legacy.write_text('old')
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert not legacy.exists()
+
+
+def test_uninstall_dry_run_no_changes(uninstall_env):
+    config_dir, env = uninstall_env
+    mtime_before = (config_dir / 'settings.json').stat().st_mtime
+    result = run_install('--uninstall', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'Would remove statusLine' in result.stdout
+    # File untouched
+    mtime_after = (config_dir / 'settings.json').stat().st_mtime
+    assert mtime_before == mtime_after
+    assert not list(config_dir.glob('settings.json.bak-yas-*'))
