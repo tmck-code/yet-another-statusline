@@ -14,12 +14,14 @@ bench:
 	@uv run python ops/bench.py $(BENCH_ARGS)
 
 pr-info:
-	@uname -a
-	@claude --version 2>/dev/null || echo "claude: not installed"
-	@echo "TERM=$$TERM TERM_PROGRAM=$$TERM_PROGRAM SHELL=$$SHELL COLORTERM=$$COLORTERM"
-	@echo "LANG=$$LANG LC_ALL=$$LC_ALL"
-	@python3 -V
-	@uv --version 2>/dev/null || echo "uv: not installed"
+	@echo "| Key | Value |"
+	@echo "|-----|-------|"
+	@printf "| OS | %s |\n" "$$(uname -a)"
+	@printf "| Claude Code | %s |\n" "$$(claude --version 2>/dev/null || echo 'not installed')"
+	@printf "| Terminal | TERM=$$TERM TERM_PROGRAM=$$TERM_PROGRAM SHELL=$$SHELL COLORTERM=$$COLORTERM |\n"
+	@printf "| Locale | LANG=$$LANG LC_ALL=$$LC_ALL |\n"
+	@printf "| Python | %s |\n" "$$(python3 -V 2>&1)"
+	@printf "| uv | %s |\n" "$$(uv --version 2>/dev/null || echo 'not installed')"
 
 demo:
 	@uv run python3 ops/demo.py
