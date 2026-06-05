@@ -31,14 +31,22 @@
      hyperfine if installed, Python fallback otherwise) and prints a paste-ready table.
      Paste it below. -->
 
-```
-```
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+|:---|---:|---:|---:|---:|
+| `main` | | | | |
+| `PR` | | | | |
 
 - [ ] N/A — no performance-relevant change
 
 ## System info
 
-<!-- Run `make pr-info` and paste the output between the fences below. -->
+<!-- Run `make pr-info` and paste the output below. -->
 
-```
-```
+| Key | Value |
+|-----|-------|
+| OS | |
+| Claude Code | |
+| Terminal | |
+| Locale | |
+| Python | |
+| uv | |
