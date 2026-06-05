@@ -945,6 +945,7 @@ def main() -> int:
             payload = mutate_session_info(tmpdir, session_id, fixture)
             raw = json.loads(payload)
             env['STATUSLINE_TOKEN_WINDOW'] = str(DEMO_TOKEN_WINDOW)
+            env['YAS_FULL_WIDTH'] = '1'
             os.system('clear -x')
             animate(env, raw, tmpdir, session_id)
     return 0
