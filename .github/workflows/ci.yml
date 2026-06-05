@@ -59,3 +59,12 @@ jobs:
 
       - name: Run mypy
         run: uv run mypy .
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run shellcheck
+        run: shellcheck ops/install.sh

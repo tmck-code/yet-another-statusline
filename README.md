@@ -6,13 +6,16 @@ _Most common form is displaying these stats, which include the loaded plugins & 
 
 ## Install/Update
 
-Via Claude Code plugin (Requires Python 3.10+, and a [Nerd Font](https://www.nerdfonts.com/font-downloads) to render the icons)
+Requires Python 3.10+, and a [Nerd Font](https://www.nerdfonts.com/font-downloads) to render the icons.
 
 ```bash
-# add the marketplace
-claude plugin marketplace add tmck-code/yet-another-statusline
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | bash
+```
 
-# to install or update
+Or install manually:
+
+```bash
+claude plugin marketplace add tmck-code/yet-another-statusline
 claude plugin install yas@yet-another-statusline
 claude -p "/yas:init"
 ```

@@ -1,4 +1,7 @@
 [
+  "Bash(bash:*)",
+  "Bash(basename:*)",
+  "Bash(command:*)",
   "Bash(cp:*)",
   "Bash(cut:*)",
   "Bash(date:*)",
@@ -7,7 +10,12 @@
   "Bash(grep:*)",
   "Bash(head:*)",
   "Bash(jq:*)",
+  "Bash(mktemp:*)",
+  "Bash(mv:*)",
   "Bash(printf:*)",
+  "Bash(python:*)",
+  "Bash(python3:*)",
+  "Bash(rm:*)",
   "Bash(sort:*)",
   "Bash(which:*)",
   "Bash(xargs:*)"
