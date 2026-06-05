@@ -119,23 +119,36 @@ TOOL_ARG_KEY: dict[str, str] = {
 # Context-fill helpers
 # ---------------------------------------------------------------------------
 
+def _ctx_used_tokens(ctx: ContextWindow) -> int:
+    """The effective context-token count that drives the bar, label, and colour.
+
+    Prefer the host-supplied `ctx.used_percentage` (Claude Code's own /context
+    value, input-only): convert it back to an absolute count via
+    `context_window_size`.  Fall back to `total_input_tokens` (input-only) when
+    the host value is absent (`None`) or the window size is unknown.  Clamped to
+    >= 0 so a negative host value never produces a negative count.
+
+    This is the single source of truth: `_ctx_fill_ratio` scales it by the soft
+    limit, and `context_line` renders the same number as the displayed figure,
+    so the label and the fill can never disagree.
+    """
+    if ctx.used_percentage is not None and ctx.context_window_size > 0:
+        return max(0, round(ctx.used_percentage / 100.0 * ctx.context_window_size))
+    return max(0, ctx.total_input_tokens)
+
+
 def _ctx_fill_ratio(ctx: ContextWindow, soft_limit: int) -> tuple[float, float]:
     """Return (fill_ratio, pct_soft) for the context bar.
 
-    Prefer the host-supplied `ctx.used_percentage` (Claude Code's own /context
-    value, input-only) when it is present.  Fall back to a manual input-only
-    calculation (`total_input_tokens / context_window_size`) when the field is
-    absent (`None`).  Negative host values are clamped to 0; divide-by-zero is
-    guarded; the result is always in [0.0, 1.0].
+    The bar fills relative to `soft_limit` (the compaction-risk threshold), so
+    it reads 100% once usage reaches the soft limit, not the full model window.
+    The token count comes from `_ctx_used_tokens`; divide-by-zero is guarded and
+    the result is always in [0.0, 1.0].
     """
-    if ctx.used_percentage is not None:
-        # Host-supplied value — use it, clamping any negative/overflow edge.
-        fill_ratio = max(0.0, min(ctx.used_percentage / 100.0, 1.0))
-    elif ctx.context_window_size > 0:
-        fill_ratio = min(ctx.total_input_tokens / ctx.context_window_size, 1.0)
-    else:
-        fill_ratio = 0.0
-    pct_soft = fill_ratio * 100.0
+    if soft_limit <= 0:
+        return 0.0, 0.0
+    fill_ratio = min(_ctx_used_tokens(ctx) / soft_limit, 1.0)
+    pct_soft   = fill_ratio * 100.0
     return fill_ratio, pct_soft
 
 
@@ -1002,7 +1015,7 @@ class Renderer:
         exceeds_200k: bool = False,
     ) -> str:
         fill_ratio, pct_soft = _ctx_fill_ratio(ctx, soft_limit)
-        total_tokens         = ctx.total_input_tokens
+        total_tokens         = _ctx_used_tokens(ctx)
 
         badge   = f'{CLR_WARN}!200K{self.R} ' if exceeds_200k else ''
         badge_w = 6 if exceeds_200k else 0
@@ -1040,7 +1053,7 @@ class Renderer:
         exceeds_200k: bool = False,
     ) -> str:
         fill_ratio, pct_soft = _ctx_fill_ratio(ctx, soft_limit)
-        total_tokens         = ctx.total_input_tokens
+        total_tokens         = _ctx_used_tokens(ctx)
 
         badge   = f'{CLR_WARN}!200K{self.R} ' if exceeds_200k else ''
         badge_w = 6 if exceeds_200k else 0
