@@ -20,10 +20,7 @@
 # would abort on them rather than letting the script branch.
 set -uo pipefail
 
-# ---------------------------------------------------------------------------
-# Arg / env parsing
-# ---------------------------------------------------------------------------
-
+# Arg / env parsing -----------------------------
 WIRE_ONLY_FLAG=0
 FULL_FLAG=0
 DRY_RUN=0
@@ -50,9 +47,8 @@ fi
 
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-# ---------------------------------------------------------------------------
-# Python 3.10+ detection — reused by preflight and do_wire
-# ---------------------------------------------------------------------------
+# Python 3.10+ detection ------------------------
+# — reused by preflight and do_wire
 
 find_python() {
     for candidate in python python3; do
@@ -65,9 +61,7 @@ find_python() {
     return 1
 }
 
-# ---------------------------------------------------------------------------
-# Preflight checks
-# ---------------------------------------------------------------------------
+# Preflight checks ------------------------------
 
 preflight_full() {
     for tool in claude curl jq; do
@@ -87,15 +81,17 @@ preflight_wire_only() {
     find_python > /dev/null         || { printf "! Python 3.10+ not found — install Python 3.10+ and re-run\n"; exit 1; }
 }
 
-# ---------------------------------------------------------------------------
 # ensure_marketplace (full mode only)
 #
-# Task 1.1 finding: `claude plugin marketplace add` and `claude plugin install`
+# claude plugin marketplace add` and `claude plugin install`
 # are designed for scripted/CI use and are expected to run non-interactively
-# under a piped (non-TTY) stdin. If they prompt in practice, use the manual
-# path: `claude plugin marketplace add tmck-code/yet-another-statusline` +
-# `claude plugin install yas@yet-another-statusline` + `/yas:init`.
-# ---------------------------------------------------------------------------
+# under a piped (non-TTY) stdin.
+# If they prompt in practice, use the manual path:
+# ```
+# claude plugin marketplace add tmck-code/yet-another-statusline
+# claude plugin install yas@yet-another-statusline
+# /yas:init
+# ```
 
 ensure_marketplace() {
     local present
@@ -115,10 +111,7 @@ ensure_marketplace() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# ensure_plugin (full mode only)
-# ---------------------------------------------------------------------------
-
+# ensure_plugin (full mode only) ----------------
 ensure_plugin() {
     local present
     present=$(jq -r 'has("yas@yet-another-statusline")' \
@@ -141,17 +134,16 @@ ensure_plugin() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# do_wire — discover renderer, clean up legacy files, patch settings.json
-# ---------------------------------------------------------------------------
-
+# do_wire ---------------------------------------
+# — discover renderer
+# - clean up legacy files
+# - patch settings.json
 do_wire() {
     local PLUGIN_ROOT=""
     local SCRIPT=""
     local SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
 
-    # --- Renderer discovery ---
-
+    # Renderer discovery
     if [ "$MODE" = "wire-only" ]; then
         PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
         if [ -z "$PLUGIN_ROOT" ]; then
@@ -202,18 +194,18 @@ do_wire() {
     SCRIPT="$PLUGIN_ROOT/claude/statusline_command.py"
     printf "  Plugin root: %s\n" "$PLUGIN_ROOT"
 
-    # --- Legacy cleanup ---
+    # Legacy cleanup
     for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
         [ -e "$f" ] || continue
         rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
     done
 
-    # --- Python detection ---
+    # Python detection
     local PYTHON_BIN
     PYTHON_BIN=$(find_python) || { printf "! Python 3.10+ not found — install Python 3.10+ and re-run\n"; exit 1; }
     printf "  Python: %s\n" "$PYTHON_BIN"
 
-    # --- Exact-match skip ---
+    # Exact-match skip
     local NEW_CMD OLD_CMD
     NEW_CMD="\"$PYTHON_BIN\" \"$SCRIPT\""
     OLD_CMD=$(jq -r '.statusLine.command // ""' "$SETTINGS" 2>/dev/null || printf '')
@@ -222,13 +214,13 @@ do_wire() {
         exit 0
     fi
 
-    # --- dry-run wiring ---
+    # dry-run wiring
     if [ "$DRY_RUN" = "1" ]; then
         printf "  Would wire statusLine.command → %s\n" "$NEW_CMD"
         exit 0
     fi
 
-    # --- Atomic write with backup / validate / restore ---
+    # Atomic write with backup / validate / restore
     local BAK=""
     if [ ! -f "$SETTINGS" ]; then
         printf '{}\n' > "$SETTINGS"
@@ -262,10 +254,6 @@ do_wire() {
     printf "  Config dir: %s\n" "$CLAUDE_CONFIG_DIR"
     printf "  Done. Reload Claude Code to activate the statusline.\n"
 }
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 main() {
     if [ "$MODE" = "full" ]; then
