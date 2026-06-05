@@ -153,6 +153,14 @@ Width is detected by the first source that returns a positive value:
 
 ## Uninstalling
 
+Remove the statusline config and uninstall the plugin in one step:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | bash -s -- --uninstall --full
+```
+
+Or uninstall manually:
+
 ```bash
 claude -p "/yas:uninstall"
 claude plugin uninstall yas@yet-another-statusline
@@ -160,9 +168,8 @@ claude plugin uninstall yas@yet-another-statusline
 
 `claude plugin uninstall` only deletes the plugin cache — it leaves `statusLine.command`
 in `~/.claude/settings.json` pointing at the now-missing script, so the statusline keeps
-trying to run. Run `/yas:uninstall` **first** to remove that config (it backs up
-settings.json, and skips a custom non-yas statusLine) and clear the renderer's runtime
-logs. Reload Claude Code afterwards.
+trying to run. Run the uninstall script (or `/yas:uninstall`) **first** to remove that
+config, then uninstall the plugin. Reload Claude Code afterwards.
 
 ---
 

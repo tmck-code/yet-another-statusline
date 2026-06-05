@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# yet-another-statusline — install / wire script
+# yet-another-statusline — install / wire / uninstall script
 #
 # Modes:
 #   full      — register marketplace, install/update the yas plugin, then wire
 #               settings.json. Requires: claude, curl, jq, Python 3.10+.
 #   wire-only — skip the plugin-manager steps and only write settings.json.
 #               Requires: jq, Python 3.10+.
+#   uninstall — remove statusLine from settings.json and clean up legacy files.
+#               With --full, also runs `claude plugin uninstall`. Requires: jq.
 #
 # Mode is auto-detected from the environment:
 #   CLAUDE_PLUGIN_ROOT set   → wire-only (plugin already installed by the host)
 #   CLAUDE_PLUGIN_ROOT unset → full
-# Override with --wire-only / --full.
+# Override with --wire-only / --full / --uninstall.
 #
 # Usage:
-#   bash ops/install.sh [--wire-only|--full] [--dry-run] [--main]
+#   bash ops/install.sh [--wire-only|--full|--uninstall] [--dry-run] [--main]
 
 # NOTE: -e is intentionally omitted. Several probe commands below are expected
 # to return non-zero (e.g. `command -v`, jq key-presence checks); using -e
@@ -23,13 +25,15 @@ set -uo pipefail
 # Arg / env parsing -----------------------------
 WIRE_ONLY_FLAG=0
 FULL_FLAG=0
+UNINSTALL_FLAG=0
 DRY_RUN=0
 
 for arg in "$@"; do
     case "$arg" in
-        --wire-only) WIRE_ONLY_FLAG=1 ;;
-        --full)      FULL_FLAG=1      ;;
-        --dry-run)   DRY_RUN=1        ;;
+        --wire-only) WIRE_ONLY_FLAG=1  ;;
+        --full)      FULL_FLAG=1       ;;
+        --uninstall) UNINSTALL_FLAG=1  ;;
+        --dry-run)   DRY_RUN=1         ;;
         --main)      ;;  # reserved — accept silently, no behaviour change
         *)
             printf "! unknown argument: %s\n" "$arg"
@@ -39,7 +43,8 @@ for arg in "$@"; do
 done
 
 # Determine mode
-if   [ "$FULL_FLAG"      = "1" ]; then MODE="full"
+if   [ "$UNINSTALL_FLAG" = "1" ]; then MODE="uninstall"
+elif [ "$FULL_FLAG"      = "1" ]; then MODE="full"
 elif [ "$WIRE_ONLY_FLAG" = "1" ]; then MODE="wire-only"
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then MODE="wire-only"
 else MODE="full"
@@ -255,14 +260,90 @@ do_wire() {
     printf "  Done. Reload Claude Code to activate the statusline.\n"
 }
 
+# do_uninstall ---------------------------------
+# — remove statusLine from settings.json (atomic, with backup/validate/restore)
+# - clean up legacy statusline-info-* files
+# - with --full, also uninstall the plugin via `claude plugin uninstall`
+do_uninstall() {
+    local SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
+
+    command -v jq > /dev/null 2>&1 || { printf "! jq not found — install from https://jqlang.github.io/jq and re-run\n"; exit 1; }
+
+    # Legacy cleanup (always, even if settings has nothing to remove)
+    for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
+        [ -e "$f" ] || continue
+        if [ "$DRY_RUN" = "1" ]; then
+            printf "  Would remove legacy %s\n" "$(basename "$f")"
+        else
+            rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
+        fi
+    done
+
+    # Remove statusLine key from settings.json
+    if [ ! -f "$SETTINGS" ]; then
+        printf "  settings.json not found — nothing to unwire.\n"
+    else
+        local HAS_KEY
+        HAS_KEY=$(jq 'has("statusLine")' "$SETTINGS" 2>/dev/null) || HAS_KEY="false"
+        if [ "$HAS_KEY" != "true" ]; then
+            printf "  statusLine not present in settings.json — nothing to unwire.\n"
+        elif [ "$DRY_RUN" = "1" ]; then
+            printf "  Would remove statusLine from %s\n" "$SETTINGS"
+        else
+            local BAK
+            BAK="${SETTINGS}.bak-yas-$(date -u +%Y%m%dT%H%M%SZ)"
+            cp "$SETTINGS" "$BAK"
+            printf "  Backed up → %s\n" "$(basename "$BAK")"
+
+            local _result
+            if ! _result=$(jq 'del(.statusLine)' "$SETTINGS") || [ -z "$_result" ]; then
+                printf "! jq failed — settings.json unchanged\n"; exit 1
+            fi
+
+            local _tmp
+            _tmp=$(mktemp "${SETTINGS}.XXXXXXXXXX")
+            printf '%s\n' "$_result" > "$_tmp" || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
+            mv "$_tmp" "$SETTINGS"
+
+            if ! jq empty "$SETTINGS" 2>/dev/null; then
+                printf "! settings.json invalid after write — restoring backup\n"
+                cp "$BAK" "$SETTINGS"
+                exit 1
+            fi
+            printf "  Removed statusLine from settings.json\n"
+        fi
+    fi
+
+    # Plugin uninstall (--full only)
+    if [ "$FULL_FLAG" = "1" ]; then
+        command -v claude > /dev/null 2>&1 || { printf "! claude not found — cannot uninstall plugin\n"; exit 1; }
+        local present
+        present=$(jq -r 'has("yas@yet-another-statusline")' \
+            "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null) || present="false"
+        if [ "$present" != "true" ]; then
+            printf "  yas plugin not installed — skipping plugin uninstall.\n"
+        elif [ "$DRY_RUN" = "1" ]; then
+            printf "  Would uninstall: yas@yet-another-statusline\n"
+        else
+            printf "  Uninstalling yas plugin…\n"
+            claude plugin uninstall yas@yet-another-statusline --scope user
+        fi
+    fi
+
+    if [ "$DRY_RUN" != "1" ]; then printf "  Done.\n"; fi
+}
+
 main() {
-    if [ "$MODE" = "full" ]; then
+    if [ "$MODE" = "uninstall" ]; then
+        do_uninstall
+    elif [ "$MODE" = "full" ]; then
         preflight_full
         ensure_marketplace
         ensure_plugin
+        do_wire
     else
         preflight_wire_only
+        do_wire
     fi
-    do_wire
 }
 main
