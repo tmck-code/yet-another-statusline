@@ -116,6 +116,30 @@ TOOL_ARG_KEY: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Context-fill helpers
+# ---------------------------------------------------------------------------
+
+def _ctx_fill_ratio(ctx: ContextWindow, soft_limit: int) -> tuple[float, float]:
+    """Return (fill_ratio, pct_soft) for the context bar.
+
+    Prefer the host-supplied `ctx.used_percentage` (Claude Code's own /context
+    value, input-only) when it is present.  Fall back to a manual input-only
+    calculation (`total_input_tokens / context_window_size`) when the field is
+    absent (`None`).  Negative host values are clamped to 0; divide-by-zero is
+    guarded; the result is always in [0.0, 1.0].
+    """
+    if ctx.used_percentage is not None:
+        # Host-supplied value — use it, clamping any negative/overflow edge.
+        fill_ratio = max(0.0, min(ctx.used_percentage / 100.0, 1.0))
+    elif ctx.context_window_size > 0:
+        fill_ratio = min(ctx.total_input_tokens / ctx.context_window_size, 1.0)
+    else:
+        fill_ratio = 0.0
+    pct_soft = fill_ratio * 100.0
+    return fill_ratio, pct_soft
+
+
+# ---------------------------------------------------------------------------
 # Renderer
 # ---------------------------------------------------------------------------
 
@@ -966,23 +990,31 @@ class Renderer:
             parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
         return ''.join(parts)
 
-    def context_line(self, ctx: ContextWindow, available: int = 76, soft_limit: int = DEFAULT_SOFT_LIMIT) -> str:
-        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / soft_limit, 1.0)
-        pct_soft     = total_tokens / soft_limit * 100
+    def context_line(
+        self,
+        ctx: ContextWindow,
+        available: int = 76,
+        soft_limit: int = DEFAULT_SOFT_LIMIT,
+        exceeds_200k: bool = False,
+    ) -> str:
+        fill_ratio, pct_soft = _ctx_fill_ratio(ctx, soft_limit)
+        total_tokens         = ctx.total_input_tokens
 
-        if total_tokens >= soft_limit:
+        badge   = f'{CLR_WARN}!200K{self.R} ' if exceeds_200k else ''
+        badge_w = 6 if exceeds_200k else 0
+
+        if fill_ratio >= 1.0:
             a = BOLD + self.risk_zone_color(total_tokens)
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {a}({pct_model:.0f}%){self.R}'
             prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
-            bar_w  = max(4, available - _visible_width(prefix) - 3)
+            bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
             bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f'{a}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
+            return f'{badge}{a}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
 
         bar_clr = self.risk_zone_color(total_tokens)
         secondary = ''
@@ -990,33 +1022,41 @@ class Renderer:
             pct_model = total_tokens / ctx.context_window_size * 100
             secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
         prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
-        bar_w  = max(4, available - _visible_width(prefix) - 3)
+        bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
         bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
-        return f'{bar_clr}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
+        return f'{badge}{bar_clr}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
 
-    def context_line_compact(self, ctx: ContextWindow, available: int, soft_limit: int = DEFAULT_SOFT_LIMIT) -> str:
-        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-        fill_ratio   = min(total_tokens / soft_limit, 1.0)
-        pct_soft     = total_tokens / soft_limit * 100
+    def context_line_compact(
+        self,
+        ctx: ContextWindow,
+        available: int,
+        soft_limit: int = DEFAULT_SOFT_LIMIT,
+        exceeds_200k: bool = False,
+    ) -> str:
+        fill_ratio, pct_soft = _ctx_fill_ratio(ctx, soft_limit)
+        total_tokens         = ctx.total_input_tokens
 
-        if total_tokens >= soft_limit:
+        badge   = f'{CLR_WARN}!200K{self.R} ' if exceeds_200k else ''
+        badge_w = 6 if exceeds_200k else 0
+
+        if fill_ratio >= 1.0:
             a      = BOLD + self.risk_zone_color(total_tokens)
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
-            bar_w  = max(4, available - _visible_width(prefix) - 3)
+            bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
             bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f' {prefix}{bar}'
+            return f' {badge}{prefix}{bar}'
 
         bar_clr = self.risk_zone_color(total_tokens)
         prefix  = f'{bar_clr}{BOLD}{pct_soft:.0f}%{self.R} '
-        bar_w   = max(4, available - _visible_width(prefix) - 3)
+        bar_w   = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
         bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
-        return f' {prefix}{bar}'
+        return f' {badge}{prefix}{bar}'
 
     SPEC_GRADIENTS: Sequence[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = [
         ((20, 60, 200),  (30, 200, 180),  (220, 255, 120)),     # Ocean    blue → teal → pale green

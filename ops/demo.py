@@ -540,6 +540,7 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
 
             ctx_win['total_input_tokens']  = total_in
             ctx_win['total_output_tokens'] = total_out
+            ctx_win['used_percentage']     = round(pct * 100.0, 1)
             # five_hour ideal_pct ≈ 60% (resets_at=now+2h, window=5h → 3h elapsed / 5h = 60%)
             # sine arc: candle at start/end, flame at midpoint, hitting all colour thresholds
             burn_5h = 60.0 + 22.0 * math.sin(pct * 2 * math.pi - math.pi / 2)
@@ -879,6 +880,7 @@ def render_scenario(
     ctx_win = _ensure_nested(raw, 'context_window')
     ctx_win['total_input_tokens']  = total_in
     ctx_win['total_output_tokens'] = total_out
+    ctx_win['used_percentage']     = round(cfg.context_pct * 100.0, 1)
     resets    = int(time.time()) + 7200
     rate_lims = _ensure_nested(raw, 'rate_limits')
     five_hour = _ensure_nested(rate_lims, 'five_hour')
