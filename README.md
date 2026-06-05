@@ -1,5 +1,7 @@
 # YAS! (Yet Another Statusline)
 
+🌈 Check out the official landing page here: [YAS! Yet Another Statusline](https://tmck-code.github.io/pages/yas.html)
+
 <img width="1685" height="320" alt="image" src="https://github.com/user-attachments/assets/516cb692-3318-4552-b813-e3e34ca96858" />
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
