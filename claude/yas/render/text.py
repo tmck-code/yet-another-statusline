@@ -16,31 +16,36 @@ def terminal_width() -> int:
     try:
         w = int(subprocess.run([
             "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
-        ], capture_output=True, text=True).stdout.strip().replace("'", ""))
+        ], capture_output=True, text=True, timeout=0.2).stdout.strip().replace("'", ""))
         if w > 0:
             return w
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
         pass
+
     try:
         w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
         if w > 0:
             return w
     except (OSError, ValueError):
         pass
+
     try:
         cols = int(os.environ.get('COLUMNS', '0'))
         if cols > 0:
             return cols
     except ValueError:
         pass
+
     w = shutil.get_terminal_size(fallback=(0, 0)).columns
     if w > 0:
         return w
+
     for fd in (2, 1, 0):
         try:
             return os.get_terminal_size(fd).columns
         except OSError:
             pass
+
     try:
         tty_fd = os.open('/dev/tty', os.O_RDONLY)
         try:
@@ -49,6 +54,7 @@ def terminal_width() -> int:
             os.close(tty_fd)
     except OSError:
         pass
+
     return DEFAULT_MAX_WIDTH
 
 
