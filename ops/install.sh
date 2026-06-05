@@ -104,7 +104,12 @@ ensure_marketplace() {
         "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" 2>/dev/null) || present="false"
 
     if [ "$present" = "true" ]; then
-        printf "  Marketplace already present — skipping.\n"
+        if [ "$DRY_RUN" = "1" ]; then
+            printf "  Would update marketplace: yet-another-statusline\n"
+        else
+            printf "  Updating marketplace…\n"
+            claude plugin marketplace update yet-another-statusline
+        fi
         return
     fi
 
@@ -119,7 +124,7 @@ ensure_marketplace() {
 # ensure_plugin (full mode only) ----------------
 ensure_plugin() {
     local present
-    present=$(jq -r 'has("yas@yet-another-statusline")' \
+    present=$(jq -r '.plugins | has("yas@yet-another-statusline")' \
         "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null) || present="false"
 
     if [ "$present" = "false" ]; then
@@ -318,7 +323,7 @@ do_uninstall() {
     if [ "$FULL_FLAG" = "1" ]; then
         command -v claude > /dev/null 2>&1 || { printf "! claude not found — cannot uninstall plugin\n"; exit 1; }
         local present
-        present=$(jq -r 'has("yas@yet-another-statusline")' \
+        present=$(jq -r '.plugins | has("yas@yet-another-statusline")' \
             "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null) || present="false"
         if [ "$present" != "true" ]; then
             printf "  yas plugin not installed — skipping plugin uninstall.\n"
