@@ -1,9 +1,16 @@
 from __future__ import annotations
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from yas.constants import _sanitize
+
+# Git env vars that, when inherited from a parent process (e.g. a git hook),
+# would override -C and make the subprocess use the wrong repository.
+_GIT_ENV_OVERRIDES = frozenset((
+    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+))
 
 
 @dataclass
@@ -84,12 +91,14 @@ class GitInfo:
         if not repo:
             return modified, untracked, deleted, renamed
         try:
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in _GIT_ENV_OVERRIDES}
             r = subprocess.run(
                 # --no-optional-locks: skip the index refresh write, so a
                 # SIGKILL on timeout can't leave a stray .git/index.lock.
                 ['git', '--no-optional-locks', '-C', repo, 'status',
                  '--porcelain=v1', '-z', '--untracked-files=normal'],
-                capture_output=True, text=True, timeout=2,
+                capture_output=True, text=True, timeout=2, env=clean_env,
             )
         except Exception:
             return modified, untracked, deleted, renamed
