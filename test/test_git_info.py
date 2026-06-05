@@ -1,4 +1,5 @@
 """Tests for GitInfo._find_repo, _read_head, and from_cwd."""
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,6 +7,12 @@ from pathlib import Path
 import pytest
 
 import yas.info.git as git
+
+# When run from a git hook (e.g. pre-commit), git sets GIT_DIR in the
+# environment. Subprocess calls that create temporary repos must clear it or
+# git init / git status will operate on the wrong repository.
+_CLEAN_GIT_ENV = {k: v for k, v in os.environ.items()
+                  if k not in git._GIT_ENV_OVERRIDES}
 
 
 
@@ -74,24 +81,18 @@ def test_from_cwd_non_repo(tmp_path: Path) -> None:
 @pytest.mark.skipif(shutil.which('git') is None, reason='git not installed')
 def test_from_cwd_real_repo(tmp_path: Path) -> None:
     """from_cwd populates modified and untracked counts from a real repo."""
-    subprocess.run(['git', 'init', str(tmp_path)], check=True, capture_output=True)
-    subprocess.run(
-        ['git', '-C', str(tmp_path), 'config', 'user.email', 'test@test.com'],
-        check=True, capture_output=True,
-    )
-    subprocess.run(
-        ['git', '-C', str(tmp_path), 'config', 'user.name', 'Test'],
-        check=True, capture_output=True,
-    )
+    def run(*cmd: str) -> None:
+        subprocess.run(list(cmd), check=True, capture_output=True, env=_CLEAN_GIT_ENV)
+
+    run('git', 'init', str(tmp_path))
+    run('git', '-C', str(tmp_path), 'config', 'user.email', 'test@test.com')
+    run('git', '-C', str(tmp_path), 'config', 'user.name', 'Test')
 
     # Create and commit a tracked file
     tracked = tmp_path / 'tracked.txt'
     tracked.write_text('initial\n')
-    subprocess.run(['git', '-C', str(tmp_path), 'add', 'tracked.txt'], check=True, capture_output=True)
-    subprocess.run(
-        ['git', '-C', str(tmp_path), 'commit', '-m', 'init'],
-        check=True, capture_output=True,
-    )
+    run('git', '-C', str(tmp_path), 'add', 'tracked.txt')
+    run('git', '-C', str(tmp_path), 'commit', '-m', 'init')
 
     # Modify the tracked file (modified count = 1)
     tracked.write_text('changed\n')
