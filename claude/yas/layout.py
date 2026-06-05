@@ -231,6 +231,9 @@ def build_wide(
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
     )
+    line_tokens:     list[str]
+    vsep_cols:       tuple[int, ...]
+    spark_mark_col:  int | None
     if view.cfg.enable_cost:
         line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
             usage.billed_in, usage.cache_read, usage.out,
