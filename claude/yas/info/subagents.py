@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from yas.constants import CLAUDE_DIR
+from yas.constants import CLAUDE_DIR, _sanitize
 
 
 def read_last_prompt_ts(session_id: str) -> float | None:
@@ -94,8 +94,8 @@ class RunningSubagents:
                 description = ''
                 try:
                     data = json.loads(meta.read_text())
-                    agent_type = data.get('agentType', '')
-                    description = data.get('description', '')
+                    agent_type = _sanitize(data.get('agentType', '') or '')
+                    description = _sanitize(data.get('description', '') or '')
                 except Exception:
                     continue
 
@@ -221,7 +221,12 @@ class RunningSubagents:
                         item = content[-1]
                         kind = item.get('type', '')
                         if kind == 'tool_use':
-                            last_activity = ('tool_use', item.get('name', ''), item.get('input') or {})
+                            raw_inp = item.get('input') or {}
+                            inp = {
+                                k: _sanitize(v) if isinstance(v, str) else v
+                                for k, v in raw_inp.items()
+                            } if isinstance(raw_inp, dict) else {}
+                            last_activity = ('tool_use', _sanitize(item.get('name', '') or ''), inp)
                         elif kind == 'thinking':
                             last_activity = ('thinking', '', {})
                         elif kind == 'text':

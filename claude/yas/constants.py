@@ -17,6 +17,20 @@ NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
+# Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1
+# (0x80-0x9f). This range includes ESC (0x1b) and BEL (0x07) — the introducers
+# and terminators for OSC/CSI sequences — so stripping it neutralizes OSC-52
+# clipboard writes, OSC-0/2 title spoofs, and any other escape injection from
+# untrusted input. TAB (0x09) and LF (0x0a) are deliberately preserved.
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+
+
+def _sanitize(s: str) -> str:
+    """Strip terminal control characters from an untrusted, host-/repo-supplied
+    string at capture time, before it can reach stdout. Printable text
+    (including non-ASCII/CJK) passes through byte-for-byte unchanged."""
+    return _CTRL_RE.sub('', s)
+
 FIVE_HOUR_MINUTES        = 300
 SEVEN_DAY_MINUTES        = 10080
 FIVE_HOUR_WARMUP_MINUTES = 5

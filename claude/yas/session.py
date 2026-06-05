@@ -1,6 +1,7 @@
 """Session data-classes and parser helpers.
 
-Stdlib-only: no imports from yas.constants or other package modules.
+The only package import is the leaf-level `_sanitize` from yas.constants (a
+stdlib-only module, so no import cycle); everything else is stdlib.
 TokenAccounting (used by Model.cost_rates) is imported lazily inside the
 property so this module can be loaded before tokens.py exists; it will resolve
 once task 4.1 creates claude/yas/tokens.py.
@@ -14,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+
+from yas.constants import _sanitize
 
 
 HOME       = Path(os.path.expanduser('~'))
@@ -40,7 +43,7 @@ def _as_float(v: object, default: float = 0.0) -> float:
 
 def _as_str(v: object, default: str = '') -> str:
     if isinstance(v, str):
-        return v
+        return _sanitize(v)
     return default
 
 
@@ -142,17 +145,18 @@ class Workspace:
         project_dir = d.get('project_dir', '')
         added_dirs  = d.get('added_dirs')
         return cls(
-            current_dir = str(current_dir) if current_dir else '',
-            project_dir = str(project_dir) if project_dir else '',
+            current_dir = _sanitize(str(current_dir)) if current_dir else '',
+            project_dir = _sanitize(str(project_dir)) if project_dir else '',
             added_dirs  = list(added_dirs) if isinstance(added_dirs, list) else [],
         )
 
     @property
     def plugins(self) -> str:
         seen: dict[str, None] = {}
+        # Only the user's own config dir is read. project_dir/.claude/settings.json
+        # is attacker-controlled for a cloned repo — reading it was both an
+        # unexpected trust-boundary read and an escape-injection sink (SEC-2).
         candidates = [CLAUDE_DIR / 'settings.json']
-        if self.project_dir:
-            candidates.append(Path(self.project_dir) / '.claude' / 'settings.json')
         for sf in candidates:
             if not sf.is_file():
                 continue
@@ -254,9 +258,9 @@ class SessionInfo:
         cwd             = d.get('cwd', '')
         version         = d.get('version', '')
         return cls(
-            session_id          = str(session_id)      if session_id      is not None else '',
+            session_id          = _sanitize(str(session_id))      if session_id      is not None else '',
             transcript_path     = str(transcript_path) if transcript_path is not None else '',
-            cwd                 = str(cwd)             if cwd             is not None else '',
+            cwd                 = _sanitize(str(cwd))             if cwd             is not None else '',
             model               = Model.from_dict(d.get('model') or {}),
             workspace           = Workspace.from_dict(_dict('workspace')),
             version             = str(version)         if version         is not None else '',

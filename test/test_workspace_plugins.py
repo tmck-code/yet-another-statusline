@@ -10,8 +10,9 @@ def _write_settings(path: Path, plugins: dict[str, bool]) -> None:
     path.write_text(json.dumps({'enabledPlugins': plugins}))
 
 
-def test_plugins_merged_from_home_and_project(tmp_home: Path, tmp_path: Path, monkeypatch) -> None:
-    """Plugins from home and project settings are merged."""
+def test_plugins_read_from_home_only(tmp_home: Path, tmp_path: Path, monkeypatch) -> None:
+    """SEC-2: only the user's own settings drive plugins; project_dir's
+    settings (attacker-controlled for a cloned repo) are never read."""
     monkeypatch.setattr(session, 'CLAUDE_DIR', tmp_home / '.claude')
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': True})
     project_dir = tmp_path / 'myproject'
@@ -20,7 +21,7 @@ def test_plugins_merged_from_home_and_project(tmp_home: Path, tmp_path: Path, mo
     ws = session.Workspace(project_dir=str(project_dir))
     result = ws.plugins
     assert 'foo' in result
-    assert 'bar' in result
+    assert 'bar' not in result
 
 
 def test_false_values_excluded(tmp_home: Path, monkeypatch) -> None:
@@ -47,7 +48,7 @@ def test_duplicates_collapsed_first_seen_order(tmp_home: Path, tmp_path: Path, m
 
 
 def test_malformed_json_silently_skipped(tmp_home: Path, tmp_path: Path, monkeypatch) -> None:
-    """Malformed JSON in one file is silently skipped; other file still read."""
+    """Malformed JSON in home settings is silently skipped (no crash, empty result)."""
     monkeypatch.setattr(session, 'CLAUDE_DIR', tmp_home / '.claude')
     # Write invalid JSON to home settings
     home_settings = tmp_home / '.claude' / 'settings.json'
@@ -59,5 +60,5 @@ def test_malformed_json_silently_skipped(tmp_home: Path, tmp_path: Path, monkeyp
 
     ws = session.Workspace(project_dir=str(project_dir))
     result = ws.plugins
-    assert 'bar' in result
-    assert 'foo' not in result
+    # Home is malformed → skipped; project is never read (SEC-2) → nothing.
+    assert result == ''
