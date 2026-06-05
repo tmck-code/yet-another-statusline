@@ -83,7 +83,7 @@ def build_narrow(
     rate_text, right_text, right_w = r.model_right_section_compact(
         session.model_name, session.rate_limits, max_right, effort_for_bg,
     )
-    line_context = r.context_line_compact(ctx, width - 3, soft_limit)
+    line_context = r.context_line_compact(ctx, width - 3, soft_limit, exceeds_200k=session.exceeds_200k_tokens)
 
     pill: Pill | None = None
     if pill_pct:
@@ -142,7 +142,7 @@ def build_medium(
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     git          = view.git
-    line_context = r.context_line_compact(ctx, width - 3, soft_limit)
+    line_context = r.context_line_compact(ctx, width - 3, soft_limit, exceeds_200k=session.exceeds_200k_tokens)
 
     max_right    = max(8, width // 2)
     rate_text, right_text, right_w = r.model_right_section_compact(
@@ -242,7 +242,7 @@ def build_wide(
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
 
-    line_context = r.context_line(ctx, width - 3, soft_limit)
+    line_context = r.context_line(ctx, width - 3, soft_limit, exceeds_200k=session.exceeds_200k_tokens)
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
