@@ -44,5 +44,8 @@ version/bump:
 	# update pyproject.toml & uv.lock
 	uv version $(VERSION)
 	@uv lock && uv sync --all-groups
+	@git add .claude-plugin/plugin.json pyproject.toml uv.lock
+	@git commit -m "Bump version to $(VERSION)"
+	@git push
 
 .PHONY: hooks bench pr-info demo demo/img test statusline/test mon/run version/bump
