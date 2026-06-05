@@ -27,15 +27,15 @@ def test_zero_duration_returns_empty_string() -> None:
 
 
 def test_five_minutes_duration() -> None:
-    """total_duration_ms=300000 (5 minutes) → elapsed == '5m'."""
+    """total_duration_ms=300000 (5 minutes) → elapsed == '0:05:00'."""
     view = _view_with_duration_ms(300_000)
-    assert view.elapsed == '5m'
+    assert view.elapsed == '0:05:00'
 
 
 def test_two_hours_two_minutes_duration() -> None:
-    """total_duration_ms=7320000 (2h2m) → elapsed == '2h2m'."""
+    """total_duration_ms=7320000 (2h2m) → elapsed == '2:02:00'."""
     view = _view_with_duration_ms(7_320_000)
-    assert view.elapsed == '2h2m'
+    assert view.elapsed == '2:02:00'
 
 
 def test_elapsed_reads_from_payload_not_filesystem() -> None:
@@ -53,4 +53,4 @@ def test_elapsed_reads_from_payload_not_filesystem() -> None:
     with patch('pathlib.Path.stat', side_effect=AssertionError('unexpected Path.stat call')):
         result = view.elapsed
 
-    assert result == '10m'
+    assert result == '0:10:00'

@@ -41,6 +41,20 @@ def _fmt_duration_ms(ms: int) -> str:
     return f'{h}h{m}m'
 
 
+def _fmt_elapsed_clock(ms: int) -> str:
+    """Format a duration in milliseconds as H:MM:SS clock time.
+
+    Returns '' for zero or negative ms; otherwise H:MM:SS (e.g. '0:13:01').
+    """
+    if ms <= 0:
+        return ''
+    s   = ms // 1000
+    h   = s // 3600
+    m   = (s % 3600) // 60
+    sec = s % 60
+    return f'{h}:{m:02d}:{sec:02d}'
+
+
 def _fmt_elapsed(mtime: float | None, now: float) -> str:
     """Format seconds-since-mtime as a human-readable string.
 
@@ -134,4 +148,4 @@ class SessionView:
 
     @cached_property
     def elapsed(self) -> str:
-        return _fmt_duration_ms(self.session.cost.total_duration_ms)
+        return _fmt_elapsed_clock(self.session.cost.total_duration_ms)

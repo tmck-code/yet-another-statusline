@@ -172,8 +172,8 @@ def test_elapsed_does_not_trigger_file_stat(monkeypatch):
     with patch('pathlib.Path.stat', side_effect=AssertionError('unexpected Path.stat call')):
         result = view.elapsed
 
-    # Result should be the formatted duration from the payload (807557ms → 13m).
-    assert result == '13m'
+    # Result should be the formatted duration from the payload (807557ms → 0:13:27).
+    assert result == '0:13:27'
 
 
 # ---------------------------------------------------------------------------

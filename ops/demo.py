@@ -482,6 +482,8 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
     rate_lims = _ensure_nested(raw, 'rate_limits')
     five_hour = _ensure_nested(rate_lims, 'five_hour')
     seven_day = _ensure_nested(rate_lims, 'seven_day')
+    cost      = _ensure_nested(raw, 'cost')
+    base_duration_ms = int(cost.get('total_duration_ms', 0))
 
     claude       = tmpdir / '.claude'
     project      = tmpdir / 'my-project'
@@ -537,6 +539,8 @@ def animate(env: dict[str, str], raw: dict[str, object], tmpdir: Path, session_i
             kept = [ln for ln in existing if ln and now - float(ln.split()[0]) <= KEEP]
             kept.append(f'{now:.3f} {session_id} {rate_cumul_in} {cumul_out}')
             rate_log.write_text('\n'.join(kept) + '\n')
+
+            cost['total_duration_ms']      = base_duration_ms + int(i * delay * 1000)
 
             ctx_win['total_input_tokens']  = total_in
             ctx_win['total_output_tokens'] = total_out

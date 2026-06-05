@@ -263,10 +263,10 @@ class Renderer:
     def gradient_bar(self, filled: int, bar_w: int) -> str:
         return self.gradient.gradient_bar(filled, bar_w)
 
-    def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False) -> str:
+    def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False, lead: int = 2) -> str:
         color    = self.gradient.grad_at(col - 1, width, fill=fill)
         trailing = ' ' if leader else '  '
-        return f'  {color}│{self.R}{trailing}'
+        return f'{" " * lead}{color}│{self.R}{trailing}'
 
     def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
         return self.gradient.sparkline(history, live)
@@ -381,6 +381,10 @@ class Renderer:
         dur    = fmt_dur(remaining)
         colour = self.fill_colour(elapsed_pct)
         text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
+        return text, _visible_width(text)
+
+    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
+        text = f'{self.SESSION}{elapsed}{self.R}'
         return text, _visible_width(text)
 
     def risk_zone_color(self, tokens: int) -> str:

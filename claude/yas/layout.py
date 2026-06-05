@@ -262,34 +262,55 @@ def build_wide(
             cache_section_w = _cache_section_w
             cache_content   = _cache_txt
 
-    target_w = (width - 4) - vsep_w - helper_w - cache_section_w - right_w
-    line_path = r.fit_path(session.short_pwd, git, elapsed, target_w, compact_only=False)
+    # Elapsed section: session clock (H:MM:SS), vsep-delimited, sheds before path truncates.
+    # elapsed_section_w = elapsed_content_w + 3 (1-lead vsep: ' │ ' = 3 visible).
+    elapsed_content, _elapsed_cw = r.elapsed_section(elapsed)
+    elapsed_section_w = 0
+    if elapsed:
+        _elapsed_sw = _elapsed_cw + 3
+        if (width - 4) - vsep_w - _elapsed_sw - helper_w - cache_section_w - right_w >= 5:
+            elapsed_section_w = _elapsed_sw
+
+    target_w = (width - 4) - vsep_w - elapsed_section_w - helper_w - cache_section_w - right_w
+    line_path = r.fit_path(session.short_pwd, git, '', target_w, compact_only=False)
     path_w   = _visible_width(line_path)
 
     pill: Pill | None = None
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
-    path_div_col  = 3 + path_w + 2
-    vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
+    path_div_col = 3 + path_w + 2
+    vsep         = r.vsep_block(path_div_col, width, fill=fill, leader=True)
 
-    cache_div_col = path_div_col + helper_w + vsep_w if cache_section_w else None
+    if elapsed_section_w:
+        elapsed_div_col = path_div_col + elapsed_section_w
+        elapsed_vsep    = r.vsep_block(elapsed_div_col, width, fill=fill, leader=True, lead=1)
+    else:
+        elapsed_div_col = None
+        elapsed_vsep    = ''
+
+    helper_anchor = elapsed_div_col if elapsed_div_col is not None else path_div_col
+    cache_div_col = helper_anchor + helper_w + vsep_w if cache_section_w else None
     cache_vsep    = r.vsep_block(cache_div_col, width, fill=fill, leader=False) if cache_div_col else ''
 
-    # Build the middle section: path | helper [ | cache ].
-    # The leading space before cache_vsep is the +1 in cache_div_col / _cache_section_w.
-    middle = f'{line_path}{vsep}{helper_text}'
+    # Build the middle section: path | [elapsed |] helper [| cache].
+    # The leading space before cache_vsep is the +1 in cache_div_col accounting.
+    middle = f'{line_path}{vsep}'
+    if elapsed_section_w:
+        middle = f'{middle}{elapsed_content}{elapsed_vsep}'
+    middle = f'{middle}{helper_text}'
     if cache_section_w:
         middle = f'{middle} {cache_vsep}{cache_content}'
 
-    # Single "section present" boolean drives ALL elbow math so border columns
-    # can never reference a missing │.
+    # Collect divider columns for elbow math — every │ in the content row
+    # must have a matching ┬/┴ on the borders above and below.
+    path_row_cols: list[int] = [path_div_col]
+    if elapsed_section_w:
+        path_row_cols.append(elapsed_div_col)  # type: ignore[arg-type]
     if cache_section_w:
-        path_row_downs: tuple[int, ...] = (path_div_col, cache_div_col)  # type: ignore[assignment]
-        path_row_ups:   tuple[int, ...] = (path_div_col, cache_div_col)  # type: ignore[assignment]
-    else:
-        path_row_downs = (path_div_col,)
-        path_row_ups   = (path_div_col,)
+        path_row_cols.append(cache_div_col)    # type: ignore[arg-type]
+    path_row_downs = tuple(path_row_cols)
+    path_row_ups   = path_row_downs
 
     if pill_pct:
         rows += [
@@ -297,7 +318,7 @@ def build_wide(
             RowSpec('content', content=middle, right_pill=right_text),
         ]
     else:
-        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + cache_section_w + (1 if cache_section_w else 0) + right_w))
+        pad = max(1, (width - 3) - (path_w + vsep_w + elapsed_section_w + helper_w + cache_section_w + (1 if cache_section_w else 0) + right_w))
         content_full = f'{middle}{" " * pad}{right_text}'
         rows += [
             RowSpec('top_border', downs=path_row_downs),
