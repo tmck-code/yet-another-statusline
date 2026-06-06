@@ -154,7 +154,7 @@ def build_medium(
     vsep_w   = 5
     rate_w   = _visible_width(rate_text)
     target_w = (width - 4) - vsep_w - rate_w - right_w
-    line_path = r.fit_path(session.short_pwd, git, '', target_w, compact_only=True)
+    line_path = r.fit_path(session.short_pwd, git, target_w, compact_only=True)
     path_w   = _visible_width(line_path)
 
     pill: Pill | None = None
@@ -272,7 +272,7 @@ def build_wide(
             elapsed_section_w = _elapsed_sw
 
     target_w = (width - 4) - vsep_w - elapsed_section_w - helper_w - cache_section_w - right_w
-    line_path = r.fit_path(session.short_pwd, git, '', target_w, compact_only=False)
+    line_path = r.fit_path(session.short_pwd, git, target_w, compact_only=False)
     path_w   = _visible_width(line_path)
 
     pill: Pill | None = None

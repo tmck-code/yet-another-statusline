@@ -307,8 +307,8 @@ class Renderer:
         return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)
 
     def path_git(
-        self, short_pwd: str, git: GitInfo, elapsed: str = '',
-        *, show_commit: bool = True, show_dirty: bool = True, show_elapsed: bool = True,
+        self, short_pwd: str, git: GitInfo,
+        *, show_commit: bool = True, show_dirty: bool = True,
     ) -> str:
         dirty = ''
         if show_dirty:
@@ -322,14 +322,13 @@ class Renderer:
                 dirty += f'{self.DIRTY}{GLYPH_RENAMED} {git.renamed}{RESET}'
             if dirty:
                 dirty = ' ' + dirty
-        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
         commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
 
         return (
             f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
             f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
-            f'{commit_part}{dirty}{tail}'
+            f'{commit_part}{dirty}'
         )
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
@@ -340,7 +339,7 @@ class Renderer:
         )
 
     def fit_path(
-        self, short_pwd: str, git: GitInfo, elapsed: str, target_w: int,
+        self, short_pwd: str, git: GitInfo, target_w: int,
         *, compact_only: bool = False,
     ) -> str:
         def fits(s: str) -> bool:
@@ -350,10 +349,9 @@ class Renderer:
             for kwargs in (
                 {},
                 {'show_commit': False},
-                {'show_commit': False, 'show_elapsed': False},
-                {'show_commit': False, 'show_elapsed': False, 'show_dirty': False},
+                {'show_commit': False, 'show_dirty': False},
             ):
-                candidate = self.path_git(short_pwd, git, elapsed, **kwargs)
+                candidate = self.path_git(short_pwd, git, **kwargs)
                 if fits(candidate):
                     return candidate
 
@@ -390,14 +388,14 @@ class Renderer:
             return self.warn
         return self.safe
 
+    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
+        text = f'{self.SESSION}{elapsed}{self.R}'
+        return text, _visible_width(text)
+
     def cache_section(self, remaining: float, elapsed_pct: int) -> tuple[str, int]:
         dur    = fmt_dur(remaining)
         colour = self.fill_colour(elapsed_pct)
         text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
-        return text, _visible_width(text)
-
-    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
-        text = f'{self.SESSION}{elapsed}{self.R}'
         return text, _visible_width(text)
 
     def risk_zone_color(self, tokens: int) -> str:

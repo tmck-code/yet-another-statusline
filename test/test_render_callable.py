@@ -49,6 +49,9 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(app, 'terminal_width', lambda: fake_tw)
     monkeypatch.setattr(app, 'CLAUDE_DIR', tmp_path / '.claude')
+    # Isolate from any YAS_* env vars set in the host shell (e.g. YAS_MAX_WIDTH=40).
+    monkeypatch.delenv('YAS_MAX_WIDTH', raising=False)
+    monkeypatch.delenv('YAS_FULL_WIDTH', raising=False)
 
     def _first_line_width(env_extra):
         for k, v in env_extra.items():

@@ -81,7 +81,7 @@ class TestSingleRowGuarantee:
         )
         helper_w = _visible_width(helper)
         target_w = (width - 4) - self._vsep_w - helper_w - right_w
-        path = r.fit_path('~/deep/project/submodule/src', git, '15m', target_w,
+        path = r.fit_path('~/deep/project/submodule/src', git, target_w,
                           compact_only=False)
         return path, helper, right, right_w
 
@@ -92,7 +92,7 @@ class TestSingleRowGuarantee:
         )
         rate_w   = _visible_width(_rate)
         target_w = (width - 4) - self._vsep_w - rate_w - right_w
-        path = r.fit_path('~/deep/project/submodule/src', git, '', target_w,
+        path = r.fit_path('~/deep/project/submodule/src', git, target_w,
                           compact_only=True)
         return path, _rate, right, right_w
 
@@ -103,7 +103,7 @@ class TestSingleRowGuarantee:
             helper, _right, right_w = r.model_right_section('Sonnet 4.6', '', RateLimits())
             helper_w = _visible_width(helper)
             target_w = (width - 4) - self._vsep_w - helper_w - right_w
-            path = r.fit_path('~/deep/project/submodule/src', git, '15m', target_w)
+            path = r.fit_path('~/deep/project/submodule/src', git, target_w)
             assert _visible_width(path) <= target_w, f'width={width}: path overflows target_w={target_w}'
 
     def test_medium_path_fits_target_at_borderline(self) -> None:
@@ -115,7 +115,7 @@ class TestSingleRowGuarantee:
             )
             rate_w   = _visible_width(_rate)
             target_w = (width - 4) - self._vsep_w - rate_w - right_w
-            path = r.fit_path('~/deep/project/submodule/src', git, '', target_w,
+            path = r.fit_path('~/deep/project/submodule/src', git, target_w,
                               compact_only=True)
             assert _visible_width(path) <= target_w, f'width={width}: path overflows target_w={target_w}'
 
