@@ -389,17 +389,13 @@ class Renderer:
         return self.safe
 
     def elapsed_section(self, elapsed: str) -> tuple[str, int]:
-        text = f'{GLYPH_HOURGLASS}  {self.SESSION}{elapsed}{self.R}'
+        text = f'{self.SESSION}{elapsed}{self.R}'
         return text, _visible_width(text)
 
     def cache_section(self, remaining: float, elapsed_pct: int) -> tuple[str, int]:
         dur    = fmt_dur(remaining)
         colour = self.fill_colour(elapsed_pct)
         text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
-        return text, _visible_width(text)
-
-    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
-        text = f'{self.SESSION}{elapsed}{self.R}'
         return text, _visible_width(text)
 
     def risk_zone_color(self, tokens: int) -> str:
