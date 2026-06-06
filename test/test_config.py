@@ -154,9 +154,36 @@ def test_toml_full_width_true(tmp_path: Path) -> None:
     assert cfg.full_width is True
 
 
-def test_env_full_width_any_nonempty_is_true(tmp_path: Path) -> None:
+def test_env_full_width_truthy_values(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'True', 'TRUE'):
+        cfg = config.Config.load(env={'YAS_FULL_WIDTH': val}, config_dir=tmp_path)
+        assert cfg.full_width is True, f'expected True for YAS_FULL_WIDTH={val!r}'
+
+
+def test_env_full_width_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'False', 'FALSE'):
+        cfg = config.Config.load(env={'YAS_FULL_WIDTH': val}, config_dir=tmp_path)
+        assert cfg.full_width is False, f'expected False for YAS_FULL_WIDTH={val!r}'
+
+
+def test_env_full_width_invalid_falls_through_to_default(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_FULL_WIDTH': 'yes'}, config_dir=tmp_path)
+    assert cfg.full_width is False  # invalid env value → default
+
+
+@requires_tomllib
+def test_env_full_width_zero_overrides_toml_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = true\n')
     cfg = config.Config.load(env={'YAS_FULL_WIDTH': '0'}, config_dir=tmp_path)
-    assert cfg.full_width is True
+    assert cfg.full_width is False
+
+
+@requires_tomllib
+def test_env_max_width_respected_when_full_width_disabled(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = true\n')
+    cfg = config.Config.load(env={'YAS_FULL_WIDTH': '0', 'YAS_MAX_WIDTH': '40'}, config_dir=tmp_path)
+    assert cfg.full_width is False
+    assert cfg.max_width == 40
 
 
 # 4.4 Broken TOML + unknown keys

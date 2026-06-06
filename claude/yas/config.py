@@ -11,6 +11,7 @@ rejection (any source) is recorded in debug_lines for YAS_DEBUG stderr output.
 
 from __future__ import annotations
 
+import json
 import os
 try:
     import tomllib
@@ -54,14 +55,16 @@ def _parse_pos_float(raw: object, origin: str) -> float:
         raise ValueError('must be > 0')
     return x
 
+BOOL_ALLOWLIST = ('1', '0', 'true', 'false')
 
 def _parse_bool(raw: object, origin: str) -> bool:
     if isinstance(raw, bool):
         return raw
-    # Env form: any non-empty value is true (empty strings are filtered out
-    # before reaching here). A non-bool from yas.toml is a type error.
     if origin == 'cli' or origin.startswith('env'):
-        return True
+        v = str(raw).strip().lower()
+        if v not in BOOL_ALLOWLIST:
+            raise ValueError(f"expected one of {', '.join(BOOL_ALLOWLIST)}")
+        return bool(json.loads(v))
     raise ValueError('expected a boolean')
 
 
