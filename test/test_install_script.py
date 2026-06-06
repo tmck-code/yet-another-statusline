@@ -123,11 +123,10 @@ def test_wire_only_output_is_valid_json(wire_env):
 # on PATH (preflight_full runs before --dry-run takes effect), plus a fake
 # plugin root for do_wire to discover.
 #
-# `ensure_plugin` checks `has("yas@yet-another-statusline")` at the TOP-LEVEL
-# of installed_plugins.json (not nested under .plugins).  `do_wire` then reads
-# .plugins[...].installPath to find the renderer.  The fixtures therefore put
-# the yas key BOTH at the top level (for ensure_plugin) and under .plugins (for
-# do_wire).
+# `ensure_plugin` checks `.plugins | has("yas@yet-another-statusline")`.
+# `do_wire` scans `.plugins` for any key whose ascii-lower contains "yas" to
+# find the renderer installPath.  The fixtures seed installed_plugins.json with
+# the yas key under `.plugins` to satisfy both checks.
 # ---------------------------------------------------------------------------
 
 # Guard: preflight_full requires claude, curl, and jq to be on PATH.
@@ -166,13 +165,10 @@ def full_dry_env(tmp_path: Path) -> tuple[Path, Path, dict]:
 def _seed_installed_plugins(config_dir: Path, plugin_root: Path) -> None:
     """Write installed_plugins.json so both ensure_plugin and do_wire are happy.
 
-    ensure_plugin reads: has("yas@yet-another-statusline") at top level.
-    do_wire reads:       .plugins["yas@yet-another-statusline"][].installPath
+    ensure_plugin reads: .plugins | has("yas@yet-another-statusline")
+    do_wire reads:       .plugins[key with "yas"][].installPath
     """
     data = {
-        # Top-level key: satisfies ensure_plugin's has() check.
-        'yas@yet-another-statusline': [{'installPath': str(plugin_root)}],
-        # .plugins key: satisfies do_wire's jq path.
         'plugins': {
             'yas@yet-another-statusline': [{'installPath': str(plugin_root)}],
         },
@@ -201,30 +197,20 @@ def test_dry_run_marketplace_already_present(full_dry_env):
     result = run_install('--full', '--dry-run', env_extra=env)
     assert result.returncode == 0, result.stderr
     combined = result.stdout.lower()
-    assert 'already present' in combined or 'skipping' in combined
+    assert 'would update marketplace' in combined
 
 
 @requires_full_preflight
 def test_dry_run_would_install_when_plugin_absent(full_dry_env):
     config_dir, plugin_root, env = full_dry_env
-    # No installed_plugins.json → has() returns false → "Would install"
-    # But do_wire still needs to find the plugin root, so we can't omit the
-    # file entirely from the filesystem — we can leave it absent and accept
-    # that do_wire will fail after the dry-run install message.  However the
-    # spec says dry-run should print "Would install" and exit 0.
-    #
-    # The script: ensure_plugin prints "Would install" (DRY_RUN=1), then
-    # do_wire tries to find PLUGIN_ROOT from installed_plugins.json which is
-    # absent → exits 1.  So we seed a minimal installed_plugins.json that
-    # does NOT have the top-level yas key (triggering install path) but DOES
-    # have the .plugins entry so do_wire can resolve the renderer path.
+    # ensure_plugin checks `.plugins | has("yas@yet-another-statusline")`.
+    # do_wire scans `.plugins` for any key where ascii_downcase contains "yas".
+    # Use a different key name so ensure_plugin sees absent (→ "Would install")
+    # while do_wire can still resolve the renderer path via the "yas"-containing key.
     data = {
-        # .plugins key satisfies do_wire discovery.
         'plugins': {
-            'yas@yet-another-statusline': [{'installPath': str(plugin_root)}],
+            'yas-cached@yet-another-statusline': [{'installPath': str(plugin_root)}],
         },
-        # Note: 'yas@yet-another-statusline' is NOT a top-level key here,
-        # so ensure_plugin sees has() == false → "Would install".
     }
     (config_dir / 'plugins' / 'installed_plugins.json').write_text(json.dumps(data))
     result = run_install('--full', '--dry-run', env_extra=env)
