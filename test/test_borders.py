@@ -51,6 +51,29 @@ def test_border_bottom_ups_markers(r: borders.BorderRenderer) -> None:
     assert stripped[9] == '┴'
 
 
+def test_border_separator_downs_marker(r: borders.BorderRenderer) -> None:
+    out = r.border_separator(width=20, downs=(7,))
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 20
+    # downs=(7,): column 7 (1-based) → string index 6
+    assert stripped[6] == '┬'
+
+
+def test_border_separator_ups_marker(r: borders.BorderRenderer) -> None:
+    out = r.border_separator(width=20, ups=(7,))
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 20
+    assert stripped[6] == '┴'
+
+
+def test_border_separator_down_and_up_coincide(r: borders.BorderRenderer) -> None:
+    out = r.border_separator(width=20, ups=(7,), downs=(7,))
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 20
+    # a column that is both a down and an up renders the cross elbow
+    assert stripped[6] == '┼'
+
+
 def test_border_line_width(r: borders.BorderRenderer) -> None:
     out = r.border_line('hello', width=20)
     assert _visible_width(out) == 20

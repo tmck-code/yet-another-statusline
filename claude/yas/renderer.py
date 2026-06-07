@@ -45,7 +45,6 @@ from yas.constants import (
     GLYPH_HELPER,
     GLYPH_HOURGLASS,
     GLYPH_MODEL,
-    GLYPH_PIE,
     GLYPH_PLUGINS,
     GLYPH_RENAMED,
     GLYPH_REPLYING,
@@ -74,7 +73,7 @@ from yas.render.gradient import (
     _scale,
 )
 from yas.info.git import GitInfo
-from yas.render.metrics import burndown_delta, subagent_avg_tpm, subagent_share
+from yas.render.metrics import burndown_delta, subagent_share
 from yas.render.pill import Pill
 from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
@@ -297,8 +296,8 @@ class Renderer:
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         return self.border.border_bottom(width, ups, fill)
 
-    def border_separator(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
-        return self.border.border_separator(width, ups, fill)
+    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
+        return self.border.border_separator(width, ups, downs, fill)
 
     def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
         return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge)
@@ -607,7 +606,14 @@ class Renderer:
             return f'{GLYPH_REPLYING} (replying)'
         return ''
 
-    def subagent_row(self, sub: RunningSubagent, width: int, session_inout: int = 0) -> str:
+    def subagent_row(
+        self,
+        sub: RunningSubagent,
+        content_width: int,
+        *,
+        twoline: bool = False,
+        session_inout: int = 0,
+    ) -> str:
         now     = time.time()
         is_done = sub.end_ts > 0
         if is_done:
@@ -615,154 +621,128 @@ class Renderer:
         else:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
-        out_s   = fmt_tok(sub.output)
         tok_s   = fmt_tok(sub.total_input)
 
         short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
 
-        step     = rainbow_step()
-        c_marker = rainbow_at(step, 12)
+        step      = rainbow_step()
+        c_marker  = rainbow_at(step, 12)
         type_text = sub.agent_type or '?'
 
-        target_w = width - 4  # content width (2 for '│ ' left, 2 for ' │' right)
+        target_w = content_width  # explicit content width supplied by the builder
 
-        if width > 100:
-            # --- identity line (▶) : agent type · description (full width) ---
-            head1_w  = 3 + _visible_width(type_text) + 3  # '▶  ' + type + ' · '
-            desc_budget = max(0, target_w - head1_w)
-            desc_text   = sub.description or ''
-            if _visible_width(desc_text) > desc_budget:
-                desc_text = (desc_text[:desc_budget - 1] + '…') if desc_budget > 0 else ''
+        if twoline:
+            # --- line 1: duration-first identity + right-aligned cluster (D6) ---
+            # No run-state marker: a Done agent dims every field and freezes its
+            # duration; a running one keeps live colours and a ticking duration.
+            # The right cluster is `· {share%}  {tok} · {model}`; under width
+            # pressure the description truncates first, then the cluster sheds
+            # share% and then tok. The model and the front duration always stay.
+            front_w = 5 + 1 + _visible_width(type_text)  # dur(5) + ' ' + type
+
+            share     = subagent_share(sub.total_input + sub.output, session_inout)
+            share_str = f'{share * 100:.1f}%' if share is not None else ''
+            tok_field = fmt_tok(sub.total_input).rjust(5)
+            model_str = short_model.rjust(6)
 
             if is_done:
-                left1 = (
-                    f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
-                    f'{self.CTX_DIM}{type_text}{self.R}'
-                    f' {self.CTX_DIM}·{self.R} '
-                    f'{self.CTX_DIM}{desc_text}{self.R}'
-                )
+                front_c = f'{self.CTX_DIM}{dur_s}{self.R} {self.CTX_DIM}{type_text}{self.R}'
             else:
-                left1 = (
-                    f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
-                    f'{self.SKILLS}{type_text}{self.R}'
-                    f' {self.LABEL}·{self.R} '
-                    f'{self.CTX}{desc_text}{self.R}'
-                )
-            left1_w = head1_w + _visible_width(desc_text)
-            pad1    = max(1, target_w - left1_w)
-            line1   = f'{left1}{" " * pad1}'  # right side empty; pad keeps equal widths
+                front_c = f'{self.CTX}{dur_s}{self.R} {self.SKILLS}{type_text}{self.R}'
 
-            # --- continuation line (└) : burn-metric cluster ---
-            # Stats live here as ' · '-joined fields; duration and model relocate
-            # from the identity line. When width is tight, stats are shed in
-            # priority order — share % first, then ↑output, then the t/m rate.
-            # The token count, elapsed, and model always remain.
-            # Freeze the rate clock once the agent is Done so t/m stops ticking
-            # down after it finishes — mirror the frozen duration above.
-            rate_now = sub.end_ts if is_done else now
-            tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, rate_now)
-            share = subagent_share(sub.total_input + sub.output, session_inout)
+            def build_cluster(show_share: bool, show_tok: bool) -> str:
+                if is_done:
+                    d   = self.CTX_DIM
+                    seg = f'{d}·{self.R} '
+                    if show_share and share is not None:
+                        seg += f'{d}{share_str}{self.R}  '
+                    if show_tok:
+                        seg += f'{d}{tok_field}{self.R} {d}·{self.R} '
+                    return seg + f'{d}{model_str}{self.R}'
+                share_clr = self.gradient.gradient_color(share) if share is not None else ''
+                seg = f'{self.LABEL}·{self.R} '
+                if show_share and share is not None:
+                    seg += f'{share_clr}{share_str}{self.R}  '
+                if show_tok:
+                    seg += f'{ctx_clr}{tok_field}{self.R} {self.LABEL}·{self.R} '
+                return seg + f'{model_clr}{model_str}{self.R}'
 
-            sep       = f' {self.LABEL}·{self.R} '
-            tok_field = fmt_tok(sub.total_input).rjust(5)
-            out_plain = f'↑ {out_s}'
-            out_pad   = ' ' * max(0, 6 - len(out_plain))
+            # Pick the richest cluster that fits alongside the front + a 1-col gap.
+            cluster = build_cluster(False, False)  # model-only fallback
+            for show_share, show_tok in ((True, True), (False, True)):
+                cand = build_cluster(show_share, show_tok)
+                if front_w + 1 + _visible_width(cand) <= target_w:
+                    cluster = cand
+                    break
+            cluster_w = _visible_width(cluster)
 
-            tpm_str = f'{tpm:,d}'.rjust(5) if tpm is not None else ''
-            if share is not None:
-                share_clr = self.gradient.gradient_color(share)
-                share_str = f'{share * 100:.1f}%'.rjust(6)
+            # Fill the description into the space left over (truncates first).
+            desc_text  = sub.description or ''
+            desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
+            sep_desc   = ''
+            sep_desc_w = 0
+            if desc_text and desc_max > 0:
+                if _visible_width(desc_text) > desc_max:
+                    desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                desc_w = _visible_width(desc_text)
+                if is_done:
+                    sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                else:
+                    sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                sep_desc_w = 3 + desc_w
 
+            pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
+            line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+
+            # --- line 2: activity-only continuation, no right metrics (D6) ---
             activity = self.subagent_activity(sub.last_activity)
-            left2_w  = 6 + _visible_width(activity)
-            left2 = (
+            avail2   = max(0, target_w - 6)  # '   '(3) + └ + '  '(2)
+            if _visible_width(activity) > avail2:
+                activity = activity[:max(0, avail2 - 1)] + '…'
+            left2   = (
                 f'   {self.CTX_DIM}{GLYPH_CONTINUATION}{self.R}  '
                 f'{self.CTX_DIM}{activity}{self.R}'
             )
-
-            def cluster(show_tpm: bool, show_share: bool, show_out: bool) -> str:
-                frags: list[str] = []
-                if is_done:
-                    dim = self.CTX_DIM
-                    if show_tpm:
-                        frags.append(f'{dim}{tpm_str}{self.R}{dim} t/m{self.R}')
-                    if show_share:
-                        frags.append(f'{dim}{GLYPH_PIE} {share_str}{self.R}')
-                    tok_seg = f'{dim}{tok_field}{self.R}'
-                    if show_out:
-                        tok_seg += f' {out_pad}{dim}↑ {self.R}{dim}{out_s}{self.R}'
-                    frags.append(tok_seg)
-                    frags.append(f'{dim}{dur_s}{self.R}')
-                    frags.append(f'{dim}{short_model.rjust(6)}{self.R}')
-                    return f' {dim}·{self.R} '.join(frags)
-                else:
-                    if show_tpm:
-                        frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
-                    if show_share:
-                        frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
-                    # tok and ↑out are one space-grouped field (no · between them).
-                    tok_seg = f'{ctx_clr}{tok_field}{self.R}'
-                    if show_out:
-                        tok_seg += f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
-                    frags.append(tok_seg)
-                    frags.append(f'{self.CTX}{dur_s}{self.R}')
-                    frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
-                    return sep.join(frags)
-
-            show_tpm, show_share, show_out = tpm is not None, share is not None, True
-
-            def fits() -> bool:
-                return left2_w + _visible_width(cluster(show_tpm, show_share, show_out)) + 1 <= target_w
-
-            if not fits() and show_share:
-                show_share = False
-            if not fits() and show_out:
-                show_out = False
-            if not fits() and show_tpm:
-                show_tpm = False
-
-            right2 = cluster(show_tpm, show_share, show_out)
-            pad2   = max(1, target_w - left2_w - _visible_width(right2))
-            line2  = f'{left2}{" " * pad2}{right2}'
+            left2_w = 6 + _visible_width(activity)
+            pad2    = max(0, target_w - left2_w)
+            line2   = f'{left2}{" " * pad2}'
 
             return f'{line1}\n{line2}'
 
+        # --- one-line collapse (D6): drops ↑output; marker/type/model/verb kept ---
+        kind = sub.last_activity[0]
+        tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
+            '(thinking)' if kind == 'thinking' else
+            '(replying)' if kind == 'text' else ''
+        )
+
+        right_n = (
+            f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
+            f'  {self.CTX}{dur_s}{self.R}'
+        )
+        right_n_w = _visible_width(right_n)
+
+        if is_done:
+            left_n = (
+                f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
+                f'{self.CTX_DIM}{type_text}{self.R}'
+                f'  {self.CTX_DIM}{short_model}{self.R}'
+                f'  {self.CTX_DIM}{tool_verb}{self.R}'
+            )
         else:
-            # --- narrow single-line collapse ---
-            kind = sub.last_activity[0]
-            tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
-                '(thinking)' if kind == 'thinking' else
-                '(replying)' if kind == 'text' else ''
+            left_n = (
+                f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
+                f'{self.SKILLS}{type_text}{self.R}'
+                f'  {model_clr}{short_model}{self.R}'
+                f'  {self.CTX}{tool_verb}{self.R}'
             )
+        left_n_w = _visible_width(left_n)
+        pad_n    = max(1, target_w - left_n_w - right_n_w)
+        return f'{left_n}{" " * pad_n}{right_n}'
 
-            right_n = (
-                f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
-                f'  {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
-                f'  {self.CTX}{dur_s}{self.R}'
-            )
-            right_n_w = _visible_width(right_n)
-
-            if is_done:
-                left_n = (
-                    f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
-                    f'{self.CTX_DIM}{type_text}{self.R}'
-                    f'  {self.CTX_DIM}{short_model}{self.R}'
-                    f'  {self.CTX_DIM}{tool_verb}{self.R}'
-                )
-            else:
-                left_n = (
-                    f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
-                    f'{self.SKILLS}{type_text}{self.R}'
-                    f'  {model_clr}{short_model}{self.R}'
-                    f'  {self.CTX}{tool_verb}{self.R}'
-                )
-            left_n_w = _visible_width(left_n)
-            pad_n    = max(1, target_w - left_n_w - right_n_w)
-            return f'{left_n}{" " * pad_n}{right_n}'
-
-    def task_row(self, tasks: TaskList, width: int, *, compact: bool = False) -> list[str]:
+    def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()
         c_glyph = rainbow_at(step, 9)
         done    = tasks.completed
@@ -830,8 +810,10 @@ class Renderer:
         else:
             head = f'{glyph_s}  {count_p}'
 
-        # Available width for the inner content of a content row.
-        inner_w = width - 3
+        # Inner content width supplied by the builder (the box's content area
+        # at full width, or a narrower side-by-side left-column width). Item
+        # rows are laid out to exactly this width so subjects truncate to fit.
+        inner_w = content_width
 
         out: list[str] = [head]
 

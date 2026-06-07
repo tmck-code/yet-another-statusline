@@ -63,6 +63,33 @@ def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) 
     rows.append(RowSpec('bottom_border'))
 
 
+def zip_columns(
+    left_lines: list[str],
+    right_lines: list[str],
+    left_w: int,
+    right_w: int,
+    divider: str,
+) -> list[str]:
+    """Combine two rendered columns into side-by-side content rows (D3).
+
+    Each column is rendered independently to its own content width; this zips
+    them top-aligned to ``max(len(left), len(right))`` rows, padding the shorter
+    column with blank rows of its own width so the divider and the right edge
+    stay straight. Every combined row is ``{left} {divider} {right}`` — one pad
+    space on each side of the gradient ``│`` — and spans the full inner width.
+    Padding uses ``_visible_width`` so ANSI/glyph runs don't skew the columns.
+    """
+    height = max(len(left_lines), len(right_lines))
+    rows: list[str] = []
+    for i in range(height):
+        left  = left_lines[i]  if i < len(left_lines)  else ''
+        right = right_lines[i] if i < len(right_lines) else ''
+        left  = f'{left}{" " * max(0, left_w - _visible_width(left))}'
+        right = f'{right}{" " * max(0, right_w - _visible_width(right))}'
+        rows.append(f'{left} {divider} {right}')
+    return rows
+
+
 def build_narrow(
     view: SessionView,
     width: int,
@@ -110,12 +137,12 @@ def build_narrow(
             RowSpec('separator_dim'),
         ]
     if tasks.is_visible():
-        for line in r.task_row(tasks, width, compact=True):
+        for line in r.task_row(tasks, width - 4, compact=True):
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
         for sub in visible_subs:
-            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
+            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -180,12 +207,12 @@ def build_medium(
     visible_subs   = subagents.visible(time.time(), last_prompt_ts)
     rows: list[RowSpec] = [top_row, content_row, sep_row]
     if tasks.is_visible():
-        for line in r.task_row(tasks, width):
+        for line in r.task_row(tasks, width - 4):
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
         for sub in visible_subs:
-            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
+            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -352,28 +379,61 @@ def build_wide(
         rows.append(RowSpec('content', content=plugins_line))
         pending_ups = ()
 
-    if tasks.is_visible():
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
-        for line in r.task_row(tasks, width):
-            rows.append(RowSpec('content', content=line))
-        pending_ups = ()
-
     last_prompt_ts = read_last_prompt_ts(session.session_id)
     visible_subs   = subagents.visible(time.time(), last_prompt_ts)
-    if visible_subs:
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
-        for sub in visible_subs:
-            for line in r.subagent_row(sub, width, session_inout=session_inout).split('\n'):
+
+    # Side-by-side composition (D2/D3/D5/D7): when the wide layout has BOTH a
+    # visible checklist AND >=1 visible subagent, lay the checklist (left) and
+    # the subagent cohort (right) as two columns in one bordered block. The
+    # left column is capped at 45% of the inner width; the right takes the rest.
+    # If the right column would be narrower than 40 cols, fall back to stacking.
+    # `tail_ups` carries the divider's `┴` onto the separator/border below.
+    tail_ups: tuple[int, ...] = ()
+    side_by_side = False
+    if tasks.is_visible() and visible_subs:
+        inner             = width - 4
+        task_lines_full   = r.task_row(tasks, inner)
+        longest_task_line = max((_visible_width(line) for line in task_lines_full), default=0)
+        left_w            = min(longest_task_line, inner * 45 // 100)
+        right_w           = inner - 3 - left_w
+        if right_w >= 40:
+            side_by_side = True
+            divider_col  = 3 + left_w + 1  # 1-indexed visual column of the │
+            left_lines   = r.task_row(tasks, left_w)
+            right_lines: list[str] = []
+            for sub in visible_subs:
+                right_lines.extend(
+                    r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout).split('\n')
+                )
+            div_color = r.grad_at(divider_col - 1, width, fill=fill)
+            divider   = f'{div_color}│{RESET}'
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, downs=(divider_col,)))
+            for line in zip_columns(left_lines, right_lines, left_w, right_w, divider):
                 rows.append(RowSpec('content', content=line))
-        pending_ups = ()
+            pending_ups = ()
+            tail_ups    = (divider_col,)
+
+    if not side_by_side:
+        if tasks.is_visible():
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
+            for line in r.task_row(tasks, width - 4):
+                rows.append(RowSpec('content', content=line))
+            pending_ups = ()
+
+        if visible_subs:
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
+            for sub in visible_subs:
+                for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout).split('\n'):
+                    rows.append(RowSpec('content', content=line))
+            pending_ups = ()
 
     if openspec_bars:
-        rows.append(RowSpec(sep_kind('separator'), ups=pending_ups))
+        rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups))
         for bar in openspec_bars:
             rows.append(RowSpec('content', content=bar))
         rows.append(RowSpec('bottom_border'))
     else:
-        rows.append(RowSpec('bottom_border', ups=pending_ups))
+        rows.append(RowSpec('bottom_border', ups=pending_ups + tail_ups))
 
     append_error_row(rows, view.cfg, width, r)
     spec.rows = rows
@@ -388,11 +448,11 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
         elif row.kind == 'bottom_border':
             lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill))
         elif row.kind == 'separator':
-            lines.append(r.border_separator(spec.width, ups=row.ups, fill=spec.fill))
+            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill))
         elif row.kind == 'separator_seam':
             # Static->dynamic split: a full-brightness solid rule (vs the dotted-dim
             # separators between dynamic sections). Renders via the solid separator.
-            lines.append(r.border_separator(spec.width, ups=row.ups, fill=spec.fill))
+            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill))
         elif row.kind == 'separator_dim':
             lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge))
         elif row.kind == 'content':

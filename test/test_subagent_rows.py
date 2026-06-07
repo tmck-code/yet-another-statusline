@@ -1,5 +1,4 @@
 import json
-import re
 import time
 from pathlib import Path
 
@@ -34,6 +33,7 @@ def _make_sub(
     total_input: int = 12345,
     last_activity: tuple = ('tool_use', 'Bash', {'command': 'pytest -q'}),
     mtime: float | None = None,
+    end_ts: float = 0.0,
 ) -> RunningSubagent:
     now = time.time()
     if first_timestamp is None:
@@ -51,171 +51,293 @@ def _make_sub(
         cache_read_in   = cache_read_in,
         total_input     = total_input,
         last_activity   = last_activity,
+        end_ts          = end_ts,
     )
 
 
-# A. subagent_row formatting
+# Helpers ---------------------------------------------------------------------
 
-def test_subagent_row_includes_agent_type() -> None:
-    out = _r.subagent_row(_make_sub(), 100)
-    assert 'general-purpose' in strip_ansi(out)
-
-
-def test_subagent_row_includes_description_when_room() -> None:
-    out = _r.subagent_row(_make_sub(), 140)
-    assert 'Draft claude-light Theme literal' in strip_ansi(out)
+def _two(sub: RunningSubagent, content_width: int = 136, **kw):
+    """Render the two-line form and return (line1, line2)."""
+    out = _r.subagent_row(sub, content_width, twoline=True, **kw)
+    line1, line2 = out.split('\n')
+    return line1, line2
 
 
-def test_subagent_row_has_marker_glyph() -> None:
-    out = _r.subagent_row(_make_sub(), 80)
-    assert '▶' in strip_ansi(out)
+def _one(sub: RunningSubagent, content_width: int = 96, **kw) -> str:
+    """Render the one-line collapse form."""
+    return _r.subagent_row(sub, content_width, twoline=False, **kw)
 
 
-def test_subagent_row_has_up_arrow() -> None:
-    out = _r.subagent_row(_make_sub(), 100)
-    assert '↑' in strip_ansi(out)
+# A. Two-line form: duration-first identity + cluster ------------------------
+
+def test_two_line_duration_at_front() -> None:
+    sub = _make_sub(first_timestamp=time.time() - 47)
+    line1, _ = _two(sub)
+    plain = strip_ansi(line1)
+    assert plain.lstrip().startswith('47s')
+    # duration precedes the agent type
+    assert plain.index('47s') < plain.index('general-purpose')
 
 
-def test_subagent_row_output_formatted() -> None:
-    out = _r.subagent_row(_make_sub(output=678), 100)
-    assert '678' in strip_ansi(out)
+def test_two_line_has_type_then_description() -> None:
+    sub = _make_sub(description='hello world')
+    line1, _ = _two(sub)
+    plain = strip_ansi(line1)
+    assert plain.index('general-purpose') < plain.index('hello world')
 
 
-def test_subagent_row_duration_seconds() -> None:
-    out = _r.subagent_row(_make_sub(first_timestamp=time.time() - 47), 100)
-    assert '47s' in strip_ansi(out)
+def test_two_line_no_run_state_marker() -> None:
+    line1, line2 = _two(_make_sub())
+    assert '▶' not in strip_ansi(line1)
+    assert '✓' not in strip_ansi(line1)
+    assert '▶' not in strip_ansi(line2)
+    assert '✓' not in strip_ansi(line2)
 
 
-@pytest.mark.parametrize('width', [80, 100])
-def test_subagent_row_fits_inner_width_narrow(width: int) -> None:
-    out = _r.subagent_row(_make_sub(), width)
-    assert _visible_width(out) <= width - 3
+def test_two_line_cluster_share_tok_model_order() -> None:
+    sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6')
+    si  = (sub.total_input + sub.output) * 2  # ~50% share
+    line1, _ = _two(sub, 136, session_inout=si)
+    plain = strip_ansi(line1)
+    tok = fmt_tok(sub.total_input)
+    assert '%' in plain
+    assert tok in plain
+    assert 'sonnet' in plain
+    # cluster order: share% then tok then model
+    assert plain.index('%') < plain.index(tok) < plain.index('sonnet')
 
 
-@pytest.mark.parametrize('width', [120, 160])
-def test_subagent_row_fits_inner_width_wide(width: int) -> None:
-    line1, line2 = _r.subagent_row(_make_sub(), width).split('\n')
-    assert _visible_width(line1) <= width - 3
-    assert _visible_width(line2) <= width - 3
+def test_two_line_no_tpm_field() -> None:
+    sub = _make_sub(first_timestamp=time.time() - 60, total_input=3000, output=600)
+    si  = (sub.total_input + sub.output) * 2
+    line1, line2 = _two(sub, 160, session_inout=si)
+    assert 't/m' not in strip_ansi(line1)
+    assert 't/m' not in strip_ansi(line2)
 
 
-def test_subagent_row_long_description_elides() -> None:
+def test_two_line_no_output_field() -> None:
+    sub = _make_sub()
+    si  = (sub.total_input + sub.output) * 2
+    line1, line2 = _two(sub, 160, session_inout=si)
+    assert '↑' not in strip_ansi(line1)
+    assert '↑' not in strip_ansi(line2)
+
+
+def test_two_line_no_cost() -> None:
+    line1, line2 = _two(_make_sub(), 160, session_inout=999_999)
+    assert '$' not in strip_ansi(line1)
+    assert '$' not in strip_ansi(line2)
+
+
+# B. Two-line line 2: activity-only ------------------------------------------
+
+def test_two_line_continuation_starts_with_elbow() -> None:
+    _, line2 = _two(_make_sub())
+    assert strip_ansi(line2).lstrip().startswith('└')
+
+
+def test_two_line_continuation_shows_activity() -> None:
+    sub = _make_sub(last_activity=('tool_use', 'Bash', {'command': 'pytest -q'}))
+    _, line2 = _two(sub)
+    assert 'Bash[pytest -q]' in strip_ansi(line2)
+
+
+def test_two_line_continuation_has_no_metrics() -> None:
+    sub = _make_sub(model='claude-sonnet-4-6')
+    si  = (sub.total_input + sub.output) * 2
+    _, line2 = _two(sub, 136, session_inout=si)
+    plain = strip_ansi(line2)
+    assert '%' not in plain
+    assert 'sonnet' not in plain
+    assert fmt_tok(sub.total_input) not in plain
+
+
+# C. Equal widths via _visible_width -----------------------------------------
+
+@pytest.mark.parametrize('content_width', [60, 96, 136])
+def test_two_line_equal_visible_widths(content_width: int) -> None:
+    sub = _make_sub()
+    si  = (sub.total_input + sub.output) * 2
+    line1, line2 = _two(sub, content_width, session_inout=si)
+    assert _visible_width(line1) == content_width
+    assert _visible_width(line2) == content_width
+
+
+def test_two_line_long_description_elides() -> None:
     sub = _make_sub(description='x' * 200)
-    out = _r.subagent_row(sub, 140)
-    assert '…' in strip_ansi(out)
+    line1, _ = _two(sub, 136, session_inout=999_999)
+    assert '…' in strip_ansi(line1)
+    assert _visible_width(line1) == 136
 
 
-def test_subagent_row_long_description_keeps_agent_type() -> None:
-    sub = _make_sub(description='x' * 200)
-    out = _r.subagent_row(sub, 80)
-    assert 'general-purpose' in strip_ansi(out)
+# D. Line-1 cluster shedding: share% first, then tok -------------------------
+
+def _cluster_state(line1: str, tok: str) -> tuple[bool, bool]:
+    """(share% present, tok present) on a line-1 cluster."""
+    p = strip_ansi(line1)
+    return ('%' in p, tok in p)
 
 
-def test_subagent_row_long_agent_type_not_truncated() -> None:
-    long_type = 'a-very-unusually-long-agent-type'  # 32 chars
-    sub = _make_sub(agent_type=long_type, description='short')
-    out = _r.subagent_row(sub, 80)
-    assert long_type in strip_ansi(out)
+def test_shed_description_truncates_before_cluster_sheds() -> None:
+    # Wide enough for the full cluster but not the full description: the
+    # description elides while share% and tok are both retained.
+    sub = _make_sub(description='x' * 120, total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 70, session_inout=si)
+    plain = strip_ansi(line1)
+    assert '…' in plain                     # description truncated
+    assert '%' in plain                     # share% kept
+    assert fmt_tok(sub.total_input) in plain  # tok kept
 
 
-def test_subagent_row_dur_few_seconds() -> None:
-    out = _r.subagent_row(_make_sub(first_timestamp=time.time() - 4), 100)
-    assert '4s' in strip_ansi(out)
+def test_shed_order_share_then_tok() -> None:
+    # Across narrowing widths the kept cluster is one of model-only,
+    # tok+model, or share+tok+model — never tok dropped while share kept.
+    sub = _make_sub(agent_type='general-purpose', description='x' * 80,
+                    total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    tok = fmt_tok(sub.total_input)
+    valid = {(True, True), (False, True), (False, False)}
+    for w in range(30, 80):
+        line1, _ = _two(sub, w, session_inout=si)
+        state = _cluster_state(line1, tok)
+        assert state in valid, f'width={w}: out-of-order shed {state}'
 
 
-def test_subagent_row_dur_minutes_seconds() -> None:
-    out = _r.subagent_row(_make_sub(first_timestamp=time.time() - 83), 100)
-    assert '1m23s' in strip_ansi(out)
+def test_shed_all_levels_reachable() -> None:
+    sub = _make_sub(agent_type='general-purpose', description='x' * 80,
+                    total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    tok = fmt_tok(sub.total_input)
+    seen = {_cluster_state(_two(sub, w, session_inout=si)[0], tok)
+            for w in range(30, 80)}
+    assert (True, True) in seen    # nothing shed
+    assert (False, True) in seen   # share% shed, tok kept
+    assert (False, False) in seen  # share% and tok shed
 
 
-def test_subagent_row_dur_hours_minutes() -> None:
-    out = _r.subagent_row(_make_sub(first_timestamp=time.time() - 3700), 100)
-    assert '1h01m' in strip_ansi(out)
+def test_shed_model_and_duration_always_kept() -> None:
+    sub = _make_sub(agent_type='general-purpose', description='x' * 80,
+                    first_timestamp=time.time() - 47, model='claude-sonnet-4-6',
+                    total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    for w in range(30, 80):
+        line1, _ = _two(sub, w, session_inout=si)
+        plain = strip_ansi(line1)
+        assert 'sonnet' in plain, f'width={w} dropped model'
+        assert '47s' in plain, f'width={w} dropped duration'
 
 
-def test_subagent_row_dur_no_timestamp_fallback() -> None:
-    out = _r.subagent_row(_make_sub(first_timestamp=0), 100)
-    assert '0s' in strip_ansi(out)
+# E. Done vs running treatment -----------------------------------------------
+
+def _make_done_sub(**kw) -> RunningSubagent:
+    now = time.time()
+    defaults = dict(first_timestamp=now - 120.0, end_ts=now - 30.0)
+    defaults.update(kw)
+    return _make_sub(**defaults)
 
 
-# B. build_wide integration
-
-def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent]) -> str:
-    monkeypatch.setattr(
-        subagents_mod.RunningSubagents, 'from_session',
-        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)),
-    )
-    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    view    = SessionView(session, Config())
-    tick    = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
-    spec    = layout.build_wide(view, tick, 120, _r)
-    return '\n'.join(layout.render_layout(spec, _r))
+def test_done_two_line_uses_dim_styling() -> None:
+    line1, _ = _two(_make_done_sub())
+    assert _r.CTX_DIM in line1
 
 
-def test_build_wide_no_subagents_no_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    out = _render_wide(monkeypatch, [])
-    assert '▶' not in strip_ansi(out)
+def test_running_two_line_uses_live_styling() -> None:
+    line1, _ = _two(_make_sub())
+    # running line1 styles the type with SKILLS and never uses the dim colour
+    assert _r.SKILLS in line1
+    assert _r.CTX_DIM not in line1
 
 
-def test_build_wide_two_subagents_two_markers(monkeypatch: pytest.MonkeyPatch) -> None:
-    sub_a = _make_sub(agent_type='alpha-agent', description='do alpha thing')
-    sub_b = _make_sub(agent_type='beta-agent', description='do beta thing')
-    out   = _render_wide(monkeypatch, [sub_a, sub_b])
-    stripped = strip_ansi(out)
-    assert stripped.count('▶') == 2
-    assert 'alpha-agent' in stripped
-    assert 'beta-agent' in stripped
+def test_done_two_line_frozen_duration_value() -> None:
+    # end_ts - first_timestamp = 90s -> 1m30s, shown at the front of line 1
+    line1, _ = _two(_make_done_sub())
+    assert '1m30s' in strip_ansi(line1)
 
 
-# C. New behavior — wide two-line shape
-
-def test_subagent_row_wide_has_two_lines() -> None:
-    out = _r.subagent_row(_make_sub(), 140)
-    assert out.count('\n') == 1
-
-
-def test_subagent_row_wide_identity_starts_with_marker() -> None:
-    line1, _ = _r.subagent_row(_make_sub(), 140).split('\n')
-    assert strip_ansi(line1).startswith('▶')
+def test_done_two_line_duration_does_not_tick() -> None:
+    sub = _make_done_sub()
+    line1_a, _ = _two(sub)
+    time.sleep(0.05)
+    line1_b, _ = _two(sub)
+    assert strip_ansi(line1_a) == strip_ansi(line1_b)
 
 
-def test_subagent_row_wide_continuation_starts_with_indent() -> None:
-    _, line2 = _r.subagent_row(_make_sub(), 140).split('\n')
-    assert strip_ansi(line2).startswith('   └')
+def test_done_two_line_no_marker() -> None:
+    line1, _ = _two(_make_done_sub())
+    plain = strip_ansi(line1)
+    assert '▶' not in plain
+    assert '✓' not in plain
 
 
-def test_subagent_row_wide_equal_visible_widths() -> None:
-    line1, line2 = _r.subagent_row(_make_sub(), 140).split('\n')
-    assert _visible_width(line1) == _visible_width(line2)
+# F. One-line collapse form ---------------------------------------------------
+
+def test_one_line_single_line() -> None:
+    assert '\n' not in _one(_make_sub())
 
 
-def test_subagent_row_wide_continuation_uses_ctx_dim() -> None:
-    line1, line2 = _r.subagent_row(_make_sub(), 140).split('\n')
-    assert _r.CTX in line1
-    assert _r.CTX_DIM in line2
-    assert _r.CTX not in line2 or _r.CTX_DIM != _r.CTX
+def test_one_line_drops_output() -> None:
+    out = _one(_make_sub())
+    assert '↑' not in strip_ansi(out)
 
 
-def test_subagent_row_narrow_single_line() -> None:
-    out = _r.subagent_row(_make_sub(), 80)
-    assert '\n' not in out
+def test_one_line_keeps_token_and_duration() -> None:
+    sub = _make_sub(first_timestamp=time.time() - 47)
+    out = strip_ansi(_one(sub))
+    assert fmt_tok(sub.total_input) in out
+    assert '47s' in out
 
 
-def test_subagent_row_narrow_at_boundary() -> None:
-    out = _r.subagent_row(_make_sub(), 100)
-    assert '\n' not in out
+def test_one_line_keeps_type_model_verb() -> None:
+    sub = _make_sub(model='claude-sonnet-4-6',
+                    last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    assert 'general-purpose' in out
+    assert 'sonnet' in out
+    assert 'Bash' in out
 
 
-def test_subagent_row_wide_ctx_uses_risk_zone_color() -> None:
-    sub_green = _make_sub(total_input=45_000)
-    sub_red   = _make_sub(total_input=160_000)
-    _, line2_green = _r.subagent_row(sub_green, 140).split('\n')
-    _, line2_red   = _r.subagent_row(sub_red,   140).split('\n')
-    assert _r.risk_zone_color(45_000) in line2_green
-    assert _r.risk_zone_color(160_000) in line2_red
+def test_one_line_running_keeps_marker() -> None:
+    out = strip_ansi(_one(_make_sub()))
+    assert '▶' in out
+    assert '✓' not in out
 
 
-# D. subagent_activity formatter
+def test_one_line_done_uses_checkmark() -> None:
+    out = strip_ansi(_one(_make_done_sub()))
+    assert '✓' in out
+    assert '▶' not in out
+
+
+def test_one_line_done_frozen_duration() -> None:
+    sub = _make_done_sub()
+    out = strip_ansi(_one(sub))
+    assert '1m30s' in out
+
+
+@pytest.mark.parametrize('content_width', [60, 96])
+def test_one_line_fits_content_width(content_width: int) -> None:
+    out = _one(_make_sub(), content_width)
+    assert _visible_width(out) <= content_width
+
+
+# G. Duration formatting ------------------------------------------------------
+
+@pytest.mark.parametrize('elapsed, token', [
+    (4, '4s'), (47, '47s'), (83, '1m23s'), (3700, '1h01m'),
+])
+def test_one_line_duration_formats(elapsed: int, token: str) -> None:
+    out = strip_ansi(_one(_make_sub(first_timestamp=time.time() - elapsed)))
+    assert token in out
+
+
+def test_one_line_no_timestamp_fallback() -> None:
+    out = strip_ansi(_one(_make_sub(first_timestamp=0)))
+    assert '0s' in out
+
+
+# H. subagent_activity formatter (unchanged) ---------------------------------
 
 def test_subagent_activity_bash_extracts_command() -> None:
     act = ('tool_use', 'Bash', {'command': 'pytest -q tests/'})
@@ -238,7 +360,6 @@ def test_subagent_activity_unknown_tool_first_value() -> None:
 def test_subagent_activity_long_arg_truncated() -> None:
     act = ('tool_use', 'Bash', {'command': 'x' * 100})
     out = strip_ansi(_r.subagent_activity(act))
-    # Extract the arg portion between '[' and ']'
     arg = out.split('[', 1)[1].rstrip(']')
     assert _visible_width(arg) == 37  # 36 chars + ellipsis
 
@@ -257,296 +378,38 @@ def test_subagent_activity_empty() -> None:
     assert _r.subagent_activity(('', '', {})) == ''
 
 
-# E. Burn-metric cluster (tasks 5.1–5.3)
+# I. build_wide integration --------------------------------------------------
 
-def _make_established_sub(**kwargs) -> RunningSubagent:
-    """Subagent running for 60s with enough tokens to produce valid tpm."""
-    defaults = dict(
-        first_timestamp=time.time() - 60,
-        total_input=3000,
-        billed_in=3000,
-        output=600,
+def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent]) -> str:
+    monkeypatch.setattr(
+        subagents_mod.RunningSubagents, 'from_session',
+        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)),
     )
-    defaults.update(kwargs)
-    return _make_sub(**defaults)
+    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
+    view    = SessionView(session, Config())
+    tick    = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
+    spec    = layout.build_wide(view, tick, 120, _r)
+    return '\n'.join(layout.render_layout(spec, _r))
 
 
-def test_burn_cluster_wide_shows_tpm_and_share() -> None:
-    # 5.1: ample wide width — both t/m and % must appear
-    sub = _make_established_sub()
-    session_inout = sub.total_input + sub.output + 1000  # non-zero denominator
-    out = _r.subagent_row(sub, 200, session_inout=session_inout)
-    _, line2 = out.split('\n')
-    plain = strip_ansi(line2)
-    assert 't/m' in plain
-    assert '%' in plain
+def test_build_wide_no_subagents(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = strip_ansi(_render_wide(monkeypatch, []))
+    assert 'alpha-agent' not in out
+    assert 'beta-agent' not in out
 
 
-def _pressure_sub() -> RunningSubagent:
-    """Wide stat fields + a max-length (36-char) activity, so the narrowest
-    wide widths are forced to shed stats. tpm/share both have valid data."""
-    return _make_sub(
-        billed_in=900_000_000, output=500_000_000, total_input=900_000_000,
-        first_timestamp=time.time() - 60, model='claude-sonnet-4-6',
-        last_activity=('tool_use', 'Bash', {'command': 'x' * 60}),
-    )
-
-
-def _droppables(line2: str) -> tuple[bool, bool, bool]:
-    """(t/m, share%, ↑output) presence in a continuation line."""
-    p = strip_ansi(line2)
-    return ('t/m' in p, '%' in p, '↑' in p)
-
-
-def test_burn_cluster_drop_priority_respected() -> None:
-    # Stats shed in order share% → ↑output → t/m. So across every width the
-    # kept set is a prefix of [t/m, ↑output, share%] from the high-priority end;
-    # a lower-priority stat is never present without all higher-priority ones.
-    valid = {(True, True, True), (True, False, True), (True, False, False), (False, False, False)}
-    sub = _pressure_sub()
-    si  = 10 ** 12
-    for w in range(101, 201):
-        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
-        combo = _droppables(line2)
-        assert combo in valid, f'width={w}: out-of-priority cluster {combo}'
-
-
-def test_burn_cluster_all_drop_levels_reachable() -> None:
-    # The chain isn't vacuous: each successive drop level is actually hit.
-    sub = _pressure_sub()
-    si  = 10 ** 12
-    seen = {_droppables(_r.subagent_row(sub, w, session_inout=si).split('\n')[1])
-            for w in range(101, 201)}
-    assert (True, False, False) in seen   # share + output dropped, t/m kept
-    assert (True, False, True)  in seen    # share dropped, output kept
-    assert (True, True, True)   in seen    # nothing dropped
-
-
-def test_burn_cluster_tok_dur_model_never_drop() -> None:
-    # Token count, elapsed, and model survive at every width, even under pressure.
-    sub = _pressure_sub()
-    si  = 10 ** 12
-    for w in range(101, 201):
-        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
-        plain = strip_ansi(line2)
-        assert re.search(r'\d+m\d{2}s', plain), f'width={w} dropped elapsed'
-        assert 'sonnet' in plain, f'width={w} dropped model'
-        assert fmt_tok(sub.total_input) in plain, f'width={w} dropped token count'
-
-
-def test_burn_cluster_widening_only_adds_stats() -> None:
-    # Monotonic: a wider row never shows fewer droppable stats than a narrower one.
-    sub = _pressure_sub()
-    si  = 10 ** 12
-    prev_count = -1
-    for w in range(101, 201):
-        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
-        count = sum(_droppables(line2))
-        assert count >= prev_count, f'width={w}: stat count dropped on widening'
-        prev_count = count
-
-
-def test_burn_cluster_narrow_row_unchanged() -> None:
-    # 5.3: width ≤ 100 — neither figure, single line, row unchanged
-    sub = _make_established_sub()
-    session_inout = sub.total_input + sub.output + 5000
-    for w in [80, 100]:
-        out = _r.subagent_row(sub, w, session_inout=session_inout)
-        assert '\n' not in out, f'width={w} produced two lines'
-        plain = strip_ansi(out)
-        assert 't/m' not in plain, f'width={w} showed t/m in narrow row'
-        assert '%' not in plain, f'width={w} showed % in narrow row'
-
-
-def _tpm_value(line2: str) -> int:
-    """Parse the integer t/m rate out of a continuation line."""
-    m = re.search(r'([\d,]+) t/m', strip_ansi(line2))
-    assert m, f'no t/m rate in: {strip_ansi(line2)!r}'
-    return int(m.group(1).replace(',', ''))
-
-
-def test_burn_cluster_done_tpm_frozen_at_end_ts() -> None:
-    # A Done agent's t/m freezes on its frozen duration (end_ts - first_timestamp),
-    # not the live clock — it must not keep ticking down after the agent finished.
-    now = time.time()
-    sub = _make_established_sub(
-        first_timestamp=now - 120,  # live clock would read 2 min
-        total_input=3000,
-        billed_in=3000,
-        output=600,
-    )
-    sub.end_ts = now - 60           # frozen duration is 1 min
-    si  = sub.total_input + sub.output + 5000
-    _, line2 = _r.subagent_row(sub, 200, session_inout=si).split('\n')
-    # Frozen: 3600 tokens / 1 min = 3600; a live clock would halve it to ~1800.
-    assert _tpm_value(line2) == 3600
-
-
-def test_burn_cluster_done_tpm_stable_as_time_passes() -> None:
-    # Two renders of the same Done agent, separated by simulated elapsed time,
-    # report the identical t/m — the value does not drift after completion.
-    base = _make_established_sub(
-        first_timestamp=time.time() - 300,
-        total_input=4000, billed_in=4000, output=800,
-    )
-    base.end_ts = time.time() - 200
-    si  = base.total_input + base.output + 5000
-    first  = _tpm_value(_r.subagent_row(base, 200, session_inout=si).split('\n')[1])
-    # Re-render after pretending another minute elapsed; end_ts is fixed so the
-    # frozen duration — and thus t/m — is unchanged.
-    later = _make_sub(
-        first_timestamp=base.first_timestamp, total_input=base.total_input,
-        billed_in=base.billed_in, output=base.output,
-    )
-    later.end_ts = base.end_ts
-    second = _tpm_value(_r.subagent_row(later, 200, session_inout=si).split('\n')[1])
-    assert first == second
-
-
-# F. Single stat line + cost removal (burndown mockup match)
-
-def test_subagent_row_wide_no_cost() -> None:
-    sub = _make_established_sub()
-    out = _r.subagent_row(sub, 160, session_inout=sub.total_input + sub.output + 5000)
-    assert '$' not in strip_ansi(out)
-
-
-def test_subagent_row_narrow_no_cost() -> None:
-    assert '$' not in strip_ansi(_r.subagent_row(_make_sub(), 100))
-
-
-def test_subagent_row_wide_dur_and_model_on_continuation() -> None:
-    # duration + model relocate from the identity line to the stat cluster
-    sub = _make_established_sub(model='claude-sonnet-4-6', first_timestamp=time.time() - 90)
-    line1, line2 = _r.subagent_row(
-        sub, 160, session_inout=sub.total_input + sub.output + 5000).split('\n')
-    p1, p2 = strip_ansi(line1), strip_ansi(line2)
-    assert 'sonnet' in p2 and 'sonnet' not in p1
-    assert '1m30s' in p2 and '1m30s' not in p1
-
-
-def test_subagent_row_wide_identity_is_just_type_and_desc() -> None:
-    line1, _ = _r.subagent_row(_make_sub(description='hello world'), 160).split('\n')
-    assert strip_ansi(line1).rstrip() == '▶  general-purpose · hello world'
-
-
-def test_subagent_row_wide_share_one_decimal() -> None:
-    sub = _make_established_sub()
-    _, line2 = _r.subagent_row(
-        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
-    m = re.search(r'(\d+\.\d+)%', strip_ansi(line2))
-    assert m is not None
-    assert len(m.group(1).split('.')[1]) == 1  # exactly one decimal place
-
-
-def test_subagent_row_wide_model_right_justified() -> None:
-    # 5-char model name (haiku) gains a leading space from rjust(6)
-    sub = _make_established_sub(model='claude-haiku-4-5', first_timestamp=time.time() - 90)
-    _, line2 = _r.subagent_row(
-        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
-    assert strip_ansi(line2).rstrip().endswith(' haiku')
-
-
-# G. Done row treatment (group 5)
-
-def _make_done_sub(**kwargs) -> RunningSubagent:
-    """Subagent that has finished: end_ts > 0, ran for ~90s."""
-    now = time.time()
-    defaults = dict(
-        agent_type='general-purpose',
-        description='Draft claude-light Theme literal',
-        billed_in=12345,
-        output=678,
-        first_timestamp=now - 120.0,
-        end_ts=now - 30.0,  # Done 30s ago; elapsed frozen at 90s
-        model='claude-sonnet-4-6',
-        cache_read_in=0,
-        total_input=12345,
-        last_activity=('tool_use', 'Bash', {'command': 'pytest -q'}),
-    )
-    defaults.update(kwargs)
-    return RunningSubagent(**defaults)
-
-
-def test_done_row_wide_shows_checkmark() -> None:
-    out = _r.subagent_row(_make_done_sub(), 140)
-    line1, _ = out.split('\n')
-    assert '✓' in strip_ansi(line1)
-
-
-def test_done_row_wide_no_running_marker() -> None:
-    out = _r.subagent_row(_make_done_sub(), 140)
-    line1, _ = out.split('\n')
-    assert '▶' not in strip_ansi(line1)
-
-
-def test_done_row_narrow_shows_checkmark() -> None:
-    out = _r.subagent_row(_make_done_sub(), 80)
-    assert '\n' not in out
-    assert '✓' in strip_ansi(out)
-
-
-def test_done_row_narrow_no_running_marker() -> None:
-    out = _r.subagent_row(_make_done_sub(), 80)
-    assert '▶' not in strip_ansi(out)
-
-
-def test_running_row_still_has_running_marker() -> None:
-    out = _r.subagent_row(_make_sub(), 140)
-    line1, _ = out.split('\n')
-    assert '▶' in strip_ansi(line1)
-    assert '✓' not in strip_ansi(line1)
-
-
-def test_running_row_narrow_still_has_running_marker() -> None:
-    out = _r.subagent_row(_make_sub(), 80)
-    assert '▶' in strip_ansi(out)
-    assert '✓' not in strip_ansi(out)
-
-
-def _extract_dur(text: str) -> str:
-    """Pull the first duration token (e.g. '1m30s', '47s', '1h01m') out of text."""
-    import re
-    m = re.search(r'\d+h\d{2}m|\d+m\d{2}s|\d+s', text)
-    return m.group(0) if m else ''
-
-
-def test_done_row_elapsed_is_frozen_wide() -> None:
-    """Duration in two renders of a Done row must be identical (elapsed is frozen)."""
-    now = time.time()
-    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
-    out1 = _r.subagent_row(sub, 140)
-    time.sleep(0.05)
-    out2 = _r.subagent_row(sub, 140)
-    _, line2_a = out1.split('\n')
-    _, line2_b = out2.split('\n')
-    assert _extract_dur(strip_ansi(line2_a)) == _extract_dur(strip_ansi(line2_b))
-
-
-def test_done_row_elapsed_is_frozen_narrow() -> None:
-    """Narrow: frozen elapsed does not increase between two renders."""
-    now = time.time()
-    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
-    out1 = _r.subagent_row(sub, 80)
-    time.sleep(0.05)
-    out2 = _r.subagent_row(sub, 80)
-    assert _extract_dur(strip_ansi(out1)) == _extract_dur(strip_ansi(out2))
-
-
-def test_done_row_frozen_duration_value_wide() -> None:
-    """Elapsed shown for Done row equals end_ts - first_timestamp (90s → 1m30s)."""
-    now = time.time()
-    sub = _make_done_sub(first_timestamp=now - 120.0, end_ts=now - 30.0)
-    _, line2 = _r.subagent_row(sub, 160).split('\n')
-    assert '1m30s' in strip_ansi(line2)
-
-
-def test_done_row_uses_ctx_dim_styling() -> None:
-    """Done row identity line must contain CTX_DIM escape; running row must not (in line1)."""
-    done_out    = _r.subagent_row(_make_done_sub(), 140)
-    running_out = _r.subagent_row(_make_sub(), 140)
-    done_line1, _    = done_out.split('\n')
-    running_line1, _ = running_out.split('\n')
-    assert _r.CTX_DIM in done_line1
-    # Running line1 uses CTX (not CTX_DIM) — verify CTX_DIM is absent (or they differ)
-    assert _r.CTX_DIM not in running_line1 or _r.CTX_DIM == _r.CTX
+def test_build_wide_two_subagents_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    sub_a = _make_sub(agent_type='alpha-agent', description='do alpha thing')
+    sub_b = _make_sub(agent_type='beta-agent', description='do beta thing')
+    out   = strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b]))
+    assert 'alpha-agent' in out
+    assert 'beta-agent' in out
+    # wide is two-line: subagent rows carry no run-state marker
+    assert '▶' not in out
+    # the subagent identity lines drop the t/m and ↑output fields
+    sub_lines = [ln for ln in strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b])).split('\n')
+                 if 'alpha-agent' in ln or 'beta-agent' in ln]
+    assert sub_lines
+    for ln in sub_lines:
+        assert 't/m' not in ln
+        assert '↑' not in ln

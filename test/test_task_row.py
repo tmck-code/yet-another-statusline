@@ -223,15 +223,59 @@ def test_task_row_no_collapse_lines_and_numbered_window() -> None:
     assert '5. doing 4' in body
 
 
-@pytest.mark.parametrize('width', [80, 100, 160])
-def test_task_row_fits_inner_width(width: int) -> None:
+@pytest.mark.parametrize('content_width', [40, 76, 96, 156])
+def test_task_row_fits_supplied_content_width(content_width: int) -> None:
+    # The builder supplies the inner content width directly (D4); every line
+    # the renderer emits must fit within it, measured by visible width.
     now = time.time()
     out = _r.task_row(_make_tasks(
         [('A', 'x' * 200, 'in_progress'), ('B', 'y' * 200, 'pending')],
         timestamps=[(now - 30, None), (None, None)],
-    ), width)
+    ), content_width)
     for line in out:
-        assert _visible_width(line) <= width - 3
+        assert _visible_width(line) <= content_width
+
+
+def test_task_row_honours_narrow_left_column_width() -> None:
+    # A side-by-side left column is much narrower than the terminal; the
+    # checklist must render its full structure into the supplied width and
+    # truncate subjects to fit (no overflow past content_width).
+    now = time.time()
+    left_w = 30
+    out = _r.task_row(_make_tasks(
+        [
+            ('done a', 'doing a', 'completed'),
+            ('b', 'a very long active form that cannot possibly fit', 'in_progress'),
+            ('c', 'doing c', 'pending'),
+        ],
+        timestamps=[(now - 100, now - 40), (now - 40, None), (None, None)],
+    ), left_w)
+    for line in out:
+        assert _visible_width(line) <= left_w
+    body = '\n'.join(strip_ansi(line) for line in out[1:])
+    assert '…' in body  # the long subject truncated to fit the narrow column
+
+
+def test_task_row_narrow_timers_still_right_align() -> None:
+    # Even at a narrow supplied width the per-task timers share one leading
+    # column so their right edges line up; all item rows share one width.
+    now = time.time()
+    out = _r.task_row(_make_tasks(
+        [
+            ('short', 'doing short', 'completed'),       # 0:05
+            ('longer', 'doing longer', 'completed'),     # 12:34
+            ('active', 'doing active', 'in_progress'),   # live
+        ],
+        timestamps=[(now - 5, now), (now - 754, now), (now - 30, None)],
+    ), 34)
+    item_lines = out[1:]
+    widths = {_visible_width(strip_ansi(line)) for line in item_lines}
+    assert len(widths) == 1
+    # The narrower timer is left-padded so its right edge aligns with the wider
+    # one (a fixed leading column), even at this narrow supplied width.
+    timed = [strip_ansi(line) for line in item_lines if ':' in strip_ansi(line)]
+    ends = {s.index(s.split()[0]) + len(s.split()[0]) for s in timed}
+    assert len(ends) == 1
 
 
 # B. task_row compact form (narrow)
