@@ -230,7 +230,9 @@ def test_last_activity_text_after_tool_use(tmp_home: Path) -> None:
 
     result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
-    assert sub.last_activity == ('text', '', {})
+    # A trailing text block must not mask a real tool_use earlier in the
+    # message: the last tool_use wins (Claude often emits [tool_use, text]).
+    assert sub.last_activity == ('tool_use', 'Edit', {'file_path': '/x.py', 'old_string': 'a', 'new_string': 'b'})
 
 
 def test_last_activity_thinking_only(tmp_home: Path) -> None:
