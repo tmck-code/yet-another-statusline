@@ -62,11 +62,20 @@ class BorderRenderer:
         parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╯', self.R]
         return ''.join(parts)
 
-    def border_separator(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
+    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
+        downs_set = set(downs)
         parts = [self.gradient.grad_at(0, width, fill=fill), '├']
         for i in range(width - 2):
-            ch = '┴' if (i + 2) in ups_set else '─'
+            col = i + 2
+            if col in downs_set and col in ups_set:
+                ch = '┼'
+            elif col in downs_set:
+                ch = '┬'
+            elif col in ups_set:
+                ch = '┴'
+            else:
+                ch = '─'
             parts += [self.gradient.grad_at(i + 1, width, fill=fill), ch]
         parts += [self.gradient.grad_at(width - 1, width, fill=fill), '┤', self.R]
         return ''.join(parts)

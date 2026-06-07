@@ -64,12 +64,24 @@ def _content_rows_starting_with(spec: layout.LayoutSpec, *prefixes: str) -> list
     ]
 
 
+def _subagent_block_rows(spec: layout.LayoutSpec, types: tuple[str, ...]) -> list[layout.RowSpec]:
+    """Content rows for a markerless two-line cohort: identity rows carry the
+    agent type, continuation rows start with the `└` elbow."""
+    return [
+        row for row in spec.rows
+        if row.kind == 'content' and (
+            any(t in strip_ansi(row.content) for t in types)
+            or strip_ansi(row.content).lstrip().startswith('└')
+        )
+    ]
+
+
 # 4.4.1 — three subagents at wide → 6 content rows
 def test_three_subagents_wide_produces_six_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     subs = [_make_sub('alpha'), _make_sub('beta'), _make_sub('gamma')]
     _inject(monkeypatch, subs)
     spec = layout.build_wide(_view(), _tick(), 140, _r)
-    sub_rows = _content_rows_starting_with(spec, '▶', '   └')
+    sub_rows = _subagent_block_rows(spec, ('alpha', 'beta', 'gamma'))
     assert len(sub_rows) == 6
 
 
@@ -97,7 +109,14 @@ def test_ordering_preserved_wide(monkeypatch: pytest.MonkeyPatch) -> None:
         classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs_sorted)),
     )
     spec = layout.build_wide(_view(), _tick(), 140, _r)
-    identity_rows = [row for row in spec.rows if row.kind == 'content' and '▶' in strip_ansi(row.content)]
+    # markerless two-line identity rows carry the agent type (continuation rows
+    # start with the `└` elbow and are excluded here)
+    identity_rows = [
+        row for row in spec.rows
+        if row.kind == 'content'
+        and not strip_ansi(row.content).lstrip().startswith('└')
+        and any(s.agent_type in strip_ansi(row.content) for s in subs_sorted)
+    ]
     for i, expected_sub in enumerate(subs_sorted):
         assert expected_sub.agent_type in strip_ansi(identity_rows[i].content)
 
@@ -114,5 +133,5 @@ def test_three_subagents_medium_produces_six_rows(monkeypatch: pytest.MonkeyPatc
     subs = [_make_sub('alpha'), _make_sub('beta'), _make_sub('gamma')]
     _inject(monkeypatch, subs)
     spec = layout.build_medium(_view(), 120, _r)
-    sub_rows = _content_rows_starting_with(spec, '▶', '   └')
+    sub_rows = _subagent_block_rows(spec, ('alpha', 'beta', 'gamma'))
     assert len(sub_rows) == 6

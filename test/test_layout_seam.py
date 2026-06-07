@@ -258,3 +258,156 @@ def test_cache_countdown_divider_threaded_into_borders(
     # cache_div_col must appear in both tuples (it's the second entry).
     cache_div_col = top_row.downs[-1]
     assert cache_div_col in sep_row.ups
+
+
+# ---------------------------------------------------------------------------
+# Side-by-side composition (Group 6: tasks ⟷ subagents columns)
+# ---------------------------------------------------------------------------
+
+def _make_tasklist(long_subject: bool = False) -> tasks_mod.TaskList:
+    """A visible checklist (one task in_progress pins it visible).
+
+    With ``long_subject`` the widest task line easily exceeds 45% of the inner
+    width at any realistic terminal, so the left column is always capped — which
+    lets the width-driven fallback be exercised deterministically.
+    """
+    now  = time.time()
+    subj = ('a fairly long task subject line wide enough to cap the left column'
+            if long_subject else 'second task here')
+    return tasks_mod.TaskList(
+        tasks=[
+            tasks_mod.Task(id=1, subject='first task subject', active_form='doing first',
+                           status='completed', completed_at=now - 30),
+            tasks_mod.Task(id=2, subject=subj, active_form='doing second',
+                           status='in_progress', started_at=now - 10),
+            tasks_mod.Task(id=3, subject='third pending task', active_form='third',
+                           status='pending'),
+        ],
+        last_event_ts=now - 5,
+    )
+
+
+def _divider_content_idx(spec: layout.LayoutSpec) -> list[int]:
+    """Indices of dynamic content rows that carry a side-by-side divider │.
+
+    The path/model row and the token-stat rows both contain vsep │ glyphs, so
+    detection is scoped to content rows *below the static→dynamic seam* — only
+    a side-by-side block puts a divider there.
+    """
+    from helper import strip_ansi
+    seam_idx = next(
+        (i for i, row in enumerate(spec.rows) if row.kind == 'separator_seam'),
+        None,
+    )
+    if seam_idx is None:
+        return []
+    return [
+        i for i, row in enumerate(spec.rows)
+        if i > seam_idx and row.kind == 'content' and '│' in strip_ansi(row.content)
+    ]
+
+
+def _both_sections(monkeypatch: pytest.MonkeyPatch, *, long_subject: bool = False) -> None:
+    """Silence host-derived dynamic sections, then inject BOTH a checklist and
+    a one-subagent cohort so the wide builder can compose side-by-side."""
+    _silence_dynamic(monkeypatch)
+    tl = _make_tasklist(long_subject=long_subject)
+    monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
+                        classmethod(lambda cls, path: tl))
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
+
+
+def test_side_by_side_continuous_divider_when_both_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Wide + both sections + room → one block with a divider column that runs
+    ┬ (separator above) → │ (every combined row) → ┴ (separator/border below).
+    Column positions asserted via _visible_width."""
+    from helper import strip_ansi
+    from yas.render.text import _visible_width
+    _both_sections(monkeypatch, long_subject=True)
+
+    width = 140
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+
+    # Locate the combined block: content rows whose *inner* content carries the
+    # divider │. The divider's 1-indexed visual column on the full line is
+    # 3 + (its 0-indexed offset within the content), since border_line places
+    # content at visual col 3.
+    combined_idx = _divider_content_idx(spec)
+    assert combined_idx, 'expected a side-by-side block with a divider column'
+    # Divider column is identical across every combined row.
+    div_cols = {3 + strip_ansi(spec.rows[i].content).index('│') for i in combined_idx}
+    assert len(div_cols) == 1, f'divider column drifts across rows: {div_cols}'
+    divider_col = div_cols.pop()
+
+    # The block is contiguous; bracketing rows are the separators above/below.
+    first, last = combined_idx[0], combined_idx[-1]
+    assert combined_idx == list(range(first, last + 1)), 'combined block is not contiguous'
+    above = spec.rows[first - 1]
+    below = spec.rows[last + 1]
+    assert above.kind in ('separator_dim', 'separator_seam', 'separator')
+    assert below.kind in ('separator_dim', 'separator_seam', 'separator', 'bottom_border')
+    # Elbow threading carries the divider down into the block and back up below.
+    assert divider_col in above.downs, f'separator above missing ┬ at {divider_col}: {above.downs}'
+    assert divider_col in below.ups,   f'separator/border below missing ┴ at {divider_col}: {below.ups}'
+
+    # Render and verify the glyphs land on the same visual column everywhere.
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    for ln in lines:
+        assert _visible_width(ln) == width, f'row not full width: {_visible_width(ln)} != {width}'
+    col = divider_col - 1  # 0-indexed
+    assert lines[first - 1][col] in ('┬', '┼'), f'no ┬ above: {lines[first - 1][col]!r}'
+    for i in combined_idx:
+        assert lines[i][col] == '│', f'no │ in combined row: {lines[i][col]!r}'
+    assert lines[last + 1][col] in ('┴', '┼'), f'no ┴ below: {lines[last + 1][col]!r}'
+
+
+def test_side_by_side_falls_back_to_stacked_when_narrow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At a width where right_w < 40 the composition is abandoned and the two
+    sections stack full-width (no divider in any content row)."""
+    from helper import strip_ansi
+    _both_sections(monkeypatch, long_subject=True)
+
+    # width 80: inner=76, left_w=min(longest, 34)=34, right_w=76-3-34=39 (<40).
+    width = 80
+    inner = width - 4
+    left_w = inner * 45 // 100
+    assert inner - 3 - left_w < 40, 'precondition: this width must force the fallback'
+
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+    assert _divider_content_idx(spec) == [], 'expected stacked fallback (no divider column)'
+    # Both sections still present, stacked: a task header glyph row and a
+    # subagent marker row both appear as full-width content.
+    from yas.constants import GLYPH_TASKS
+    has_task = any(row.kind == 'content' and GLYPH_TASKS in strip_ansi(row.content) for row in spec.rows)
+    has_sub  = any(row.kind == 'content' and strip_ansi(row.content).lstrip().startswith('▶') for row in spec.rows)
+    assert has_task and has_sub, 'both sections should render in the stacked fallback'
+
+
+def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Single-section: checklist present, no subagents → full-width, no divider."""
+    from helper import strip_ansi
+    from yas.constants import GLYPH_TASKS
+    _silence_dynamic(monkeypatch)
+    tl = _make_tasklist(long_subject=True)
+    monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
+                        classmethod(lambda cls, path: tl))
+
+    spec = layout.build_wide(_view(), _tick(), 140, _r)
+    assert _divider_content_idx(spec) == [], 'tasks-only must not compose a divider column'
+    assert any(row.kind == 'content' and GLYPH_TASKS in strip_ansi(row.content) for row in spec.rows), \
+        'task checklist should render'
+
+
+def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Single-section: subagents present, no checklist → full-width, no divider."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
+
+    spec = layout.build_wide(_view(), _tick(), 140, _r)
+    assert _divider_content_idx(spec) == [], 'subagents-only must not compose a divider column'
+    # twoline cohort at wide: an identity row carries the agent type.
+    assert any(row.kind == 'content' and 'Explore' in strip_ansi(row.content) for row in spec.rows), \
+        'subagent cohort should render'
