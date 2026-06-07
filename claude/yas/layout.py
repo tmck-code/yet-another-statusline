@@ -267,7 +267,7 @@ def build_wide(
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
-    openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
+    openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
 
     line_context = r.context_line(ctx, width - 3, soft_limit)
 

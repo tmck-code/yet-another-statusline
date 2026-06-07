@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+import zlib
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -1099,7 +1100,8 @@ class Renderer:
             parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
         return ''.join(parts)
 
-    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25, idx: int = 0) -> str:
+    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
+        idx = zlib.crc32(name.encode()) % len(self.SPEC_GRADIENTS)
         pct = done * 100 // total
         if len(name) > title_w:
             title = name[:max(1, title_w - 3)] + '...'
