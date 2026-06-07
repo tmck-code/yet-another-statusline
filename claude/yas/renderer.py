@@ -585,7 +585,12 @@ class Renderer:
 
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
-    def subagent_activity(self, last_activity: tuple[str, str, dict[str, object]]) -> str:
+    def subagent_activity(
+        self,
+        last_activity: tuple[str, str, dict[str, object]],
+        *,
+        cap: int = 36,
+    ) -> str:
         kind, name, inp = last_activity
         if kind == 'tool_use':
             key = TOOL_ARG_KEY.get(name)
@@ -597,13 +602,18 @@ class Renderer:
                 raw = str(next(iter(inp.values())))
             else:
                 raw = ''
-            if _visible_width(raw) > 36:
-                raw = raw[:36] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+            if _visible_width(raw) > cap:
+                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
             return f'{GLYPH_TASKS} {name}[{raw}]'
         if kind == 'thinking':
             return f'{GLYPH_THINKING} (thinking)'
         if kind == 'text':
-            return f'{GLYPH_REPLYING} (replying)'
+            raw = name
+            if not raw:
+                return f'{GLYPH_REPLYING} (replying)'
+            if _visible_width(raw) > cap:
+                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+            return f'{GLYPH_REPLYING} {raw}'
         return ''
 
     def subagent_row(
@@ -697,8 +707,11 @@ class Renderer:
             line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
 
             # --- line 2: activity-only continuation, no right metrics (D6) ---
-            activity = self.subagent_activity(sub.last_activity)
-            avail2   = max(0, target_w - 6)  # '   '(3) + └ + '  '(2)
+            # The snippet grows with the spare width line 2 has (no right
+            # cluster lives here), but never past 100 cols before truncating.
+            avail2       = max(0, target_w - 6)  # '   '(3) + └ + '  '(2)
+            activity_cap = min(100, avail2)
+            activity     = self.subagent_activity(sub.last_activity, cap=activity_cap)
             if _visible_width(activity) > avail2:
                 activity = activity[:max(0, avail2 - 1)] + '…'
             left2   = (
