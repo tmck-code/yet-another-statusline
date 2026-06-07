@@ -1,6 +1,6 @@
 [project]
 name = "yet-another-statusline"
-version = "0.2.12"
+version = "0.2.13"
 description = "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more"
 readme = "README.md"
 
