@@ -323,6 +323,17 @@ def test_one_line_fits_content_width(content_width: int) -> None:
     assert _visible_width(out) <= content_width
 
 
+@pytest.mark.parametrize('content_width', [33, 37, 41])
+def test_one_line_long_name_padded_flush_to_width(content_width: int) -> None:
+    # A long-named agent (general-purpose + Edit verb) would push the left
+    # segment past the right border at narrow widths. The left run truncates so
+    # the row is padded/truncated to exactly content_width (border stays flush).
+    sub = _make_sub(agent_type='general-purpose',
+                    last_activity=('tool_use', 'Edit', {}))
+    out = _one(sub, content_width)
+    assert _visible_width(out) == content_width
+
+
 # G. Duration formatting ------------------------------------------------------
 
 @pytest.mark.parametrize('elapsed, token', [
