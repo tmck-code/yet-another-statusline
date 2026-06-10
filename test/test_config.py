@@ -59,6 +59,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.token_window == 60.0
     assert cfg.theme == 'claude-dark'
     assert cfg.bg_shift == 'warm'
+    assert cfg.show_day_stats is True
     assert cfg.errors == ()
 
 
@@ -176,6 +177,48 @@ def test_env_full_width_zero_overrides_toml_true(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = true\n')
     cfg = config.Config.load(env={'YAS_FULL_WIDTH': '0'}, config_dir=tmp_path)
     assert cfg.full_width is False
+
+
+# show_day_stats (seventh knob)
+
+def test_env_show_day_stats_zero_is_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_SHOW_DAY_STATS': '0'}, config_dir=tmp_path)
+    assert cfg.show_day_stats is False
+
+
+def test_env_show_day_stats_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'False', 'no', 'NO'):
+        cfg = config.Config.load(env={'YAS_SHOW_DAY_STATS': val}, config_dir=tmp_path)
+        assert cfg.show_day_stats is False, f'expected False for {val!r}'
+
+
+def test_env_show_day_stats_any_other_value_is_true(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'yes', 'banana'):
+        cfg = config.Config.load(env={'YAS_SHOW_DAY_STATS': val}, config_dir=tmp_path)
+        assert cfg.show_day_stats is True, f'expected True for {val!r}'
+
+
+@requires_tomllib
+def test_toml_show_day_stats_false(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[tokens]\nshow_day_stats = false\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_day_stats is False
+    assert 'show_day_stats' not in cfg.errors
+
+
+@requires_tomllib
+def test_toml_show_day_stats_non_bool_rejected_to_default(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[tokens]\nshow_day_stats = "banana"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_day_stats is True  # default
+    assert 'show_day_stats' in cfg.errors
+
+
+@requires_tomllib
+def test_env_show_day_stats_beats_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[tokens]\nshow_day_stats = true\n')
+    cfg = config.Config.load(env={'YAS_SHOW_DAY_STATS': '0'}, config_dir=tmp_path)
+    assert cfg.show_day_stats is False
 
 
 @requires_tomllib
