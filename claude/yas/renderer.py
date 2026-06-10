@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+import zlib
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -280,8 +281,8 @@ class Renderer:
         trailing = ' ' if leader else '  '
         return f'{" " * lead}{color}│{self.R}{trailing}'
 
-    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
-        return self.gradient.sparkline(history, live)
+    def sparkline_1row(self, history: list[int], live: bool = False) -> str:
+        return self.gradient.sparkline_1row(history, live)
 
     def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         return self.gradient.spark_rgb(t, dim)
@@ -585,7 +586,12 @@ class Renderer:
 
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
-    def subagent_activity(self, last_activity: tuple[str, str, dict[str, object]]) -> str:
+    def subagent_activity(
+        self,
+        last_activity: tuple[str, str, dict[str, object]],
+        *,
+        cap: int = 36,
+    ) -> str:
         kind, name, inp = last_activity
         if kind == 'tool_use':
             key = TOOL_ARG_KEY.get(name)
@@ -597,13 +603,18 @@ class Renderer:
                 raw = str(next(iter(inp.values())))
             else:
                 raw = ''
-            if _visible_width(raw) > 36:
-                raw = raw[:36] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+            if _visible_width(raw) > cap:
+                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
             return f'{GLYPH_TASKS} {name}[{raw}]'
         if kind == 'thinking':
             return f'{GLYPH_THINKING} (thinking)'
         if kind == 'text':
-            return f'{GLYPH_REPLYING} (replying)'
+            raw = name
+            if not raw:
+                return f'{GLYPH_REPLYING} (replying)'
+            if _visible_width(raw) > cap:
+                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+            return f'{GLYPH_REPLYING} {raw}'
         return ''
 
     def subagent_row(
@@ -697,8 +708,11 @@ class Renderer:
             line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
 
             # --- line 2: activity-only continuation, no right metrics (D6) ---
-            activity = self.subagent_activity(sub.last_activity)
-            avail2   = max(0, target_w - 6)  # '   '(3) + └ + '  '(2)
+            # The snippet grows with the spare width line 2 has (no right
+            # cluster lives here), but never past 100 cols before truncating.
+            avail2       = max(0, target_w - 6)  # '   '(3) + └ + '  '(2)
+            activity_cap = min(100, avail2)
+            activity     = self.subagent_activity(sub.last_activity, cap=activity_cap)
             if _visible_width(activity) > avail2:
                 activity = activity[:max(0, avail2 - 1)] + '…'
             left2   = (
@@ -870,72 +884,105 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> tuple[list[str], tuple[int, int], int]:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int]:
+        """One content line: tokens │ cost │ rate-and-sparkline.
+
+        With ``show_day_stats`` (default), session and day figures merge per
+        field as ``session/day`` with a paired cache parenthetical. When off,
+        the row is session-only and keeps the original per-field justification.
+        The tokens and cost columns occupy *static* widths derived from
+        ``box_width`` (not the rendered content), so the two ``│`` dividers stay
+        put as token/cost magnitudes change — content is left-justified into its
+        fixed cell. Returns ``([line], (col1, col2), 0)`` — the divider columns
+        for the builder's elbow threading; the old 60s tick marker is gone
+        (mark_col=0).
+        """
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
         in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
         out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
 
-        sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
-        day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
-        sess_cache_s = fmt_tok(sess_cache).rjust(self.CACHE_W)
-        day_cache_s  = fmt_tok(day_cache).rjust(self.CACHE_W)
-        sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
-        day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
+        if show_day_stats:
+            # Merged session/day per field; variable width, no fixed rjust (D2).
+            cache = (f'{self.TOK_DIM}({fmt_tok(sess_cache)}{self.R}'
+                     f'{self.TOK_DAY_DIM}/{fmt_tok(day_cache)}{self.R}'
+                     f'{self.TOK_DIM}){self.R}')
+            tokens_col = (
+                f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
+                f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R} '
+                f'{cache}'
+                f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
+                f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
+            )
+            cost_col = (f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
+                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
+        else:
+            # Session-only: original per-field justification (D2).
+            sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
+            sess_cache_s = fmt_tok(sess_cache).rjust(self.CACHE_W)
+            sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
+            tokens_col = (f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} '
+                          f'{self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} '
+                          f'{self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}')
+            cost_col = f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
 
         vsep_w        = 4
         vsep_leader_w = 4
+        label_w       = 15
 
-        middle1 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}'
-        middle2 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK_DAY}{day_out_s}{self.R}'
-
-        cost1 = f'${sess_cost:,.2f}'
-        cost2 = f'${day_cost:,.2f}'
-        cost_width = max(_visible_width(cost1), _visible_width(cost2))
-
-        end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
-        end2 = f'  {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
-
-        label_w = 15
-        w_middle = _visible_width(middle1)
-        w_end    = max(_visible_width(end1), _visible_width(end2))
         content_w = box_width - 3
-        leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
+        inner     = content_w - vsep_w - vsep_leader_w  # tokens + cost + leader budget
 
-        col1 = w_middle + 5                  # 1-indexed position of vsep │
+        # Static section widths: the two │ dividers must not reflow as token and
+        # cost magnitudes change, so allocate fixed column budgets sized for the
+        # realistic widest merged session/day content rather than measuring the
+        # rendered strings —
+        #   tokens '↓ 128.4K/1.9M (1.2M/18.3M) ↑ 47.3K/612.5K'  (~44 cols max)
+        #   cost   '$ $327.00 / $4188.88'                       (~20 cols max)
+        # They depend only on box_width (stable for a given terminal width) and
+        # shrink proportionally only when the terminal is too narrow to also keep
+        # the rate/spark leader at its label_w+1 minimum.
+        TOKENS_BUDGET = 46
+        COST_BUDGET   = 20
+        avail = inner - (label_w + 1)              # room left after the leader minimum
+        if TOKENS_BUDGET + COST_BUDGET <= avail:
+            w_middle, w_end = TOKENS_BUDGET, COST_BUDGET
+        else:
+            w_middle = max(1, avail * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
+            w_end    = max(1, avail - w_middle)
+
+        # Left-justify each column to its fixed width. The strings carry ANSI, so
+        # pad with _visible_width (never len()) — the trailing pad lands the │ at
+        # the fixed divider column regardless of content. Over-budget content
+        # overflows its cell (graceful) rather than corrupting the divider math.
+        tokens_col += ' ' * max(0, w_middle - _visible_width(tokens_col))
+        cost_col   += ' ' * max(0, w_end   - _visible_width(cost_col))
+
+        leader_w = max(label_w + 1, inner - w_middle - w_end)
+
+        col1 = w_middle + 5                   # 1-indexed position of vsep │
         col2 = w_middle + vsep_w + w_end + 5  # 1-indexed position of vsep_leader │
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
-        # bar_w = leader_w - label_w
 
-        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
-        rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
-        bar_w = leader_w - rate_label_w
+        bar_w        = leader_w - rate_label_w
 
         if bar_w <= 0:
-            leader1 = rate_label_padded
-            leader2 = ' ' * label_w
+            leader = rate_label
         else:
             if session_id:
-                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
-                top_row, bot_row = self.sparkline(spark_history[::-1], live=True)
+                # 60s window (D4); history is oldest→newest, so reverse it to put
+                # the newest (live) bucket on the LEFT, next to the t/m label —
+                # sparkline_1row dims that now-leftmost cell.
+                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW)[::-1]
+                spark = self.sparkline_1row(spark_history, live=True)
             else:
-                top_row, bot_row = ' ' * bar_w, ' ' * bar_w
-            leader1 = f'{rate_label_padded}{top_row}'
-            # leader2 = f'{" " * label_w}{bot_row}'
-            leader2 = f'{" " * rate_label_w}{bot_row}'
+                spark = ' ' * bar_w
+            leader = f'{rate_label}{spark}'
 
-        # 1-indexed column of the WINDOW (60s) tick inside the sparkline. History
-        # spans WINDOW*2 (=120s) across bar_w buckets reversed so index 0 is "now",
-        # which puts the 60s boundary at bar_w // 2. col2 is the vsep_leader │
-        # column; sparkline starts rate_label_w cells past that.
-        mark_col = col2 + rate_label_w + (bar_w // 2) if bar_w > 0 else 0
-
-        return [
-            f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
-            f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
-        ], (col1, col2), mark_col
+        return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -1099,7 +1146,8 @@ class Renderer:
             parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
         return ''.join(parts)
 
-    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25, idx: int = 0) -> str:
+    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
+        idx = zlib.crc32(name.encode()) % len(self.SPEC_GRADIENTS)
         pct = done * 100 // total
         if len(name) > title_w:
             title = name[:max(1, title_w - 3)] + '...'
