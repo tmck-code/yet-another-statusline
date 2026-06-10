@@ -82,7 +82,7 @@ The ` <N>K` token figure is coloured by the **Compaction-Risk Zone** (green �
 
 Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
 
-**Done state**: When a subagent finishes with `stop_reason == "end_turn"` its transcript captures `end_ts` (the epoch of that final line). In the two-line form a Done agent carries **no marker glyph** — it renders with dimmed styling throughout (duration, type, description, all stats) and a *frozen* elapsed time (`end_ts − first_timestamp` rather than `now − first_timestamp`); a running agent keeps live colours and a ticking duration. In the one-line collapse a Done agent still renders with `✓` (`GLYPH_SUBAGENT_DONE`) in place of the running `▶` (`GLYPH_SUBAGENT_ROW`), dimmed throughout.
+**Done state**: A subagent is Done when its transcript captures `end_ts` (an epoch > 0). The primary signal is an assistant line with `stop_reason == "end_turn"` (the epoch of that line). Some sidechain transcripts never emit `end_turn` — every assistant line is `tool_use` or null, including the final result message — so a **terminal-text fallback** also applies: when no `end_turn` is seen and the *last* assistant line is terminal text (a `text` block with no pending `tool_use`), its timestamp becomes `end_ts`. A still-running agent's last assistant line is a `tool_use` awaiting a result, so the fallback cannot fire mid-run. In the two-line form a Done agent carries **no marker glyph** — it renders with dimmed styling throughout (duration, type, description, all stats) and a *frozen* elapsed time (`end_ts − first_timestamp` rather than `now − first_timestamp`); a running agent keeps live colours and a ticking duration. In the one-line collapse a Done agent still renders with `✓` (`GLYPH_SUBAGENT_DONE`) in place of the running `▶` (`GLYPH_SUBAGENT_ROW`), dimmed throughout.
 
 **Cohort retirement**: Subagents are shown as a *cohort* scoped to the current user turn (bounded by the `UserPromptSubmit` hook writing `~/.claude/yas-last-prompt.json`). Membership rules:
 - When the turn marker is available: include agents whose `first_timestamp ≥ last_prompt_ts`, plus any still-writing stragglers from the previous turn (transcript written within the liveness window).
@@ -90,7 +90,7 @@ Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired 
 
 Once the cohort is computed, retirement applies:
 - **Clean retire** (all Done): hide the section 20 s after the last `end_ts` — the whole cohort vanishes together after a brief "done" beat.
-- **Dirty sweep** (janitor): if no cohort member's transcript has been written for 60 s and no member has a clean `end_turn`, the section is hidden (dead agents without a clean exit are swept).
+- **Dirty sweep** (janitor): if no cohort member's transcript has been written for 60 s and no member has a clean exit (`end_ts`, whether from `end_turn` or the terminal-text fallback), the section is hidden (dead agents without a clean exit are swept).
 
 **Three time constants**:
 - `COHORT_GRACE_SECONDS = 20` — how long a fully-Done cohort stays visible after the last `end_ts` (clean retire).
