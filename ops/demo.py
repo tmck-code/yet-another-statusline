@@ -988,6 +988,23 @@ def main() -> int:
         out_dir = Path(args.snapshots)
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # DEMO_ONLY=<scenario-name> renders just that one scenario's .txt and
+        # skips the per-theme kitchen-sink renders, for a fast single-snapshot loop.
+        only = os.environ.get('DEMO_ONLY')
+        if only:
+            scenarios = [c for c in SCENARIOS if c.name == only]
+            if not scenarios:
+                names = ', '.join(c.name for c in SCENARIOS)
+                print(f'DEMO_ONLY={only!r}: no such scenario. Available: {names}', file=sys.stderr)
+                return 1
+            tasks: list[tuple[ScenarioConfig, Path, str | None]] = [(cfg, out_dir, None) for cfg in scenarios]
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(len(tasks), (os.cpu_count() or 4))) as pool:
+                futures = [pool.submit(_render_isolated, fixture, cfg, dest, theme) for cfg, dest, theme in tasks]
+                for fut in futures:
+                    fut.result()
+            return 0
+
         sys.path.insert(0, str(REPO_ROOT / 'claude'))
         from yas.themes import THEMES
         light_dir = out_dir / 'themes' / 'light'
@@ -999,7 +1016,7 @@ def main() -> int:
 
         # (cfg, out_dir, theme) tasks: each is independent (own $HOME), so the
         # ~68ms-per-render subprocesses run concurrently instead of serially.
-        tasks: list[tuple[ScenarioConfig, Path, str | None]] = [(cfg, out_dir, None) for cfg in SCENARIOS]
+        tasks = [(cfg, out_dir, None) for cfg in SCENARIOS]
         for theme_name in sorted(THEMES):
             theme_dir = light_dir if theme_name in light_themes else dark_dir
             tasks.append((kitchen_sink, theme_dir, theme_name))
