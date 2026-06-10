@@ -454,3 +454,65 @@ def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPat
     # twoline cohort at wide: an identity row carries the agent type.
     assert any(row.kind == 'content' and 'Explore' in strip_ansi(row.content) for row in spec.rows), \
         'subagent cohort should render'
+
+
+# ---------------------------------------------------------------------------
+# Bottom-of-wide-band tokens row (the box 80-84 overflow / detached-divider bug)
+# ---------------------------------------------------------------------------
+
+def _elbow_gaps(lines: list[str]) -> int:
+    """Count ┬/┴ that lack a │ (or other vertical) in the adjacent row/column."""
+    from yas.render.text import _is_wide
+    def grid(line: str) -> dict[int, str]:
+        cols: dict[int, str] = {}
+        c = 0
+        for ch in line:
+            cols[c] = ch
+            c += 2 if _is_wide(ch) else 1
+        return cols
+    g = [grid(ln) for ln in lines]
+    vert = set('│┃┤├┼')
+    join = set('┬┴┳┻')
+    gaps = 0
+    for i, cols in enumerate(g):
+        for col, ch in cols.items():
+            if ch in '┬┳' and i + 1 < len(g) and g[i + 1].get(col, ' ') not in vert | join:
+                gaps += 1
+            if ch in '┴┻' and i > 0 and g[i - 1].get(col, ' ') not in vert | join:
+                gaps += 1
+    return gaps
+
+
+@pytest.mark.parametrize('width', [80, 81, 82, 83, 84, 85])
+def test_wide_bottom_band_no_overflow_no_detached_elbows(
+    monkeypatch: pytest.MonkeyPatch, width: int,
+) -> None:
+    """At the bottom of the wide band (box 80-84) the three-segment tokens row
+    used to overflow the box and detach its two │ from the ┬/┴ elbows. The
+    builder now drops it for the compact context line below the fit floor, so at
+    EVERY width: no rendered row is wider than the box, and every ┬/┴ is backed
+    by a │ in the adjacent row."""
+    from helper import strip_ansi
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    for ln in lines:
+        assert _visible_width(ln) == width, f'row not full width at box {width}: {_visible_width(ln)} != {width}'
+    assert _elbow_gaps(lines) == 0, f'detached ┬/┴ elbow at box {width}'
+
+
+def test_wide_bottom_band_drops_three_segment_tokens_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Below the fit floor the three-segment tokens │ cost │ rate row is dropped
+    (no 't/m' content row); at/above it the row is present."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+
+    def has_tokens_row(spec: layout.LayoutSpec) -> bool:
+        return any(row.kind == 'content' and 't/m' in strip_ansi(row.content)
+                   for row in spec.rows)
+
+    assert not has_tokens_row(layout.build_wide(_view(), _tick(), 82, _r))
+    assert has_tokens_row(layout.build_wide(_view(), _tick(), 100, _r))

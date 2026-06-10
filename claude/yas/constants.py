@@ -16,6 +16,21 @@ DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
+# Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
+# the row cannot hold both columns at full size plus the rate/spark leader, so
+# build_wide drops it for the compact context line instead of overflowing the
+# box. The exact, content-aware minimum is computed per-render by
+# Renderer.tokens_cost (its ``min_width`` return) — this constant is the
+# realistic-widest floor (the wide layout owns box >= MEDIUM_WIDTH=80, and the
+# row first fits around box 84-85 for typical 6-7 digit token magnitudes).
+TOKENS_COST_MIN_WIDTH = 85
+
+# Minimum gap between the narrow tasks-header's left cluster (glyph + done/total)
+# and its right-anchored active-task timer. The timer is flush to the content
+# edge to use the otherwise-dead trailing space as a second anchor (mirroring the
+# subagent rows' two-anchor read); this floor guarantees a readable separation
+# and triggers the middle-ellipsis fallback before left + timer would collide.
+TASK_HEADER_RIGHT_GAP_MIN = 2
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 # Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1

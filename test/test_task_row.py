@@ -320,6 +320,39 @@ def test_task_row_compact_drops_active_form() -> None:
     assert 'Doing distinctive thing' not in strip_ansi(out)
 
 
+def test_task_row_compact_right_anchors_timer() -> None:
+    # The narrow header right-anchors the active-task timer to the content edge:
+    # the row fills exactly to the content width and the last non-space content
+    # is the live timer, with no trailing dead space before the (caller-added)
+    # closing border.
+    now = time.time()
+    width = 78
+    out = _r.task_row(_make_tasks(
+        [('a', 'a', 'in_progress')],
+        timestamps=[(now - 30, None)],
+    ), width, compact=True)
+    line = strip_ansi(out[0])
+    assert _visible_width(line) == width
+    # Last non-space content is the timer, flush to the content edge.
+    assert line.rstrip().endswith('0:30')
+    assert line.endswith('0:30')  # no trailing gap before the border
+
+
+def test_task_row_compact_timer_truncates_left_no_overflow() -> None:
+    # When the content is too narrow to hold both the left cluster and the
+    # right-anchored timer, the left cluster ellipsizes and the row still fits
+    # exactly — never overflows the content width.
+    now = time.time()
+    width = 12
+    out = _r.task_row(_make_tasks(
+        [('a', 'a', 'in_progress')],
+        timestamps=[(now - 30, None)],
+    ), width, compact=True)
+    line = strip_ansi(out[0])
+    assert _visible_width(line) == width
+    assert line.endswith('0:30')
+
+
 # C. build_wide / build_medium integration
 
 def _render(monkeypatch: pytest.MonkeyPatch, builder, tasks: tasks_mod.TaskList, width: int) -> str:

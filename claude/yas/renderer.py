@@ -63,6 +63,7 @@ from yas.constants import (
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
+    TASK_HEADER_RIGHT_GAP_MIN,
 )
 from yas.render.gradient import (
     GradientEngine,
@@ -80,7 +81,7 @@ from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
 from yas.info.tasks import TaskList
-from yas.render.text import _visible_width, fmt_dur, fmt_tok
+from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
 from yas.tokens import TokenRate
 
 if TYPE_CHECKING:
@@ -761,7 +762,18 @@ class Renderer:
                 f'  {self.CTX}{tool_verb}{self.R}'
             )
         left_n_w = _visible_width(left_n)
-        pad_n    = max(1, target_w - left_n_w - right_n_w)
+        # Budget the left segment so the row never overflows the right border:
+        # the bounded right cluster (hourglass + tok + dur) stays intact, and
+        # the marker/type/model/verb run truncates with a middle ellipsis when
+        # it would otherwise push past target_w (reserving a 1-col gap).
+        left_budget = target_w - right_n_w - 1
+        if left_n_w > left_budget:
+            left_n   = _middle_ellipsis(left_n, max(1, left_budget))
+            left_n_w = _visible_width(left_n)
+        # Right-anchor the metric cluster (hourglass + tok + dur) flush to the
+        # closing border so the tokens and elapsed columns line up down stacked
+        # rows; the slack between the left run and the cluster is the gap.
+        pad_n = max(1, target_w - left_n_w - right_n_w)
         return f'{left_n}{" " * pad_n}{right_n}'
 
     def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
@@ -778,14 +790,29 @@ class Renderer:
         glyph_s = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}'
         count_p = f'{self.SKILLS}{count_s}{self.R}'
 
-        # --- compact branch (narrow): glyph + done/total + active live timer ---
+        # --- compact branch (narrow): glyph + done/total on the left, the active
+        # task's live timer right-anchored to the content edge. The header is a
+        # lone row (no per-task checklist below it to column-align against), so
+        # the timer fills the otherwise-dead trailing space as a second anchor,
+        # reading like the subagent rows. Falls back to the bare left cluster
+        # when no task is actively timing.
         if compact:
-            head = f'{glyph_s}  {count_p}'
+            head   = f'{glyph_s}  {count_p}'
             active = tasks.active
-            if active is not None and active.started_at is not None:
-                live = fmt_duration(now - active.started_at)
-                return [f'{head}  {BRT}{BOLD}{live}{self.R}']
-            return [head]
+            if active is None or active.started_at is None:
+                return [head]
+            live    = fmt_duration(now - active.started_at)
+            right   = f'{BRT}{BOLD}{live}{self.R}'
+            right_w = _visible_width(right)
+            head_w  = _visible_width(head)
+            # Reserve the floor gap; if left + gap + timer would overflow the
+            # content width, truncate the left cluster with a middle ellipsis so
+            # the timer stays flush right and the row never overruns the border.
+            if head_w + TASK_HEADER_RIGHT_GAP_MIN + right_w > content_width:
+                head   = _middle_ellipsis(head, max(1, content_width - TASK_HEADER_RIGHT_GAP_MIN - right_w))
+                head_w = _visible_width(head)
+            mid = max(TASK_HEADER_RIGHT_GAP_MIN, content_width - head_w - right_w)
+            return [f'{head}{" " * mid}{right}']
 
         # --- full-list branch (wide/medium): header + windowed items ---
         elapsed   = total_elapsed(tasks, now)
@@ -892,18 +919,20 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int]:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int, int]:
         """One content line: tokens │ cost │ rate-and-sparkline.
 
         With ``show_day_stats`` (default), session and day figures merge per
         field as ``session/day`` with a paired cache parenthetical. When off,
         the row is session-only and keeps the original per-field justification.
-        The tokens and cost columns occupy *static* widths derived from
-        ``box_width`` (not the rendered content), so the two ``│`` dividers stay
-        put as token/cost magnitudes change — content is left-justified into its
-        fixed cell. Returns ``([line], (col1, col2), 0)`` — the divider columns
-        for the builder's elbow threading; the old 60s tick marker is gone
-        (mark_col=0).
+        The tokens and cost columns are sized to the *measured* content (floored
+        at a realistic-widest budget), so the two ``│`` dividers always land on
+        the rendered content's divider column — they never detach from the
+        ┬/┴ elbows above/below. Returns ``([line], (col1, col2), 0, min_width)``:
+        the divider columns for the builder's elbow threading, the dead mark_col
+        (the old 60s tick marker is gone, =0), and ``min_width`` — the smallest
+        box width at which this row fits without overflow, so the builder can
+        fall back to a compact form below it.
         """
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
@@ -922,7 +951,7 @@ class Renderer:
                 f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
                 f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
             )
-            cost_col = (f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
+            cost_col = (f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
                         f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
         else:
             # Session-only: original per-field justification (D2).
@@ -932,7 +961,7 @@ class Renderer:
             tokens_col = (f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} '
                           f'{self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} '
                           f'{self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}')
-            cost_col = f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
+            cost_col = f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
 
         vsep_w        = 4
         vsep_leader_w = 4
@@ -941,30 +970,55 @@ class Renderer:
         content_w = box_width - 3
         inner     = content_w - vsep_w - vsep_leader_w  # tokens + cost + leader budget
 
-        # Static section widths: the two │ dividers must not reflow as token and
-        # cost magnitudes change, so allocate fixed column budgets sized for the
-        # realistic widest merged session/day content rather than measuring the
-        # rendered strings —
-        #   tokens '↓ 128.4K/1.9M (1.2M/18.3M) ↑ 47.3K/612.5K'  (~44 cols max)
-        #   cost   '$ $327.00 / $4188.88'                       (~20 cols max)
-        # They depend only on box_width (stable for a given terminal width) and
-        # shrink proportionally only when the terminal is too narrow to also keep
-        # the rate/spark leader at its label_w+1 minimum.
-        TOKENS_BUDGET = 46
-        COST_BUDGET   = 20
-        avail = inner - (label_w + 1)              # room left after the leader minimum
+        # Section widths track the *measured* content so each column hugs its
+        # content and the two │ dividers sit directly after it (only the vsep's
+        # built-in 2-space lead remains as the gap). There is no inflated floor:
+        # the budget IS the measured width. Measure with _visible_width (the
+        # strings carry ANSI; never len()). The honest floor further down
+        # (``w_middle = max(w_middle, tokens_w)`` etc.) still guarantees pad>=0,
+        # so col1/col2 always land on the rendered │ and never detach from their
+        # ┬/┴ elbows above/below. The intrinsic minimum box width this needs is
+        # returned to the caller (see ``min_width`` below) so the builder can fall
+        # back to a compact form rather than overflow the box.
+        tokens_w = _visible_width(tokens_col)
+        cost_w   = _visible_width(cost_col)
+        TOKENS_BUDGET = tokens_w
+        COST_BUDGET   = cost_w
+        # The rate/spark leader can never compress below its bare ``<rate> t/m``
+        # label; measure it here so the budget split and min_width are exact (when
+        # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
+        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label_w = _visible_width(rate_label)
+        leader_min   = max(label_w + 1, rate_label_w)
+
+        # The smallest box that holds both columns at their measured size plus the
+        # two vseps and the leader. Derived from the measured content, so it tracks
+        # token/cost/rate magnitude rather than being hardcoded. The leader floor
+        # here is the bare ``rate_label_w``, not ``leader_min``: at the tightest
+        # box the sparkline is omitted (bar_w<10) and the leader collapses to the
+        # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
+        # width. The builder only emits this row when ``box_width >= min_width``.
+        min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
+
+        avail = inner - leader_min                 # room left after the leader minimum
         if TOKENS_BUDGET + COST_BUDGET <= avail:
             w_middle, w_end = TOKENS_BUDGET, COST_BUDGET
         else:
-            w_middle = max(1, avail * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
-            w_end    = max(1, avail - w_middle)
+            # Over budget: give each column at least its measured content, then
+            # share any slack proportionally. Clamping at content (not the inflated
+            # proportional share) keeps the cell sum from spilling past col1/col2.
+            w_middle = max(tokens_w, avail * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
+            w_end    = max(cost_w, avail - w_middle)
 
-        # Left-justify each column to its fixed width. The strings carry ANSI, so
-        # pad with _visible_width (never len()) — the trailing pad lands the │ at
-        # the fixed divider column regardless of content. Over-budget content
-        # overflows its cell (graceful) rather than corrupting the divider math.
-        tokens_col += ' ' * max(0, w_middle - _visible_width(tokens_col))
-        cost_col   += ' ' * max(0, w_end   - _visible_width(cost_col))
+        # Honest floor: never allocate a cell narrower than its own content. This
+        # keeps the trailing pad >= 0 so the │ lands exactly at col1/col2.
+        w_middle = max(w_middle, tokens_w)
+        w_end    = max(w_end, cost_w)
+
+        # Left-justify each column to its (content-floored) width. The trailing pad
+        # lands the │ at the divider column col1/col2 regardless of content.
+        tokens_col += ' ' * max(0, w_middle - tokens_w)
+        cost_col   += ' ' * max(0, w_end   - cost_w)
 
         leader_w = max(label_w + 1, inner - w_middle - w_end)
 
@@ -973,24 +1027,24 @@ class Renderer:
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
 
-        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
-        rate_label_w = _visible_width(rate_label)
-        bar_w        = leader_w - rate_label_w
+        bar_w = leader_w - rate_label_w
 
-        if bar_w <= 0:
+        if bar_w < 10:
             leader = rate_label
         else:
             if session_id:
-                # 60s window (D4); history is oldest→newest, so reverse it to put
-                # the newest (live) bucket on the LEFT, next to the t/m label —
-                # sparkline_1row dims that now-leftmost cell.
-                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW)[::-1]
+                # 1 second per char (D4): span the most recent bar_w seconds, one
+                # char each (window == bar_w → 1s buckets). History is
+                # oldest→newest, so reverse it to put the newest (live) bucket on
+                # the LEFT, next to the t/m label — sparkline_1row dims that
+                # now-leftmost cell.
+                spark_history = TokenRate.history(session_id, bar_w, float(bar_w))[::-1]
                 spark = self.sparkline_1row(spark_history, live=True)
             else:
                 spark = ' ' * bar_w
             leader = f'{rate_label}{spark}'
 
-        return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0
+        return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0, min_width
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
