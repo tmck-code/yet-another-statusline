@@ -958,6 +958,23 @@ def render_scenario(
     print(f'  wrote {dest}')
 
 
+def _render_isolated(fixture: dict[str, object], cfg: ScenarioConfig, out_dir: Path, theme: str | None = None) -> None:
+    """Render one scenario into its own throwaway $HOME so renders can run concurrently.
+
+    Each task gets a fresh synthetic env (git repo, transcript, settings, ...),
+    which is ~8ms to build, so the per-render subprocess (~68ms) stays the
+    dominant cost and the tasks are fully independent on disk.
+    """
+    session_id = fixture['session_id']
+    with tempfile.TemporaryDirectory() as raw_tmp:
+        tmpdir = Path(raw_tmp)
+        build_synthetic_env(tmpdir, session_id)
+        env = os.environ.copy()
+        env['HOME'] = str(tmpdir)
+        env['CLAUDE_CONFIG_DIR'] = str(tmpdir / '.claude')
+        render_scenario(env, fixture, tmpdir, session_id, cfg, out_dir, theme=theme)
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser()
@@ -967,34 +984,56 @@ def main() -> int:
     fixture = json.loads(FIXTURE_PATH.read_text())
     session_id = fixture['session_id']
 
-    with tempfile.TemporaryDirectory() as raw_tmp:
-        tmpdir = Path(raw_tmp)
-        build_synthetic_env(tmpdir, session_id)
+    if args.snapshots:
+        out_dir = Path(args.snapshots)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        env = os.environ.copy()
-        env['HOME'] = str(tmpdir)
-        env['CLAUDE_CONFIG_DIR'] = str(tmpdir / '.claude')
+        # DEMO_ONLY=<scenario-name> renders just that one scenario's .txt and
+        # skips the per-theme kitchen-sink renders, for a fast single-snapshot loop.
+        only = os.environ.get('DEMO_ONLY')
+        if only:
+            scenarios = [c for c in SCENARIOS if c.name == only]
+            if not scenarios:
+                names = ', '.join(c.name for c in SCENARIOS)
+                print(f'DEMO_ONLY={only!r}: no such scenario. Available: {names}', file=sys.stderr)
+                return 1
+            tasks: list[tuple[ScenarioConfig, Path, str | None]] = [(cfg, out_dir, None) for cfg in scenarios]
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(len(tasks), (os.cpu_count() or 4))) as pool:
+                futures = [pool.submit(_render_isolated, fixture, cfg, dest, theme) for cfg, dest, theme in tasks]
+                for fut in futures:
+                    fut.result()
+            return 0
 
-        if args.snapshots:
-            out_dir = Path(args.snapshots)
-            out_dir.mkdir(parents=True, exist_ok=True)
+        sys.path.insert(0, str(REPO_ROOT / 'claude'))
+        from yas.themes import THEMES
+        light_dir = out_dir / 'themes' / 'light'
+        dark_dir  = out_dir / 'themes' / 'dark'
+        light_dir.mkdir(parents=True, exist_ok=True)
+        dark_dir.mkdir(parents=True, exist_ok=True)
+        kitchen_sink = next(c for c in SCENARIOS if c.name == 'kitchen-sink')
+        light_themes = {n for n in THEMES if THEMES[n].pill_fg_dark[0] <= 10}
 
-            for cfg in SCENARIOS:
-                render_scenario(env, fixture, tmpdir, session_id, cfg, out_dir)
+        # (cfg, out_dir, theme) tasks: each is independent (own $HOME), so the
+        # ~68ms-per-render subprocesses run concurrently instead of serially.
+        tasks = [(cfg, out_dir, None) for cfg in SCENARIOS]
+        for theme_name in sorted(THEMES):
+            theme_dir = light_dir if theme_name in light_themes else dark_dir
+            tasks.append((kitchen_sink, theme_dir, theme_name))
 
-            sys.path.insert(0, str(REPO_ROOT / 'claude'))
-            from yas.themes import THEMES
-            light_dir = out_dir / 'themes' / 'light'
-            dark_dir  = out_dir / 'themes' / 'dark'
-            light_dir.mkdir(parents=True, exist_ok=True)
-            dark_dir.mkdir(parents=True, exist_ok=True)
-            kitchen_sink = next(c for c in SCENARIOS if c.name == 'kitchen-sink')
-            light_themes = {n for n in THEMES if THEMES[n].pill_fg_dark[0] <= 10}
-            for theme_name in sorted(THEMES):
-                theme_dir = light_dir if theme_name in light_themes else dark_dir
-                render_scenario(env, fixture, tmpdir, session_id, kitchen_sink, theme_dir, theme=theme_name)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(tasks), (os.cpu_count() or 4))) as pool:
+            futures = [pool.submit(_render_isolated, fixture, cfg, dest, theme) for cfg, dest, theme in tasks]
+            for fut in futures:
+                fut.result()
 
-        else:
+    else:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmpdir = Path(raw_tmp)
+            build_synthetic_env(tmpdir, session_id)
+            env = os.environ.copy()
+            env['HOME'] = str(tmpdir)
+            env['CLAUDE_CONFIG_DIR'] = str(tmpdir / '.claude')
             payload = mutate_session_info(tmpdir, session_id, fixture)
             raw = json.loads(payload)
             env['STATUSLINE_TOKEN_WINDOW'] = str(DEMO_TOKEN_WINDOW)

@@ -26,6 +26,9 @@ pr-info:
 demo:
 	@uv run python3 ops/demo.py
 
+# Renders every scenario .txt (plus per-theme kitchen-sink renders) into demo/.
+# Set DEMO_ONLY=<scenario-name> to render just one scenario's .txt, e.g.
+#   DEMO_ONLY=tasks make demo/img
 demo/img:
 	@uv run python3 ops/demo.py --snapshots demo/
 
