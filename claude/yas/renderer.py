@@ -956,7 +956,7 @@ class Renderer:
                 f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
                 f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
             )
-            cost_col = (f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
+            cost_col = (f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
                         f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
         else:
             # Session-only: original per-field justification (D2).
@@ -966,7 +966,7 @@ class Renderer:
             tokens_col = (f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} '
                           f'{self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} '
                           f'{self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}')
-            cost_col = f'{self.safe}{ICON_COST}{self.R} {self.COST}${sess_cost:,.2f}{self.R}'
+            cost_col = f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
 
         vsep_w        = 4
         vsep_leader_w = 4
@@ -975,22 +975,20 @@ class Renderer:
         content_w = box_width - 3
         inner     = content_w - vsep_w - vsep_leader_w  # tokens + cost + leader budget
 
-        # Section widths track the *measured* content so the two │ dividers can
-        # never detach from their ┬/┴ elbows: a budget narrower than its content
-        # would leave pad==0 and let the content overflow past the divider column
-        # the borders assume. Measure with _visible_width (the strings carry ANSI;
-        # never len()). The budgets start from the realistic widest merged
-        # session/day content —
-        #   tokens '↓ 128.4K/1.9M (1.2M/18.3M) ↑ 47.3K/612.5K'  (~44 cols max)
-        #   cost   '$ $327.00 / $4188.88'                       (~20 cols max)
-        # — then floor at the actual content so pad>=0 and col1/col2 always land
-        # on the rendered │. The intrinsic minimum box width this needs is
+        # Section widths track the *measured* content so each column hugs its
+        # content and the two │ dividers sit directly after it (only the vsep's
+        # built-in 2-space lead remains as the gap). There is no inflated floor:
+        # the budget IS the measured width. Measure with _visible_width (the
+        # strings carry ANSI; never len()). The honest floor further down
+        # (``w_middle = max(w_middle, tokens_w)`` etc.) still guarantees pad>=0,
+        # so col1/col2 always land on the rendered │ and never detach from their
+        # ┬/┴ elbows above/below. The intrinsic minimum box width this needs is
         # returned to the caller (see ``min_width`` below) so the builder can fall
         # back to a compact form rather than overflow the box.
         tokens_w = _visible_width(tokens_col)
         cost_w   = _visible_width(cost_col)
-        TOKENS_BUDGET = max(46, tokens_w)
-        COST_BUDGET   = max(20, cost_w)
+        TOKENS_BUDGET = tokens_w
+        COST_BUDGET   = cost_w
         # The rate/spark leader can never compress below its bare ``<rate> t/m``
         # label; measure it here so the budget split and min_width are exact (when
         # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
@@ -999,10 +997,13 @@ class Renderer:
         leader_min   = max(label_w + 1, rate_label_w)
 
         # The smallest box that holds both columns at their measured size plus the
-        # two vseps and the leader minimum. Derived from the measured content, so it
-        # tracks token/cost/rate magnitude rather than being hardcoded. The builder
-        # only emits this row when ``box_width >= min_width`` (else a compact form).
-        min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + leader_min + 3
+        # two vseps and the leader. Derived from the measured content, so it tracks
+        # token/cost/rate magnitude rather than being hardcoded. The leader floor
+        # here is the bare ``rate_label_w``, not ``leader_min``: at the tightest
+        # box the sparkline is omitted (bar_w<10) and the leader collapses to the
+        # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
+        # width. The builder only emits this row when ``box_width >= min_width``.
+        min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
 
         avail = inner - leader_min                 # room left after the leader minimum
         if TOKENS_BUDGET + COST_BUDGET <= avail:
@@ -1033,14 +1034,16 @@ class Renderer:
 
         bar_w = leader_w - rate_label_w
 
-        if bar_w <= 0:
+        if bar_w < 10:
             leader = rate_label
         else:
             if session_id:
-                # 60s window (D4); history is oldest→newest, so reverse it to put
-                # the newest (live) bucket on the LEFT, next to the t/m label —
-                # sparkline_1row dims that now-leftmost cell.
-                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW)[::-1]
+                # 1 second per char (D4): span the most recent bar_w seconds, one
+                # char each (window == bar_w → 1s buckets). History is
+                # oldest→newest, so reverse it to put the newest (live) bucket on
+                # the LEFT, next to the t/m label — sparkline_1row dims that
+                # now-leftmost cell.
+                spark_history = TokenRate.history(session_id, bar_w, float(bar_w))[::-1]
                 spark = self.sparkline_1row(spark_history, live=True)
             else:
                 spark = ' ' * bar_w
