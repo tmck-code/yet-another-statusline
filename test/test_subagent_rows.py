@@ -9,7 +9,13 @@ import yas.renderer as renderer_mod
 import yas.session as session_mod
 import yas.info.subagents as subagents_mod
 from yas.config import Config
-from yas.constants import GLYPH_REPLYING
+import re
+
+from yas.constants import (
+    GLYPH_HOURGLASS,
+    GLYPH_REPLYING,
+    SUBAGENT_ONELINE_GAP_MAX,
+)
 from yas.info import SessionView
 from yas.info.subagents import RunningSubagent
 from yas.render.text import _visible_width, fmt_tok
@@ -331,6 +337,23 @@ def test_one_line_long_name_padded_flush_to_width(content_width: int) -> None:
     sub = _make_sub(agent_type='general-purpose',
                     last_activity=('tool_use', 'Edit', {}))
     out = _one(sub, content_width)
+    assert _visible_width(out) == content_width
+
+
+def test_one_line_interior_gap_capped_at_wide_width() -> None:
+    # At a wide single-line width the slack between the left content and the
+    # right metric cluster is capped: the metrics follow the verb at a fixed
+    # distance instead of drifting to the far border. The leftover slack becomes
+    # trailing space, so the row still fills exactly to content_width.
+    content_width = 90
+    sub = _make_sub(agent_type='grep-bot',
+                    last_activity=('tool_use', 'Grep', {}))
+    out  = _one(sub, content_width)
+    text = strip_ansi(out)
+    # The run of spaces directly before the hourglass is the interior gap.
+    gap = re.search(rf' +(?={re.escape(GLYPH_HOURGLASS)})', text)
+    assert gap is not None
+    assert len(gap.group()) <= SUBAGENT_ONELINE_GAP_MAX
     assert _visible_width(out) == content_width
 
 

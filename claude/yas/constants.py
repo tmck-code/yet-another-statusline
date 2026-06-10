@@ -24,6 +24,20 @@ MEDIUM_WIDTH = 80
 # realistic-widest floor (the wide layout owns box >= MEDIUM_WIDTH=80, and the
 # row first fits around box 84-85 for typical 6-7 digit token magnitudes).
 TOKENS_COST_MIN_WIDTH = 85
+# Max interior gap (cols) between the left content and the right metric cluster
+# in the one-line subagent collapse. Capping the gap keeps the hourglass/token
+# cluster a fixed, readable distance from the tool verb as the box widens,
+# instead of flinging the metrics to the far edge and leaving a ragged empty
+# channel down the middle of stacked rows. Slack beyond the cap becomes trailing
+# space before the closing border (the row still fills exactly to target_w).
+SUBAGENT_ONELINE_GAP_MAX = 4
+
+# Minimum gap between the narrow tasks-header's left cluster (glyph + done/total)
+# and its right-anchored active-task timer. The timer is flush to the content
+# edge to use the otherwise-dead trailing space as a second anchor (mirroring the
+# subagent rows' two-anchor read); this floor guarantees a readable separation
+# and triggers the middle-ellipsis fallback before left + timer would collide.
+TASK_HEADER_RIGHT_GAP_MIN = 2
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 # Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1

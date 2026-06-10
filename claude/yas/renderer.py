@@ -63,6 +63,8 @@ from yas.constants import (
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
+    SUBAGENT_ONELINE_GAP_MAX,
+    TASK_HEADER_RIGHT_GAP_MIN,
 )
 from yas.render.gradient import (
     GradientEngine,
@@ -769,8 +771,15 @@ class Renderer:
         if left_n_w > left_budget:
             left_n   = _middle_ellipsis(left_n, max(1, left_budget))
             left_n_w = _visible_width(left_n)
-        pad_n    = max(1, target_w - left_n_w - right_n_w)
-        return f'{left_n}{" " * pad_n}{right_n}'
+        # Cap the interior gap so the metric cluster follows the left content at
+        # a fixed, readable distance instead of drifting to the far border as the
+        # box widens (a ragged empty channel down stacked rows). Any slack beyond
+        # the cap becomes trailing space before the closing border — the row
+        # still fills exactly to target_w.
+        slack    = max(1, target_w - left_n_w - right_n_w)
+        gap_n    = min(slack, SUBAGENT_ONELINE_GAP_MAX)
+        trail_n  = slack - gap_n
+        return f'{left_n}{" " * gap_n}{right_n}{" " * trail_n}'
 
     def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()
@@ -786,14 +795,29 @@ class Renderer:
         glyph_s = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}'
         count_p = f'{self.SKILLS}{count_s}{self.R}'
 
-        # --- compact branch (narrow): glyph + done/total + active live timer ---
+        # --- compact branch (narrow): glyph + done/total on the left, the active
+        # task's live timer right-anchored to the content edge. The header is a
+        # lone row (no per-task checklist below it to column-align against), so
+        # the timer fills the otherwise-dead trailing space as a second anchor,
+        # reading like the subagent rows. Falls back to the bare left cluster
+        # when no task is actively timing.
         if compact:
-            head = f'{glyph_s}  {count_p}'
+            head   = f'{glyph_s}  {count_p}'
             active = tasks.active
-            if active is not None and active.started_at is not None:
-                live = fmt_duration(now - active.started_at)
-                return [f'{head}  {BRT}{BOLD}{live}{self.R}']
-            return [head]
+            if active is None or active.started_at is None:
+                return [head]
+            live    = fmt_duration(now - active.started_at)
+            right   = f'{BRT}{BOLD}{live}{self.R}'
+            right_w = _visible_width(right)
+            head_w  = _visible_width(head)
+            # Reserve the floor gap; if left + gap + timer would overflow the
+            # content width, truncate the left cluster with a middle ellipsis so
+            # the timer stays flush right and the row never overruns the border.
+            if head_w + TASK_HEADER_RIGHT_GAP_MIN + right_w > content_width:
+                head   = _middle_ellipsis(head, max(1, content_width - TASK_HEADER_RIGHT_GAP_MIN - right_w))
+                head_w = _visible_width(head)
+            mid = max(TASK_HEADER_RIGHT_GAP_MIN, content_width - head_w - right_w)
+            return [f'{head}{" " * mid}{right}']
 
         # --- full-list branch (wide/medium): header + windowed items ---
         elapsed   = total_elapsed(tasks, now)
