@@ -17,6 +17,7 @@ from yas.info.openspec import OpenSpec
 from yas.session import SessionInfo
 from yas.info.skills import LoadedSkills
 from yas.info.subagents import RunningSubagents
+from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
 from yas.tokens import compute_session_cost
 from yas.info.transcript import TranscriptUsage
@@ -91,6 +92,13 @@ class SessionView:
     @cached_property
     def subagents(self) -> RunningSubagents:
         return RunningSubagents.from_session(
+            self.session.session_id,
+            self.session.workspace.project_dir,
+        )
+
+    @cached_property
+    def workflows(self) -> RunningWorkflows:
+        return RunningWorkflows.from_session(
             self.session.session_id,
             self.session.workspace.project_dir,
         )

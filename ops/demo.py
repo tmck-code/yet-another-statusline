@@ -207,7 +207,8 @@ def write_subagents(
     subagents_dir = claude_dir / 'projects' / project_slug / session_id / 'subagents'
     subagents_dir.mkdir(parents=True, exist_ok=True)
     for f in subagents_dir.iterdir():
-        f.unlink()
+        if f.is_file():  # skip the workflows/ subdir (managed by write_workflows)
+            f.unlink()
     now = time.time()
     ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
     _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
@@ -282,6 +283,112 @@ def write_subagents(
         else:
             file_mtime = now - mtime_age
             os.utime(jsonl, (file_mtime, file_mtime))
+
+
+def write_workflows(
+    claude_dir:  Path,
+    session_id:  str,
+    project_dir: Path,
+    runs:        list[dict[str, object]],
+    *,
+    age_seconds: float = 0.0,
+) -> None:
+    """Synthesise workflow-cohort runs on disk for the demo.
+
+    Each run dict: {
+        'run_id': str,
+        'name':   str | None,   # workflowName -> enrichment JSON; None omits it
+        'phase':  str | None,   # latest workflow_phase title (needs name to emit)
+        'status': str,          # run-JSON status (default 'running')
+        'agents': [ (label, billed_in, output[, action[, done_seconds_ago]]), ... ],
+    }
+    Mirrors write_subagents per agent — a first user prompt line (the fallback
+    label source), an assistant token/activity line, an optional end_turn — but
+    nests transcripts under subagents/workflows/<run_id>/ and writes the
+    enrichment JSON at workflows/<run_id>.json. A Done agent's mtime settles in
+    the past (done_seconds_ago); running agents are fresh so the run stays inside
+    the workflow liveness window.
+    """
+    project_slug = re.sub(r'[^A-Za-z0-9]', '-', str(project_dir))
+    session_root = claude_dir / 'projects' / project_slug / session_id
+    runs_root    = session_root / 'subagents' / 'workflows'
+    json_root    = session_root / 'workflows'
+    # Clear prior demo runs so scenarios don't bleed into each other.
+    for root in (runs_root, json_root):
+        if root.exists():
+            shutil.rmtree(root)
+    now = time.time()
+    ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
+    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
+    for run in runs:
+        run_id  = str(run['run_id'])
+        agents  = list(run.get('agents') or [])  # type: ignore[arg-type]
+        run_dir = runs_root / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        progress: list[dict[str, object]] = []
+        phase = run.get('phase')
+        if phase:
+            progress.append({'type': 'workflow_phase', 'index': 1, 'title': str(phase)})
+        for i, row in enumerate(agents, 1):
+            label         = str(row[0])
+            billed_in     = int(row[1]) if len(row) > 1 and isinstance(row[1], (int, float)) else 0
+            output_tokens = int(row[2]) if len(row) > 2 and isinstance(row[2], (int, float)) else 0
+            action_raw    = row[3] if len(row) > 3 else None
+            done_secs_raw = row[4] if len(row) > 4 else None
+            done_secs     = float(done_secs_raw) if isinstance(done_secs_raw, (int, float)) and done_secs_raw > 0 else None
+            agent_id      = f'a{i:016x}'  # deterministic transcript stem
+            model         = _demo_models[(i - 1) % len(_demo_models)]
+            (run_dir / f'agent-{agent_id}.meta.json').write_text(json.dumps({'agentType': 'workflow-subagent'}))
+            jsonl = run_dir / f'agent-{agent_id}.jsonl'
+            cache_creation = int(billed_in * 0.7)
+            input_tokens   = billed_in - cache_creation
+            msg: dict[str, object] = {
+                'id':    f'msg_wf_{run_id}_{i}',
+                'role':  'assistant',
+                'model': model,
+                'usage': {
+                    'input_tokens':                input_tokens,
+                    'cache_creation_input_tokens': cache_creation,
+                    'cache_read_input_tokens':     0,
+                    'output_tokens':               output_tokens,
+                },
+            }
+            specs  = [action_raw] if action_raw is not None else []
+            blocks = [b for b in (_subagent_content_block(s) for s in specs) if b is not None]
+            if blocks:
+                msg['content'] = blocks
+            lines = [
+                json.dumps({'type': 'user', 'timestamp': ts, 'message': {'role': 'user', 'content': label}}),
+                json.dumps({'type': 'assistant', 'timestamp': ts, 'message': msg}),
+            ]
+            if done_secs is not None:
+                done_ts = (datetime.now() - timedelta(seconds=done_secs)).astimezone().isoformat()
+                lines.append(json.dumps({
+                    'type':      'assistant',
+                    'timestamp': done_ts,
+                    'message': {
+                        'id':          f'msg_wf_done_{run_id}_{i}',
+                        'stop_reason': 'end_turn',
+                        'role':        'assistant',
+                        'usage': {'input_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0},
+                    },
+                }))
+            jsonl.write_text('\n'.join(lines) + '\n')
+            file_mtime = (now - done_secs) if done_secs is not None else now
+            os.utime(jsonl, (file_mtime, file_mtime))
+            progress.append({'type': 'workflow_agent', 'index': i, 'label': label, 'agentId': agent_id})
+        # Enrichment JSON only when a name is supplied (simulates a known run);
+        # totalTokens is deliberately bogus — the reader sums per-agent instead.
+        name = run.get('name')
+        if name:
+            json_root.mkdir(parents=True, exist_ok=True)
+            (json_root / f'{run_id}.json').write_text(json.dumps({
+                'runId':            run_id,
+                'workflowName':     str(name),
+                'status':           str(run.get('status', 'running')),
+                'workflowProgress': progress,
+                'totalTokens':      999_999,
+            }))
 
 
 def write_settings(claude_dir: Path, plugins: list[str]) -> None:
@@ -615,6 +722,7 @@ class ScenarioConfig:
     skills:        list[str]                 = field(default_factory=list)
     plugins:       list[str]                 = field(default_factory=list)
     subagents:     list[tuple[object, ...]]         = field(default_factory=list)
+    workflows:     list[dict[str, object]]   = field(default_factory=list)
     openspec:      list[tuple[str, int, int]]= field(default_factory=list)
     tasks:         list[tuple[str, str, str]]= field(default_factory=list)
     five_hour_pct: float                     = 30.0
@@ -708,6 +816,34 @@ SCENARIOS: list[ScenarioConfig] = [
         ],
         five_hour_pct = 46.0,
         seven_day_pct = 37.0,
+    ),
+    ScenarioConfig(
+        name        = 'workflows',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.40,
+        skills      = ['grill-me', 'caveman'],
+        plugins     = ['openspec@0.1.0'],
+        # One live workflow run: 2 agents Done (settled within the 120s liveness
+        # window) + 2 still running. Wide shows header + 4 twoline agent rows +
+        # summary; medium/narrow collapse to header + summary only.
+        workflows   = [
+            {
+                'run_id': 'wf_d8212a1d-34a',
+                'name':   'investigate-airship-timeout',
+                'phase':  'Analyse',
+                'status': 'running',
+                'agents': [
+                    ('fetch-notebook', 11_500, 1_200, ('Bash', {'command': 'curl -s -H "Authorization: Bearer ***" https://host/api/2.0/workspace/export'}), 40.0),
+                    ('fetch-wrapper',   9_300,   980, ('Read', {'file_path': 'transforms/airship_enrichment.py'}), 25.0),
+                    ('run-history',    14_200, 2_100, ('text', 'Building the run-history timeline across the last 30 days')),
+                    ('synthesise',      6_800,   740, ('Edit', {'file_path': 'findings.md', 'old_string': 'a', 'new_string': 'b'})),
+                ],
+            },
+        ],
+        five_hour_pct = 44.0,
+        seven_day_pct = 33.0,
+        cache_anchor_secs_ago = 120.0,
     ),
     ScenarioConfig(
         name        = 'kitchen-sink',
@@ -917,6 +1053,7 @@ def render_scenario(
     elif yas_toml_path.exists():
         yas_toml_path.unlink()
     write_subagents(claude, session_id, project, cfg.subagents, age_seconds=90, mtime_age=cfg.subagent_mtime_age)
+    write_workflows(claude, session_id, project, cfg.workflows, age_seconds=90)
     write_openspec_changes(project, cfg.openspec)
     write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
 

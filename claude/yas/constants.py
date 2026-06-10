@@ -101,6 +101,17 @@ GLYPH_HOURGLASS    = ''  # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE          = ''  # nf-fa-pie_chart     (subagent session share)
 GLYPH_CONFIG_WARN  = '⚠'  # U+26A0 WARNING SIGN (config-error row marker)
 GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
+GLYPH_WF_HEADER    = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE (workflow run header)
+GLYPH_WF_SUMMARY   = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
+
+# Workflow cohort thresholds. A run is kept visible while any agent transcript
+# was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
+# cohort's windows so a run rides through between-phase lulls). At most
+# WORKFLOW_AGENT_CAP agent rows render per run and WORKFLOW_RUN_CAP run blocks
+# render concurrently; overflow is summarised, never dropped silently.
+WORKFLOW_LIVENESS_SECONDS = 120
+WORKFLOW_AGENT_CAP        = 6
+WORKFLOW_RUN_CAP          = 2
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5

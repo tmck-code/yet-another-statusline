@@ -42,6 +42,96 @@ def _parse_iso_to_epoch(ts: str) -> float:
         return 0.0
 
 
+def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float]:
+    """Parse one agent-*.jsonl transcript into the subagent metric tuple.
+
+    Module-level so the workflow cohort reader (info/workflows.py) can call the
+    identical token/activity/Done logic without duplicating it. Returns
+    ``(billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts)``.
+    Never raises; an unreadable transcript yields zeroes.
+    """
+    seen: set[str] = set()
+    billed_in    = 0
+    cache_read_in = 0
+    output       = 0
+    first_ts     = 0.0
+    end_ts       = 0.0
+    model        = ''
+    last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
+    try:
+        with jsonl.open('r', errors='ignore') as fh:
+            for ln in fh:
+                if first_ts == 0.0 and '"timestamp"' in ln:
+                    try:
+                        d = json.loads(ln)
+                        ts = d.get('timestamp', '')
+                        if ts:
+                            first_ts = _parse_iso_to_epoch(ts)
+                    except (ValueError, TypeError):
+                        pass
+                if '"usage"' not in ln or '"assistant"' not in ln:
+                    continue
+                try:
+                    d = json.loads(ln)
+                except (ValueError, TypeError):
+                    continue
+                msg = d.get('message') or {}
+                mid = msg.get('id')
+                if not mid or mid in seen:
+                    continue
+                seen.add(mid)
+                if not model:
+                    m = msg.get('model') or ''
+                    if m:
+                        model = m
+                u = msg.get('usage') or {}
+                billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
+                cache_read_in += u.get('cache_read_input_tokens', 0) or 0
+                output        += u.get('output_tokens', 0) or 0
+                content = msg.get('content') or []
+                if content:
+                    # Prefer the last tool_use block anywhere in the message;
+                    # a trailing text narration must not mask an actual tool
+                    # call (Claude often emits [text, tool_use, text]).  Only
+                    # when no tool_use exists do we fall back to the first
+                    # non-empty line of the last text block, then thinking.
+                    last_tool = None
+                    last_text = None
+                    for item in content:
+                        kind = item.get('type', '')
+                        if kind == 'tool_use':
+                            last_tool = item
+                        elif kind == 'text':
+                            last_text = item
+                    if last_tool is not None:
+                        raw_inp = last_tool.get('input') or {}
+                        inp = {
+                            k: _sanitize(v) if isinstance(v, str) else v
+                            for k, v in raw_inp.items()
+                        } if isinstance(raw_inp, dict) else {}
+                        last_activity = ('tool_use', _sanitize(last_tool.get('name', '') or ''), inp)
+                    elif last_text is not None:
+                        snippet = ''
+                        for line in str(last_text.get('text', '') or '').splitlines():
+                            stripped = line.strip()
+                            if stripped:
+                                snippet = _sanitize(stripped)
+                                break
+                        last_activity = ('text', snippet, {})
+                    else:
+                        last_activity = ('thinking', '', {})
+                try:
+                    if msg.get('stop_reason') == 'end_turn':
+                        ts = d.get('timestamp', '')
+                        if ts:
+                            end_ts = _parse_iso_to_epoch(ts)
+                except (ValueError, TypeError):
+                    pass
+    except OSError:
+        pass
+    return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
+
+
 @dataclass
 class RunningSubagent:
     agent_type: str
@@ -55,6 +145,7 @@ class RunningSubagent:
     last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
     end_ts:        float                 = 0.0  # end_turn timestamp; Done iff end_ts > 0
     mtime:         float                 = 0.0  # transcript last-modified time (st_mtime)
+    agent_id:      str                   = ''   # transcript filename stem; matches run-JSON agentId (workflow cohort)
 
 
 @dataclass
@@ -178,83 +269,6 @@ class RunningSubagents:
 
     @staticmethod
     def _parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float]:
-        seen: set[str] = set()
-        billed_in    = 0
-        cache_read_in = 0
-        output       = 0
-        first_ts     = 0.0
-        end_ts       = 0.0
-        model        = ''
-        last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
-        try:
-            with jsonl.open('r', errors='ignore') as fh:
-                for ln in fh:
-                    if first_ts == 0.0 and '"timestamp"' in ln:
-                        try:
-                            d = json.loads(ln)
-                            ts = d.get('timestamp', '')
-                            if ts:
-                                first_ts = _parse_iso_to_epoch(ts)
-                        except (ValueError, TypeError):
-                            pass
-                    if '"usage"' not in ln or '"assistant"' not in ln:
-                        continue
-                    try:
-                        d = json.loads(ln)
-                    except (ValueError, TypeError):
-                        continue
-                    msg = d.get('message') or {}
-                    mid = msg.get('id')
-                    if not mid or mid in seen:
-                        continue
-                    seen.add(mid)
-                    if not model:
-                        m = msg.get('model') or ''
-                        if m:
-                            model = m
-                    u = msg.get('usage') or {}
-                    billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
-                    cache_read_in += u.get('cache_read_input_tokens', 0) or 0
-                    output        += u.get('output_tokens', 0) or 0
-                    content = msg.get('content') or []
-                    if content:
-                        # Prefer the last tool_use block anywhere in the message;
-                        # a trailing text narration must not mask an actual tool
-                        # call (Claude often emits [text, tool_use, text]).  Only
-                        # when no tool_use exists do we fall back to the first
-                        # non-empty line of the last text block, then thinking.
-                        last_tool = None
-                        last_text = None
-                        for item in content:
-                            kind = item.get('type', '')
-                            if kind == 'tool_use':
-                                last_tool = item
-                            elif kind == 'text':
-                                last_text = item
-                        if last_tool is not None:
-                            raw_inp = last_tool.get('input') or {}
-                            inp = {
-                                k: _sanitize(v) if isinstance(v, str) else v
-                                for k, v in raw_inp.items()
-                            } if isinstance(raw_inp, dict) else {}
-                            last_activity = ('tool_use', _sanitize(last_tool.get('name', '') or ''), inp)
-                        elif last_text is not None:
-                            snippet = ''
-                            for line in str(last_text.get('text', '') or '').splitlines():
-                                stripped = line.strip()
-                                if stripped:
-                                    snippet = _sanitize(stripped)
-                                    break
-                            last_activity = ('text', snippet, {})
-                        else:
-                            last_activity = ('thinking', '', {})
-                    try:
-                        if msg.get('stop_reason') == 'end_turn':
-                            ts = d.get('timestamp', '')
-                            if ts:
-                                end_ts = _parse_iso_to_epoch(ts)
-                    except (ValueError, TypeError):
-                        pass
-        except OSError:
-            pass
-        return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
+        # Thin delegator to the module-level parse_transcript, kept so existing
+        # callers/tests referencing RunningSubagents._parse_transcript still work.
+        return parse_transcript(jsonl)
