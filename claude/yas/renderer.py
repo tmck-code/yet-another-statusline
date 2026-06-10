@@ -79,7 +79,7 @@ from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
 from yas.info.tasks import TaskList
-from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
+from yas.render.text import _visible_width, fmt_dur, fmt_tok
 from yas.tokens import TokenRate
 
 if TYPE_CHECKING:
@@ -307,7 +307,7 @@ class Renderer:
 
     def path_git(
         self, short_pwd: str, git: GitInfo,
-        *, show_commit: bool = True, show_dirty: bool = True,
+        *, show_path: bool = True, show_commit: bool = True, show_dirty: bool = True,
     ) -> str:
         dirty = ''
         if show_dirty:
@@ -322,13 +322,25 @@ class Renderer:
             if dirty:
                 dirty = ' ' + dirty
         commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
+        # The cwd path is a whole unit: shown in full or omitted entirely (no
+        # middle-ellipsis). show_path=False yields the branch-only rung (glyph +
+        # arrow + branch) used as a width-degradation step below the path forms.
+        path_part = f'{self.PWD}{short_pwd}{self.R} ' if show_path else ''
 
         return (
-            f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}{GLYPH_FOLDER}  {path_part}'
+            f'{self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{commit_part}{dirty}'
         )
+
+    def path_glyph_only(self) -> str:
+        """Presence-glyph floor: the folder glyph alone (1 visible column).
+
+        The overflow-safe terminal state of the path ladder — it can never
+        exceed the available width or disturb the box border math.
+        """
+        return f'{self.ICON_PATH}{GLYPH_FOLDER}{self.R}'
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
@@ -344,6 +356,11 @@ class Renderer:
         def fits(s: str) -> bool:
             return _visible_width(s) <= target_w
 
+        # Whole-unit include/omit ladder; first candidate that fits wins.
+        # full → drop commit → drop commit+dirty → compact path+branch →
+        # branch-only (path omitted) → glyph-only floor. The path is never
+        # middle-ellipsized: it is shown in full or dropped whole, and the
+        # branch outlives the path. compact_only enters at the compact rung.
         if not compact_only:
             for kwargs in (
                 {},
@@ -358,24 +375,15 @@ class Renderer:
         if fits(compact):
             return compact
 
-        # Ellipsis on short_pwd only
-        for pwd_w in range(target_w - 1, 0, -1):
-            trunc_pwd = _middle_ellipsis(short_pwd, pwd_w)
-            candidate = self.path_git_compact(trunc_pwd, git)
-            if fits(candidate):
-                return candidate
-
-        # Ellipsis on both short_pwd and branch
-        # Overhead of path_git_compact with empty strings is 5 visible chars.
-        half = max(1, (target_w - 5) // 2)
-        trunc_pwd    = _middle_ellipsis(short_pwd,  half)
-        trunc_branch = _middle_ellipsis(git.branch, half)
-        truncated_git = GitInfo(
-            branch=trunc_branch, commit=git.commit,
-            modified=git.modified, untracked=git.untracked,
-            deleted=git.deleted, renamed=git.renamed,
+        # Path omitted whole, branch retained (glyph + arrow + branch).
+        branch_only = self.path_git(
+            short_pwd, git, show_path=False, show_commit=False, show_dirty=False,
         )
-        return self.path_git_compact(trunc_pwd, truncated_git)
+        if fits(branch_only):
+            return branch_only
+
+        # Glyph-only presence floor — 1 visible column, always within target.
+        return self.path_glyph_only()
 
     def model_colour(self, model_name: str) -> str:
         return self.theme.models[model_key(model_name)].label

@@ -125,24 +125,33 @@ class TestFitPath:
         result = r.fit_path('~/p', git, target_w)
         assert strip_ansi(result) == strip_ansi(compact)
 
-    def test_ellipsis_pwd_when_compact_overflows(self) -> None:
+    def test_omits_pwd_whole_when_compact_overflows(self) -> None:
+        # Below compact path+branch the path is dropped whole (no middle
+        # ellipsis): the branch survives and the distinctive pwd is gone.
         r = Renderer()
         git = self._git(branch='x')
-        compact = r.path_git_compact('~/very-long-path-name', git)
-        target_w = _visible_width(compact) - 4
-        result = r.fit_path('~/very-long-path-name', git, target_w)
+        pwd = '~/very-long-path-name'
+        branch_only = r.path_git(
+            pwd, git, show_path=False, show_commit=False, show_dirty=False,
+        )
+        target_w = _visible_width(branch_only)
+        result = r.fit_path(pwd, git, target_w)
+        stripped = strip_ansi(result)
         assert _visible_width(result) <= target_w
-        assert '…' in strip_ansi(result)
-        assert 'x' in strip_ansi(result)
+        assert pwd not in stripped       # path omitted whole
+        assert 'x' in stripped           # branch retained
+        assert '…' not in stripped       # never middle-ellipsized
 
-    def test_ellipsis_branch_as_last_resort(self) -> None:
+    def test_floor_when_branch_does_not_fit(self) -> None:
+        # When not even the branch fits, fit_path falls back to the glyph-only
+        # floor — within target, no ellipsis (no ellipsis-fallback any more).
         r = Renderer()
         git = self._git(branch='feature/very-long-branch-name')
         pwd = '~/also-very-long-path'
-        compact = r.path_git_compact(pwd, git)
-        target_w = max(5, _visible_width(compact) - 20)
-        result = r.fit_path(pwd, git, target_w)
-        assert _visible_width(result) <= target_w + 2  # small tolerance for wide chars
+        result = r.fit_path(pwd, git, 2)
+        assert result == r.path_glyph_only()
+        assert _visible_width(result) <= 2
+        assert '…' not in strip_ansi(result)
 
     def test_compact_only_skips_path_git_variants(self) -> None:
         r = Renderer()
