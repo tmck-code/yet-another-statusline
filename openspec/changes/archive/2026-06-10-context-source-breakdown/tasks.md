@@ -6,6 +6,6 @@
 
 ## 2. Deferral / follow-up
 
-- [ ] 2.1 Leave context rendering unchanged; do not ship an approximate by-source breakdown.
-- [ ] 2.2 If pursued later, open a separate change for one feasible alternative: per-skill/plugin cumulative attribution, or the cache-base vs fresh structural split.
-- [ ] 2.3 Revisit if Claude Code ever exposes a `/context`-style breakdown in the statusline payload.
+- [x] 2.1 Leave context rendering unchanged; do not ship an approximate by-source breakdown.
+- [x] 2.2 If pursued later, open a separate change for one feasible alternative: per-skill/plugin cumulative attribution, or the cache-base vs fresh structural split.
+- [x] 2.3 Revisit if Claude Code ever exposes a `/context`-style breakdown in the statusline payload.
