@@ -29,8 +29,15 @@ demo:
 # Renders every scenario .txt (plus per-theme kitchen-sink renders) into demo/.
 # Set DEMO_ONLY=<scenario-name> to render just one scenario's .txt, e.g.
 #   DEMO_ONLY=tasks make demo/img
+# With DEMO_ONLY set, also emits a deterministic PNG screenshot next to the .txt
+# (demo/<scenario>.png) via ops/ansi_png.py — handy for before/after PR shots.
+# Font/size/colours are overridable; see ops/ansi_png.py for the env knobs:
+#   DEMO_ONLY=tasks YAS_DEMO_FONT='FiraCode Nerd Font Mono' make demo/img
 demo/img:
 	@uv run python3 ops/demo.py --snapshots demo/
+	@if [ -n "$(DEMO_ONLY)" ]; then \
+		uv run python3 ops/ansi_png.py demo/$(DEMO_ONLY).txt demo/$(DEMO_ONLY).png; \
+	fi
 
 test:
 	@uv run pytest -q
