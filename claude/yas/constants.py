@@ -13,6 +13,7 @@ DEFAULT_MAX_WIDTH    = 140
 DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
+DEFAULT_SHOW_DAY_STATS = True
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
@@ -104,18 +105,6 @@ GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
-
-# Sparkline slope glyphs from U+1FB3C-U+1FB6B "Symbols for Legacy Computing".
-# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
-# peak cell pairs with a 'fall' char on the next cell to form a /\ shape.
-SPARK_RISE_SMALL  = '\U0001fb48'  # small rise (bot row, idx 1-3)
-SPARK_FALL_SMALL  = '\U0001fb3d'  # small fall (bot row, idx 1-3)
-SPARK_RISE_MED    = '\U0001fb4a'  # medium rise (bot row, idx 4-7)
-SPARK_FALL_MED    = '\U0001fb3f'  # medium fall (bot row, idx 4-7)
-SPARK_RISE_TALL   = '\U0001fb45'  # tall rise (bot row, idx 8+)
-SPARK_FALL_TALL   = '\U0001fb50'  # tall fall (bot row, idx 8+)
-SPARK_RISE_TOP    = '\U0001fb4b'  # top-row rise (idx 9+)
-SPARK_FALL_TOP    = '\U0001fb40'  # top-row fall (idx 9+)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block

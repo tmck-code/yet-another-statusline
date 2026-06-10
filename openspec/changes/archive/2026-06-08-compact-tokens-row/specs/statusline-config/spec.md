@@ -1,10 +1,4 @@
-# statusline-config Specification
-
-## Purpose
-
-Define how the statusline resolves user configuration: a fixed precedence chain across CLI flags, canonical and legacy environment variables, a sectioned `yas.toml` file, and built-in defaults; fail-safe validation; per-model `soft_limit` overrides; a visible config-error row; and a single frozen source of resolved configuration.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Layered configuration precedence
 
@@ -78,20 +72,6 @@ The statusline SHALL read configuration from `yas.toml` located in `CLAUDE_CONFI
 - **WHEN** `yas.toml` contains a key or section that does not map to a known knob
 - **THEN** the unknown entry is ignored and the rest of the config still resolves
 
-### Requirement: TOML parsing with graceful 3.10 degradation
-
-The statusline SHALL parse `yas.toml` using the standard-library `tomllib` module and SHALL remain zero-dependency. On a Python runtime where `tomllib` is unavailable (3.10), the statusline SHALL skip the `yas.toml` file silently and resolve every knob from env + defaults; it SHALL NOT crash and SHALL NOT add any third-party dependency.
-
-#### Scenario: TOML applied on 3.11+
-
-- **WHEN** the runtime provides `tomllib` and a valid `yas.toml` exists
-- **THEN** the file's values participate in precedence resolution
-
-#### Scenario: File skipped on 3.10
-
-- **WHEN** the runtime does not provide `tomllib` and a `yas.toml` exists
-- **THEN** the file is ignored, env + defaults are used, and the statusline renders without error
-
 ### Requirement: Fail-safe validation of config values
 
 The statusline SHALL never crash or render garbage because of bad configuration. A syntactically broken `yas.toml` SHALL cause the entire file to be ignored (env + defaults still apply). A value that is the wrong type or out of range for its knob SHALL cause only that single knob to fall back to its default while all other valid knobs are still applied. Validation rules: `max_width` is an integer > 0; `full_width` is a boolean (env form accepts any non-empty value as true); `soft_limit` is an integer > 0; `token_window` is a number > 0; `theme` must be a known theme name; `bg_shift` must be one of `warm` or `cool`; `show_day_stats` is a boolean (env form treats `0`, `false`, and `no` as false and any other non-empty value as true).
@@ -125,70 +105,3 @@ The statusline SHALL never crash or render garbage because of bad configuration.
 
 - **WHEN** a `[[tokens.model]]` entry has a missing/empty `match`, or a `soft_limit` that is non-integer or `<= 0`
 - **THEN** only that entry is dropped (models it would have matched fall back to the global `soft_limit`), valid entries still apply, and the rejection is recorded referencing the entry (e.g. `tokens.model[2]`)
-
-### Requirement: Per-model soft_limit resolution
-
-The statusline SHALL support per-model `soft_limit` overrides declared as a `[[tokens.model]]` array of tables, each with a `match` string and a `soft_limit` integer. At render time the statusline SHALL select the effective `soft_limit` for the session's model by matching each entry's `match` as a case-insensitive plain substring against the lowercased model `id` and `display_name`; when multiple entries match, the entry with the longest `match` string SHALL win, and ties SHALL be broken by file order (first entry wins). `match` SHALL be a literal substring (no glob or regex). When no entry matches, the global `soft_limit` SHALL be used. A matching per-model override SHALL take precedence over the global value from ANY source, including the `YAS_SOFT_LIMIT` environment variable (specificity beats source precedence; this is the single documented exception to the env > toml rule). Per-model overrides SHALL be expressible only in `yas.toml`; there SHALL be no per-model environment variable.
-
-#### Scenario: Most-specific match wins
-
-- **WHEN** entries `match="opus"` (200000) and `match="opus-4-8[1m]"` (1000000) are present and the session model id is `claude-opus-4-8[1m]`
-- **THEN** the effective `soft_limit` is `1000000` (the longer `match="opus-4-8[1m]"` wins over `match="opus"`)
-
-#### Scenario: Falls back to global when no entry matches
-
-- **WHEN** only `match="haiku"` overrides exist and the session model is an Opus model
-- **THEN** the effective `soft_limit` is the resolved global value
-
-#### Scenario: Matches against display_name as well as id
-
-- **WHEN** an entry `match="1m context"` is present and the model `display_name` is `Opus 4.8 (1M context)`
-- **THEN** that entry matches (case-insensitive) and its `soft_limit` is used
-
-#### Scenario: Per-model toml beats global env
-
-- **WHEN** `YAS_SOFT_LIMIT=200000` is set in the environment and a matching entry `match="1m", soft_limit=1000000` exists for a 1M-context session
-- **THEN** the effective `soft_limit` is `1000000`
-
-#### Scenario: Tie broken by file order
-
-- **WHEN** two entries have equal-length `match` strings that both match the model
-- **THEN** the entry appearing first in the file is used
-
-### Requirement: Visible config-error row
-
-When one or more configuration values are rejected, the statusline SHALL append a single compact error row at the bottom of the box, inside the border, naming the rejected knobs and truncated to the render width (e.g. `⚠ yas.toml: 2 values ignored (max_width, bg_shift)`). The row SHALL appear in all layouts (narrow, medium, wide). The error row SHALL NOT appear when no value was rejected. Full per-value reasons SHALL be written to stderr only when `YAS_DEBUG` is set in the environment.
-
-#### Scenario: Error row shown on rejection
-
-- **WHEN** two configured values are rejected
-- **THEN** a single error row is appended above the bottom border naming the two rejected knobs
-
-#### Scenario: No error row when config is clean
-
-- **WHEN** all configured values are valid (or no config is present)
-- **THEN** no error row is rendered
-
-#### Scenario: Detailed reasons gated by YAS_DEBUG
-
-- **WHEN** a value is rejected and `YAS_DEBUG` is set
-- **THEN** a per-value reason line is written to stderr in addition to the compact row
-
-#### Scenario: Error row appears in narrow layout
-
-- **WHEN** a value is rejected and the terminal is narrow
-- **THEN** the compact error row is still appended, truncated to the narrow width without breaking the box
-
-### Requirement: Single source of resolved configuration
-
-The statusline SHALL expose resolved configuration through one frozen `Config` object loaded once, and the existing module-level constants that callers and tests depend on (`MAX_WIDTH`, `SOFT_LIMIT`, the token-rate window) SHALL be sourced from that object so that current behaviour and module-reload tests continue to work. The module-level `SOFT_LIMIT` SHALL hold the resolved *global* value; per-model resolution SHALL be performed at render time via a `Config` method (e.g. `soft_limit_for(model_name)`) whose result is threaded into the rendering paths, not via the module constant. Layout breakpoints (narrow/medium/min width) SHALL remain hardcoded and SHALL NOT be user-configurable.
-
-#### Scenario: Module constant holds the global value
-
-- **WHEN** `YAS_MAX_WIDTH` and `YAS_SOFT_LIMIT` are set and the module is loaded
-- **THEN** `MAX_WIDTH` equals the resolved value and `SOFT_LIMIT` equals the resolved global `soft_limit` (independent of any per-model overrides)
-
-#### Scenario: Layout breakpoints are not configurable
-
-- **WHEN** a user attempts to set a narrow/medium/min width via env or `yas.toml`
-- **THEN** the layout breakpoints are unchanged (the setting has no effect)

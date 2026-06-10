@@ -74,6 +74,49 @@ def _kinds(spec: layout.LayoutSpec) -> list[str]:
     return [row.kind for row in spec.rows]
 
 
+def _tokens_row_indices(spec: layout.LayoutSpec) -> list[int]:
+    """Content rows that carry the tokens/cost/rate line (the rate label 't/m')."""
+    from helper import strip_ansi
+    return [i for i, row in enumerate(spec.rows)
+            if row.kind == 'content' and 't/m' in strip_ansi(row.content)]
+
+
+def test_tokens_row_is_single_content_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    _silence_dynamic(monkeypatch)
+    spec = layout.build_wide(_view(), _tick(), 160, _r)
+    assert len(_tokens_row_indices(spec)) == 1
+
+
+def test_tokens_row_session_only_single_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    _silence_dynamic(monkeypatch)
+    view = SessionView(_session(), Config(show_day_stats=False))
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    assert len(_tokens_row_indices(spec)) == 1
+
+
+def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every interior │ in the single tokens line has a matching ┬ on the
+    separator above and ┴ on the separator below at the same visual column."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    # A dynamic section below ensures the row below tokens is a (seam) separator,
+    # not the bottom border — so we can check ┴ elbows both sides.
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
+    spec  = layout.build_wide(_view(), _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    t_idx = _tokens_row_indices(spec)[0]
+
+    last = len(lines[t_idx]) - 1
+    interior_bars = [i for i, ch in enumerate(lines[t_idx]) if ch == '│' and 0 < i < last]
+    assert len(interior_bars) == 2, f'expected 2 interior │, got {interior_bars}'
+
+    above, below = lines[t_idx - 1], lines[t_idx + 1]
+    for col in interior_bars:
+        assert above[col] in ('┬', '┼'), f'no ┬ above at col {col}: {above[col]!r}'
+        assert below[col] in ('┴', '┼'), f'no ┴ below at col {col}: {below[col]!r}'
+
+
 def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
