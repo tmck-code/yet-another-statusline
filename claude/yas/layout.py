@@ -258,16 +258,16 @@ def build_wide(
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
     )
-    line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
+    line_tokens, vsep_cols, _mark_col = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
         sess_cost, day_cost, tok_rate,
-        session.session_id, width, fill,
+        session.session_id, width, fill, view.cfg.show_day_stats,
     )
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
-    openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
+    openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
 
     line_context = r.context_line(ctx, width - 3, soft_limit)
 
@@ -355,8 +355,9 @@ def build_wide(
     rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill))
     rows.append(RowSpec('content', content=line_context))
 
-    tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
-    rows.append(RowSpec('separator_dim', downs=tokens_downs))
+    # Two elbows: one per vsep │ in the single tokens line. The old 60s tick
+    # marker (a third elbow) was removed once the bar became a flat 60s window.
+    rows.append(RowSpec('separator_dim', downs=vsep_cols))
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
 

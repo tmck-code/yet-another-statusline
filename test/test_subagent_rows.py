@@ -9,6 +9,7 @@ import yas.renderer as renderer_mod
 import yas.session as session_mod
 import yas.info.subagents as subagents_mod
 from yas.config import Config
+from yas.constants import GLYPH_REPLYING
 from yas.info import SessionView
 from yas.info.subagents import RunningSubagent
 from yas.render.text import _visible_width, fmt_tok
@@ -376,6 +377,91 @@ def test_subagent_activity_replying() -> None:
 
 def test_subagent_activity_empty() -> None:
     assert _r.subagent_activity(('', '', {})) == ''
+
+
+# H2. Activity selection: text snippet vs tool_use precedence ----------------
+
+def _parse_activity(content: list, tmp_path: Path) -> tuple:
+    """Write a one-message transcript and return its parsed last_activity tuple.
+
+    Exercises RunningSubagents._parse_transcript end-to-end so the snippet /
+    precedence selection is tested, not just the renderer.
+    """
+    line = json.dumps({
+        'type': 'assistant',
+        'message': {
+            'id': 'm1',
+            'usage': {'input_tokens': 1, 'output_tokens': 1},
+            'content': content,
+        },
+    }) + '\n'
+    jsonl = tmp_path / 'agent.jsonl'
+    jsonl.write_text(line)
+    return subagents_mod.RunningSubagents._parse_transcript(jsonl)[5]
+
+
+def test_text_only_message_renders_replying_snippet(tmp_path: Path) -> None:
+    # Text-only latest message (no tool_use) -> first non-empty stripped line.
+    act = _parse_activity(
+        [{'type': 'text', 'text': '\n   Investigating the failing test\nmore'}],
+        tmp_path,
+    )
+    assert act[0] == 'text'
+    assert act[1] == 'Investigating the failing test'
+    out = strip_ansi(_r.subagent_activity(act))
+    assert out == f'{GLYPH_REPLYING} Investigating the failing test'
+
+
+def test_interleaved_tool_use_beats_trailing_text(tmp_path: Path) -> None:
+    # [text, tool_use, text]: the tool call must win over the trailing narration.
+    act = _parse_activity(
+        [
+            {'type': 'text', 'text': 'Let me run the tests'},
+            {'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pytest -q'}},
+            {'type': 'text', 'text': 'running now'},
+        ],
+        tmp_path,
+    )
+    assert act[0] == 'tool_use'
+    out = strip_ansi(_r.subagent_activity(act))
+    assert 'Bash[pytest -q]' in out      # tool verb wins
+    assert 'running now' not in out      # trailing text snippet suppressed
+    assert GLYPH_REPLYING not in out     # not the replying glyph
+
+
+def test_text_snippet_truncates_and_empty_falls_back() -> None:
+    # A snippet wider than 36 visible columns is capped to 36 + ellipsis.
+    out = strip_ansi(_r.subagent_activity(('text', 'y' * 80, {})))
+    snippet = out[len(f'{GLYPH_REPLYING} '):]
+    assert snippet.endswith('…')
+    assert _visible_width(snippet) == 37  # 36 cols + ellipsis
+    # Empty/absent text content falls back to the (replying) placeholder.
+    empty = strip_ansi(_r.subagent_activity(('text', '', {})))
+    assert empty == f'{GLYPH_REPLYING} (replying)'
+
+
+# H3. Line-2 activity snippet widens with available width --------------------
+
+def test_two_line_activity_widens_beyond_36_when_room() -> None:
+    # A text snippet 60 cols wide (>36, <=100) renders in full on a wide row,
+    # rather than being capped to the old 36+ellipsis cap.
+    sub = _make_sub(last_activity=('text', 'y' * 60, {}))
+    _, line2 = _two(sub, 136)
+    plain   = strip_ansi(line2)
+    snippet = plain.split(f'{GLYPH_REPLYING} ', 1)[1].rstrip()
+    assert '…' not in snippet                  # not truncated
+    assert _visible_width(snippet) == 60       # full 60 cols, not 37
+
+
+def test_two_line_activity_caps_at_100_when_huge() -> None:
+    # A snippet far wider than 100 caps at 100 cols + ellipsis even on a very
+    # wide row, instead of expanding unbounded.
+    sub = _make_sub(last_activity=('text', 'y' * 150, {}))
+    _, line2 = _two(sub, 160)
+    plain   = strip_ansi(line2)
+    snippet = plain.split(f'{GLYPH_REPLYING} ', 1)[1].rstrip()
+    assert snippet.endswith('…')
+    assert _visible_width(snippet) == 101       # 100 cols + ellipsis
 
 
 # I. build_wide integration --------------------------------------------------

@@ -54,12 +54,15 @@ OPENSPEC_PROGRESSION: tuple[list[tuple[str, int, int]], ...] = (
 )
 
 # (agentType, description, billed_in, output_tokens, action) — empty list means no subagent active
-# action is (tool_name, input_dict) or None; omit to leave activity blank.
+# action is (tool_name, input_dict), ('text', snippet), a list of either, or
+# None; omit to leave activity blank.  See write_subagents for the full vocabulary.
 SUBAGENTS_PROGRESSION: tuple[list[tuple[object, ...]], ...] = (
     [],
     [('explore',         'Search codebase - looking for token tracking',  1_200,    80, ('Bash',  {'command': 'grep -rn "billed_in" claude/statusline_command.py'}))],
     [('explore',         'Search codebase - looking for token tracking',  3_100,   190, ('Read',  {'file_path': 'claude/statusline_command.py'}))],
     [('general-purpose', 'Fix sparkline - update bucket algorithm',       7_600,   680, ('Edit',  {'file_path': 'claude/statusline_command.py', 'old_string': 'old', 'new_string': 'new'}))],
+    # Text-only latest message -> the GLYPH_REPLYING snippet continuation line.
+    [('narrator',        'Narrate progress on the gradient fix',          9_400,   980, ('text',  'Tracing the off-by-one in the gradient border math'))],
     [('general-purpose', 'Fix sparkline - update bucket algorithm',      11_800, 1_350, None)],
     [],
 )
@@ -154,6 +157,25 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     )
 
 
+def _subagent_content_block(spec: object) -> dict[str, object] | None:
+    """Turn a demo action spec into a synthetic transcript content block.
+
+    ('text', '<snippet>')   -> a text block   (renders `GLYPH_REPLYING <snippet>`)
+    ('<Tool>', {..input..}) -> a tool_use block (renders `GLYPH_TASKS Tool[arg]`)
+
+    The two forms are distinguished by the second element's type (str vs dict),
+    which lets a scenario interleave them in a single message (e.g. the
+    [text, tool_use, text] case the parser must collapse to the tool_use).
+    """
+    if isinstance(spec, tuple) and len(spec) == 2:
+        head, body = spec
+        if head == 'text' and isinstance(body, str):
+            return {'type': 'text', 'text': body}
+        if isinstance(body, dict):
+            return {'type': 'tool_use', 'name': str(head), 'input': body}
+    return None
+
+
 def write_subagents(
     claude_dir:  Path,
     session_id:  str,
@@ -165,7 +187,12 @@ def write_subagents(
 ) -> None:
     """Each subagent entry: (agentType, description, billed_in, output_tokens[, action[, done_seconds_ago]]).
 
-    action is (tool_name, input_dict) or None; if absent or None, content is omitted.
+    action selects the latest assistant message's content blocks:
+      - (tool_name, input_dict)  -> a tool_use block  -> `GLYPH_TASKS Tool[arg]`
+      - ('text', '<snippet>')    -> a text block       -> `GLYPH_REPLYING <snippet>`
+      - a list of either form    -> interleaved blocks (the last tool_use still
+        wins over a trailing text narration, matching the production parser)
+      - None / absent            -> content omitted.
     age_seconds shifts the recorded start timestamp into the past so that duration
     and t/m rate are non-zero when rendered.
     done_seconds_ago (6th element, float > 0) marks the agent as Done: appends an
@@ -214,12 +241,15 @@ def write_subagents(
                     'output_tokens':               output_tokens,
                 },
             }
-            if isinstance(action_raw, tuple) and len(action_raw) == 2:
-                tool_name = str(action_raw[0])
-                input_dict = action_raw[1]
-                msg['content'] = [
-                    {'type': 'tool_use', 'name': tool_name, 'input': input_dict}
-                ]
+            if isinstance(action_raw, list):
+                specs: list[object] = list(action_raw)
+            elif action_raw is not None:
+                specs = [action_raw]
+            else:
+                specs = []
+            blocks = [b for b in (_subagent_content_block(s) for s in specs) if b is not None]
+            if blocks:
+                msg['content'] = blocks
             entry: dict[str, object] = {
                 'type':      'assistant',
                 'timestamp': ts,
@@ -670,6 +700,11 @@ SCENARIOS: list[ScenarioConfig] = [
             ('explore',         'Search codebase - looking for token tracking', 3_200,   420, ('Bash', {'command': 'grep -rn "billed_in" claude/statusline_command.py'})),
             ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'a', 'new_string': 'b'})),
             ('claude',          'Review border math implementation',            5_400,   980, ('Read', {'file_path': 'claude/statusline_command.py'})),
+            # Text-only latest message -> the replying-snippet path. Medium
+            # snippet (~50 cols) now shows in full past the old 36-col cap.
+            ('narrator',        'Narrate progress on the gradient fix',         4_100,   610, ('text', 'Tracing the off-by-one in the gradient border math')),
+            # Long snippet (>100 cols) -> exercises the 100-col ceiling + ellipsis.
+            ('reviewer',        'Summarise the border-math review',             6_300, 1_120, ('text', 'Investigating why the gradient border shifts a column under load and patching the off-by-one before the snapshot diff settles')),
         ],
         five_hour_pct = 46.0,
         seven_day_pct = 37.0,
@@ -687,6 +722,16 @@ SCENARIOS: list[ScenarioConfig] = [
             ('explore',         'Search codebase - looking for token tracking', 3_200,   420, ('Bash', {'command': 'grep -rn "billed_in" claude/statusline_command.py'})),
             ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'a', 'new_string': 'b'})),
             ('claude',          'Review border math implementation',            5_400,   980, ('Read', {'file_path': 'claude/statusline_command.py'})),
+            # Text-only latest message -> replying snippet, shown even in the
+            # narrower side-by-side right column.
+            ('narrator',        'Narrate the gradient fix',                     4_100,   610, ('text', 'Patching the gradient border off-by-one')),
+            # Interleaved [text, tool_use, text]: the trailing narration must not
+            # mask the real tool call, so this still renders the tool_use verb.
+            ('grep-bot',        'Confirm no stray callers remain',             2_900,   480, [
+                ('text', 'Let me double-check there are no stragglers'),
+                ('Grep', {'pattern': 'billed_in', 'path': 'claude/'}),
+                ('text', 'Found them, wiring the fix now'),
+            ]),
         ],
         openspec    = [
             ('add-gradient-engine',        6, 8),
@@ -749,6 +794,8 @@ SCENARIOS: list[ScenarioConfig] = [
             ('explore',         'Scan codebase for token tracking',   2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
             ('general-purpose', 'Analyse sparkline bucket algorithm',  5_600,   720, ('Read', {'file_path': 'claude/statusline_command.py'})),
             ('claude',          'Draft border-math refactor',          3_800,   540, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'x', 'new_string': 'y'})),
+            # Text-only latest message -> replying snippet alongside the cohort.
+            ('narrator',        'Narrate the refactor plan',           2_400,   320, ('text', 'Walking the border helpers before touching the elbow math')),
         ],
         five_hour_pct = 30.0,
         seven_day_pct = 20.0,

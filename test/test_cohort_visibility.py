@@ -3,7 +3,15 @@
 These tests build RunningSubagent objects directly (no disk I/O) so they are
 fast and deterministic.  The mtime and end_ts fields are set explicitly to
 simulate various age/done combinations.
+
+One test (test_streaming_duplicate_id_end_turn_reaches_done_state) is an
+end-to-end exception: it parses a real fixture transcript through from_session
+so the Done-state (end_ts > 0) it asserts is produced by the production
+_parse_transcript path, not hand-set.
 '''
+import json
+from pathlib import Path
+
 from yas.info.subagents import RunningSubagent, RunningSubagents
 
 
@@ -151,3 +159,120 @@ def test_empty_subagents_returns_empty() -> None:
     '''An empty RunningSubagents always returns an empty list.'''
     assert _cohort().visible(NOW, NOW - 5.0) == []
     assert _cohort().visible(NOW, None) == []
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: streaming duplicate-id end_turn must still reach Done state
+# ---------------------------------------------------------------------------
+#
+# Regression for the hardened _parse_transcript: streaming writes the same
+# assistant message.id several times — an early partial with stop_reason: null,
+# then a final write with stop_reason: "end_turn".  The end_turn/end_ts capture
+# must run BEFORE the message-id dedup guard, otherwise the final end_turn write
+# on an already-seen id is skipped, end_ts stays 0, and the agent lingers
+# looking ACTIVE instead of reaching the Done state.  A Done agent (end_ts > 0)
+# is eligible for the dimmed Done treatment + 20 s clean-retire grace; an
+# active one is not.
+
+_SESSION_ID = 'sess-dup'
+_PROJECT_DIR = '/home/user/myproject'
+_PROJECT_SLUG = 'home-user-myproject'
+
+
+def _streaming_partial_line(msg_id: str, *, timestamp: str) -> str:
+    '''An early streaming partial: same id, stop_reason null, not yet done.'''
+    d: dict = {
+        'type': 'assistant',
+        'timestamp': timestamp,
+        'message': {
+            'id': msg_id,
+            'role': 'assistant',
+            'model': 'claude-sonnet-4-6',
+            'stop_reason': None,
+            'usage': {
+                'input_tokens': 10,
+                'cache_creation_input_tokens': 0,
+                'cache_read_input_tokens': 0,
+                'output_tokens': 2,
+            },
+            'content': [{'type': 'text', 'text': 'partial'}],
+        },
+    }
+    return json.dumps(d) + '\n'
+
+
+def _end_turn_line(msg_id: str, *, timestamp: str) -> str:
+    '''Final streaming write: SAME id as the partial, now stop_reason end_turn.'''
+    d: dict = {
+        'type': 'assistant',
+        'timestamp': timestamp,
+        'message': {
+            'id': msg_id,
+            'role': 'assistant',
+            'model': 'claude-sonnet-4-6',
+            'stop_reason': 'end_turn',
+            'usage': {
+                'input_tokens': 10,
+                'cache_creation_input_tokens': 0,
+                'cache_read_input_tokens': 0,
+                'output_tokens': 5,
+            },
+            'content': [{'type': 'text', 'text': 'done'}],
+        },
+    }
+    return json.dumps(d) + '\n'
+
+
+def test_streaming_duplicate_id_end_turn_reaches_done_state(tmp_home: Path) -> None:
+    '''A transcript whose final end_turn reuses an earlier streaming partial's
+    message.id still reaches the Done state (end_ts > 0) and is therefore
+    subject to the 20 s grace retire (dimmed Done), not treated as active.
+    '''
+    # Build a real fixture transcript with a duplicated message.id: a streaming
+    # partial (stop_reason null) followed by the final end_turn (same id).
+    sdir = (
+        tmp_home / '.claude' / 'projects' / f'-{_PROJECT_SLUG}'
+        / _SESSION_ID / 'subagents'
+    )
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / 'agent-dup.meta.json').write_text(
+        json.dumps({'agentType': 'Explore', 'description': 'find X'}),
+    )
+    jsonl = sdir / 'agent-dup.jsonl'
+    jsonl.write_text(
+        _streaming_partial_line('msg_same', timestamp='2026-05-22T17:50:00.000Z')
+        + _end_turn_line('msg_same', timestamp='2026-05-22T17:50:30.000Z'),
+    )
+
+    parsed = RunningSubagents.from_session(_SESSION_ID, _PROJECT_DIR)
+    assert len(parsed.subagents) == 1
+    sub = parsed.subagents[0]
+
+    # The end_turn on the already-seen id must NOT have been suppressed by dedup.
+    assert sub.end_ts > 0, 'duplicate-id end_turn must still set end_ts (Done)'
+    end_ts = sub.end_ts
+
+    # Drive that real Done agent through visible(): because it IS Done, it is
+    # governed by the COHORT_GRACE_SECONDS clean-retire window, not the 60 s
+    # janitor sweep that applies to active agents.
+
+    # Within grace (just retired this turn): still visible (eligible for the
+    # dimmed Done treatment).
+    now_in_grace = end_ts + (GRACE - 1)
+    cohort = RunningSubagents(
+        subagents=[RunningSubagent(
+            agent_type='Explore', description='find X', billed_in=sub.billed_in,
+            output=sub.output, first_timestamp=sub.first_timestamp,
+            mtime=now_in_grace, end_ts=end_ts,
+        )],
+    )
+    last_prompt_ts = sub.first_timestamp - 1.0  # agent started this turn
+    assert cohort.subagents[0] in cohort.visible(now_in_grace, last_prompt_ts)
+
+    # Past the grace window: the all-Done cohort clean-retires (NOT lingering
+    # active waiting for the 60 s janitor sweep).
+    now_past_grace = end_ts + (GRACE + 1)
+    assert cohort.visible(now_past_grace, last_prompt_ts) == []
+    # Sanity: it retired strictly before the 60 s janitor horizon, proving it
+    # was treated as Done rather than as an active/dirty agent.
+    assert (GRACE + 1) < JANITOR

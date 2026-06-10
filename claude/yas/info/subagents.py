@@ -205,6 +205,20 @@ class RunningSubagents:
                         continue
                     msg = d.get('message') or {}
                     mid = msg.get('id')
+                    # Terminal-state check runs on EVERY assistant+usage line,
+                    # independent of message-id dedup. Streaming writes the same
+                    # message.id several times (early partials with
+                    # stop_reason: null, a final write with end_turn); the dedup
+                    # below must not let an already-seen id suppress this capture.
+                    # Last-write-wins: a later end_turn overwrites an earlier
+                    # end_ts; non-terminal lines never touch end_ts.
+                    try:
+                        if msg.get('stop_reason') == 'end_turn':
+                            ts = d.get('timestamp', '')
+                            if ts:
+                                end_ts = _parse_iso_to_epoch(ts)
+                    except (ValueError, TypeError):
+                        pass
                     if not mid or mid in seen:
                         continue
                     seen.add(mid)
@@ -218,26 +232,36 @@ class RunningSubagents:
                     output        += u.get('output_tokens', 0) or 0
                     content = msg.get('content') or []
                     if content:
-                        item = content[-1]
-                        kind = item.get('type', '')
-                        if kind == 'tool_use':
-                            raw_inp = item.get('input') or {}
+                        # Prefer the last tool_use block anywhere in the message;
+                        # a trailing text narration must not mask an actual tool
+                        # call (Claude often emits [text, tool_use, text]).  Only
+                        # when no tool_use exists do we fall back to the first
+                        # non-empty line of the last text block, then thinking.
+                        last_tool = None
+                        last_text = None
+                        for item in content:
+                            kind = item.get('type', '')
+                            if kind == 'tool_use':
+                                last_tool = item
+                            elif kind == 'text':
+                                last_text = item
+                        if last_tool is not None:
+                            raw_inp = last_tool.get('input') or {}
                             inp = {
                                 k: _sanitize(v) if isinstance(v, str) else v
                                 for k, v in raw_inp.items()
                             } if isinstance(raw_inp, dict) else {}
-                            last_activity = ('tool_use', _sanitize(item.get('name', '') or ''), inp)
-                        elif kind == 'thinking':
+                            last_activity = ('tool_use', _sanitize(last_tool.get('name', '') or ''), inp)
+                        elif last_text is not None:
+                            snippet = ''
+                            for line in str(last_text.get('text', '') or '').splitlines():
+                                stripped = line.strip()
+                                if stripped:
+                                    snippet = _sanitize(stripped)
+                                    break
+                            last_activity = ('text', snippet, {})
+                        else:
                             last_activity = ('thinking', '', {})
-                        elif kind == 'text':
-                            last_activity = ('text', '', {})
-                    try:
-                        if msg.get('stop_reason') == 'end_turn':
-                            ts = d.get('timestamp', '')
-                            if ts:
-                                end_ts = _parse_iso_to_epoch(ts)
-                    except (ValueError, TypeError):
-                        pass
         except OSError:
             pass
         return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts

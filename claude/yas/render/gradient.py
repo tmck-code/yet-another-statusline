@@ -10,14 +10,6 @@ from yas.constants import (
     BarChars,
     LIVE_DIM,
     RESET,
-    SPARK_RISE_SMALL,
-    SPARK_FALL_SMALL,
-    SPARK_RISE_MED,
-    SPARK_FALL_MED,
-    SPARK_RISE_TALL,
-    SPARK_FALL_TALL,
-    SPARK_RISE_TOP,
-    SPARK_FALL_TOP,
 )
 
 if TYPE_CHECKING:
@@ -212,66 +204,26 @@ class GradientEngine:
             parts.append(f'\033[49m{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
-    def _spark_flat(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 8:
-            return ' ', self.SPARK_CHARS[idx - 1]
-        return self.SPARK_CHARS[idx - 9], '█'
+    def sparkline_1row(self, history: list[int], live: bool = False) -> str:
+        """Single-row block-element sparkline.
 
-    def _spark_rise(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_RISE_SMALL
-        if idx <= 7:
-            return ' ', SPARK_RISE_MED
-        if idx <= 8:
-            return ' ', SPARK_RISE_TALL
-        return SPARK_RISE_TOP, SPARK_RISE_TALL
-
-    def _spark_fall(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_FALL_SMALL
-        if idx <= 7:
-            return ' ', SPARK_FALL_MED
-        if idx <= 8:
-            return ' ', SPARK_FALL_TALL
-        return SPARK_FALL_TOP, SPARK_FALL_TALL
-
-    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
+        Each value maps to a level in [0, 8] by ``round(ratio * 8)`` against the
+        window peak, indexing ``' ▁▂▃▄▅▆▇█'`` (a leading blank for zero, then the
+        eight rising block elements U+2581–U+2588). Each cell is coloured by that
+        same ratio via :meth:`spark_color`. ``history`` is drawn left-to-right in
+        index order, so the *first* (leftmost) cell is the live/in-flight bucket
+        and is the one dimmed when ``live`` — callers that want the newest sample
+        on the left feed the bucket history newest-first. Returns ``''`` for
+        empty history.
+        """
         if not history:
-            return '', ''
-        max_val = max(history)
-        indices = [
-            min(int(((v / max_val) if max_val > 0 else 0.0) * 16), 16)
-            for v in history
-        ]
-        last_i  = len(indices) - 1
-        top_parts = []
-        bot_parts = []
-        for i, idx in enumerate(indices):
-            prev_idx = indices[i - 1] if i > 0 else 0
-            if idx > prev_idx:
-                top_ch, bot_ch = self._spark_rise(idx)
-                tint_idx       = idx
-            elif prev_idx > idx:
-                top_ch, bot_ch = self._spark_fall(prev_idx)
-                tint_idx       = prev_idx
-            else:
-                top_ch, bot_ch = self._spark_flat(idx)
-                tint_idx       = idx
-            ratio     = tint_idx / 16.0
-            ratio_bot = ratio * 0.5
-            ratio_top = 0.5 + ratio * 0.5
-            if live and i == last_i:
-                bot_clr = self.spark_color(ratio_bot, dim=LIVE_DIM)
-                top_clr = self.spark_color(ratio_top, dim=LIVE_DIM)
-            else:
-                bot_clr = self.spark_color(ratio_bot)
-                top_clr = self.spark_color(ratio_top)
-            top_parts.append(f'{top_clr}{top_ch}{RESET}')
-            bot_parts.append(f'{bot_clr}{bot_ch}{RESET}')
-        return ''.join(top_parts), ''.join(bot_parts)
+            return ''
+        peak  = max(history) or 1
+        blocks = ' ' + self.SPARK_CHARS  # index 0 = blank, 1..8 = U+2581..U+2588
+        parts = []
+        for i, v in enumerate(history):
+            ratio = v / peak
+            level = min(8, max(0, round(ratio * 8)))
+            dim   = LIVE_DIM if (live and i == 0) else 1.0
+            parts.append(f'{self.spark_color(ratio, dim=dim)}{blocks[level]}{RESET}')
+        return ''.join(parts)
