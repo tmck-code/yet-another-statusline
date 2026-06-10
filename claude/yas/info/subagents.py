@@ -205,6 +205,20 @@ class RunningSubagents:
                         continue
                     msg = d.get('message') or {}
                     mid = msg.get('id')
+                    # Terminal-state check runs on EVERY assistant+usage line,
+                    # independent of message-id dedup. Streaming writes the same
+                    # message.id several times (early partials with
+                    # stop_reason: null, a final write with end_turn); the dedup
+                    # below must not let an already-seen id suppress this capture.
+                    # Last-write-wins: a later end_turn overwrites an earlier
+                    # end_ts; non-terminal lines never touch end_ts.
+                    try:
+                        if msg.get('stop_reason') == 'end_turn':
+                            ts = d.get('timestamp', '')
+                            if ts:
+                                end_ts = _parse_iso_to_epoch(ts)
+                    except (ValueError, TypeError):
+                        pass
                     if not mid or mid in seen:
                         continue
                     seen.add(mid)
@@ -248,13 +262,6 @@ class RunningSubagents:
                             last_activity = ('text', snippet, {})
                         else:
                             last_activity = ('thinking', '', {})
-                    try:
-                        if msg.get('stop_reason') == 'end_turn':
-                            ts = d.get('timestamp', '')
-                            if ts:
-                                end_ts = _parse_iso_to_epoch(ts)
-                    except (ValueError, TypeError):
-                        pass
         except OSError:
             pass
         return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
