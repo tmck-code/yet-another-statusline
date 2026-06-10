@@ -63,7 +63,6 @@ from yas.constants import (
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
-    SUBAGENT_ONELINE_GAP_MAX,
     TASK_HEADER_RIGHT_GAP_MIN,
 )
 from yas.render.gradient import (
@@ -771,15 +770,11 @@ class Renderer:
         if left_n_w > left_budget:
             left_n   = _middle_ellipsis(left_n, max(1, left_budget))
             left_n_w = _visible_width(left_n)
-        # Cap the interior gap so the metric cluster follows the left content at
-        # a fixed, readable distance instead of drifting to the far border as the
-        # box widens (a ragged empty channel down stacked rows). Any slack beyond
-        # the cap becomes trailing space before the closing border — the row
-        # still fills exactly to target_w.
-        slack    = max(1, target_w - left_n_w - right_n_w)
-        gap_n    = min(slack, SUBAGENT_ONELINE_GAP_MAX)
-        trail_n  = slack - gap_n
-        return f'{left_n}{" " * gap_n}{right_n}{" " * trail_n}'
+        # Right-anchor the metric cluster (hourglass + tok + dur) flush to the
+        # closing border so the tokens and elapsed columns line up down stacked
+        # rows; the slack between the left run and the cluster is the gap.
+        pad_n = max(1, target_w - left_n_w - right_n_w)
+        return f'{left_n}{" " * pad_n}{right_n}'
 
     def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()
