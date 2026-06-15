@@ -9,7 +9,10 @@ import yas.renderer as renderer_mod
 import yas.session as session_mod
 import yas.info.subagents as subagents_mod
 from yas.config import Config
-from yas.constants import GLYPH_REPLYING
+
+from yas.constants import (
+    GLYPH_REPLYING,
+)
 from yas.info import SessionView
 from yas.info.subagents import RunningSubagent
 from yas.render.text import _visible_width, fmt_tok
@@ -321,6 +324,32 @@ def test_one_line_done_frozen_duration() -> None:
 def test_one_line_fits_content_width(content_width: int) -> None:
     out = _one(_make_sub(), content_width)
     assert _visible_width(out) <= content_width
+
+
+@pytest.mark.parametrize('content_width', [33, 37, 41])
+def test_one_line_long_name_padded_flush_to_width(content_width: int) -> None:
+    # A long-named agent (general-purpose + Edit verb) would push the left
+    # segment past the right border at narrow widths. The left run truncates so
+    # the row is padded/truncated to exactly content_width (border stays flush).
+    sub = _make_sub(agent_type='general-purpose',
+                    last_activity=('tool_use', 'Edit', {}))
+    out = _one(sub, content_width)
+    assert _visible_width(out) == content_width
+
+
+def test_one_line_metrics_right_anchored_at_wide_width() -> None:
+    # The right metric cluster (hourglass + tok + dur) is flush to the closing
+    # border so the tokens/elapsed columns line up down stacked rows; the slack
+    # between the left run and the cluster is the interior gap (no trailing
+    # space after the duration). The row fills exactly to content_width.
+    content_width = 90
+    sub = _make_sub(agent_type='grep-bot',
+                    last_activity=('tool_use', 'Grep', {}))
+    out  = _one(sub, content_width)
+    text = strip_ansi(out)
+    assert _visible_width(out) == content_width
+    # No trailing space: the duration is the last visible glyph on the row.
+    assert text == text.rstrip()
 
 
 # G. Duration formatting ------------------------------------------------------

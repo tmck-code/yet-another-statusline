@@ -58,6 +58,14 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     end_ts       = 0.0
     model        = ''
     last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
+    # Shape of the most recent assistant+usage line, used for the terminal-
+    # text Done fallback after the loop (see below). Overwritten each line so
+    # only the LAST assistant message decides — interstitial null-stop text
+    # lines mid-stream are superseded by whatever assistant line follows.
+    last_stop:     str | None = None
+    last_has_tool             = False
+    last_has_text             = False
+    last_ts                   = 0.0
     try:
         with jsonl.open('r', errors='ignore') as fh:
             for ln in fh:
@@ -77,6 +85,28 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     continue
                 msg = d.get('message') or {}
                 mid = msg.get('id')
+                # Terminal-state check runs on EVERY assistant+usage line,
+                # independent of message-id dedup. Streaming writes the same
+                # message.id several times (early partials with
+                # stop_reason: null, a final write with end_turn); the dedup
+                # below must not let an already-seen id suppress this capture.
+                # Last-write-wins: a later end_turn overwrites an earlier
+                # end_ts; non-terminal lines never touch end_ts.
+                try:
+                    stop   = msg.get('stop_reason')
+                    ts_raw = d.get('timestamp', '')
+                    line_ts = _parse_iso_to_epoch(ts_raw) if ts_raw else 0.0
+                    if stop == 'end_turn' and line_ts:
+                        end_ts = line_ts
+                    # Record this line's shape for the post-loop fallback.
+                    # Runs pre-dedup so the final full write of a streamed
+                    # message is always observed even if its id was seen.
+                    cont = msg.get('content') or []
+                    last_has_tool = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in cont)
+                    last_has_text = any(isinstance(b, dict) and b.get('type') == 'text'     for b in cont)
+                    last_stop, last_ts = stop, line_ts
+                except (ValueError, TypeError, AttributeError):
+                    pass
                 if not mid or mid in seen:
                     continue
                 seen.add(mid)
@@ -120,15 +150,18 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                         last_activity = ('text', snippet, {})
                     else:
                         last_activity = ('thinking', '', {})
-                try:
-                    if msg.get('stop_reason') == 'end_turn':
-                        ts = d.get('timestamp', '')
-                        if ts:
-                            end_ts = _parse_iso_to_epoch(ts)
-                except (ValueError, TypeError):
-                    pass
     except OSError:
         pass
+    # Terminal-text Done fallback. Some sidechain (sub-agent) transcripts
+    # never emit stop_reason: "end_turn" — every assistant line is either
+    # "tool_use" or null, including the final result message. A finished
+    # agent's LAST assistant line is then terminal text: a text block with no
+    # tool_use awaiting a result. A still-running agent's last assistant line
+    # is a tool_use (or it is mid-streaming), so this cannot fire once work
+    # is genuinely done. Only the last line is considered, so interstitial
+    # null-stop text mid-stream never triggers it.
+    if end_ts == 0.0 and last_ts and last_has_text and not last_has_tool and last_stop != 'tool_use':
+        end_ts = last_ts
     return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
 
 
@@ -143,7 +176,7 @@ class RunningSubagent:
     cache_read_in: int                   = 0
     total_input:   int                   = 0
     last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
-    end_ts:        float                 = 0.0  # end_turn timestamp; Done iff end_ts > 0
+    end_ts:        float                 = 0.0  # end_turn ts, else terminal-text ts; Done iff > 0
     mtime:         float                 = 0.0  # transcript last-modified time (st_mtime)
     agent_id:      str                   = ''   # transcript filename stem; matches run-JSON agentId (workflow cohort)
 

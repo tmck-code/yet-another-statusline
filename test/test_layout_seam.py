@@ -74,6 +74,49 @@ def _kinds(spec: layout.LayoutSpec) -> list[str]:
     return [row.kind for row in spec.rows]
 
 
+def _tokens_row_indices(spec: layout.LayoutSpec) -> list[int]:
+    """Content rows that carry the tokens/cost/rate line (the rate label 't/m')."""
+    from helper import strip_ansi
+    return [i for i, row in enumerate(spec.rows)
+            if row.kind == 'content' and 't/m' in strip_ansi(row.content)]
+
+
+def test_tokens_row_is_single_content_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    _silence_dynamic(monkeypatch)
+    spec = layout.build_wide(_view(), _tick(), 160, _r)
+    assert len(_tokens_row_indices(spec)) == 1
+
+
+def test_tokens_row_session_only_single_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    _silence_dynamic(monkeypatch)
+    view = SessionView(_session(), Config(show_day_stats=False))
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    assert len(_tokens_row_indices(spec)) == 1
+
+
+def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every interior │ in the single tokens line has a matching ┬ on the
+    separator above and ┴ on the separator below at the same visual column."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    # A dynamic section below ensures the row below tokens is a (seam) separator,
+    # not the bottom border — so we can check ┴ elbows both sides.
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
+    spec  = layout.build_wide(_view(), _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    t_idx = _tokens_row_indices(spec)[0]
+
+    last = len(lines[t_idx]) - 1
+    interior_bars = [i for i, ch in enumerate(lines[t_idx]) if ch == '│' and 0 < i < last]
+    assert len(interior_bars) == 2, f'expected 2 interior │, got {interior_bars}'
+
+    above, below = lines[t_idx - 1], lines[t_idx + 1]
+    for col in interior_bars:
+        assert above[col] in ('┬', '┼'), f'no ┬ above at col {col}: {above[col]!r}'
+        assert below[col] in ('┴', '┼'), f'no ┴ below at col {col}: {below[col]!r}'
+
+
 def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
@@ -411,3 +454,65 @@ def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPat
     # twoline cohort at wide: an identity row carries the agent type.
     assert any(row.kind == 'content' and 'Explore' in strip_ansi(row.content) for row in spec.rows), \
         'subagent cohort should render'
+
+
+# ---------------------------------------------------------------------------
+# Bottom-of-wide-band tokens row (the box 80-84 overflow / detached-divider bug)
+# ---------------------------------------------------------------------------
+
+def _elbow_gaps(lines: list[str]) -> int:
+    """Count ┬/┴ that lack a │ (or other vertical) in the adjacent row/column."""
+    from yas.render.text import _is_wide
+    def grid(line: str) -> dict[int, str]:
+        cols: dict[int, str] = {}
+        c = 0
+        for ch in line:
+            cols[c] = ch
+            c += 2 if _is_wide(ch) else 1
+        return cols
+    g = [grid(ln) for ln in lines]
+    vert = set('│┃┤├┼')
+    join = set('┬┴┳┻')
+    gaps = 0
+    for i, cols in enumerate(g):
+        for col, ch in cols.items():
+            if ch in '┬┳' and i + 1 < len(g) and g[i + 1].get(col, ' ') not in vert | join:
+                gaps += 1
+            if ch in '┴┻' and i > 0 and g[i - 1].get(col, ' ') not in vert | join:
+                gaps += 1
+    return gaps
+
+
+@pytest.mark.parametrize('width', [80, 81, 82, 83, 84, 85])
+def test_wide_bottom_band_no_overflow_no_detached_elbows(
+    monkeypatch: pytest.MonkeyPatch, width: int,
+) -> None:
+    """At the bottom of the wide band (box 80-84) the three-segment tokens row
+    used to overflow the box and detach its two │ from the ┬/┴ elbows. The
+    builder now drops it for the compact context line below the fit floor, so at
+    EVERY width: no rendered row is wider than the box, and every ┬/┴ is backed
+    by a │ in the adjacent row."""
+    from helper import strip_ansi
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    for ln in lines:
+        assert _visible_width(ln) == width, f'row not full width at box {width}: {_visible_width(ln)} != {width}'
+    assert _elbow_gaps(lines) == 0, f'detached ┬/┴ elbow at box {width}'
+
+
+def test_wide_bottom_band_drops_three_segment_tokens_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Below the fit floor the three-segment tokens │ cost │ rate row is dropped
+    (no 't/m' content row); at/above it the row is present."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+
+    def has_tokens_row(spec: layout.LayoutSpec) -> bool:
+        return any(row.kind == 'content' and 't/m' in strip_ansi(row.content)
+                   for row in spec.rows)
+
+    assert not has_tokens_row(layout.build_wide(_view(), _tick(), 82, _r))
+    assert has_tokens_row(layout.build_wide(_view(), _tick(), 100, _r))

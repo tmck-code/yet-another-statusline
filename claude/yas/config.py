@@ -28,6 +28,7 @@ from yas.constants import (
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
     DEFAULT_THEME,
+    DEFAULT_SHOW_DAY_STATS,
 )
 from yas.themes import THEMES
 
@@ -65,6 +66,21 @@ def _parse_bool(raw: object, origin: str) -> bool:
         if v not in BOOL_ALLOWLIST:
             raise ValueError(f"expected one of {', '.join(BOOL_ALLOWLIST)}")
         return bool(json.loads(v))
+    raise ValueError('expected a boolean')
+
+
+def _parse_show_day_stats(raw: object, origin: str) -> bool:
+    """Boolean knob with lenient env form.
+
+    A real TOML boolean is taken as-is. From CLI/env, ``0``/``false``/``no``
+    (case-insensitive) are false and any other non-empty value is true (empty
+    env values are already filtered out upstream as "absent"). A non-boolean
+    TOML value raises so it falls back to the default and is recorded.
+    """
+    if isinstance(raw, bool):
+        return raw
+    if origin == 'cli' or origin.startswith('env'):
+        return str(raw).strip().lower() not in ('0', 'false', 'no')
     raise ValueError('expected a boolean')
 
 
@@ -193,6 +209,7 @@ class Config:
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
     bg_shift: str = 'warm'
+    show_day_stats: bool = DEFAULT_SHOW_DAY_STATS
     soft_limit_models: tuple[tuple[str, int], ...] = ()
     errors: tuple[str, ...] = ()
     debug_lines: tuple[str, ...] = ()
@@ -258,6 +275,10 @@ class Config:
             + _env_sources(env, 'YAS_BG_SHIFT')
             + toml_src(appearance, 'bg_shift'),
             _parse_bg_shift, 'warm', errors, debug)
+        show_day_stats = _resolve(
+            'show_day_stats',
+            _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
+            _parse_show_day_stats, DEFAULT_SHOW_DAY_STATS, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
@@ -268,6 +289,7 @@ class Config:
             token_window=token_window,
             theme=theme,
             bg_shift=bg_shift,
+            show_day_stats=show_day_stats,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

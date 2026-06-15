@@ -72,3 +72,30 @@ def test_spark_rgb_dim_zero() -> None:
 def test_spark_color_dim_one_matches_default() -> None:
     """spark_color(t, dim=1.0) is byte-identical to spark_color(t)."""
     assert _r.spark_color(0.5) == _r.spark_color(0.5, dim=1.0)
+
+
+# sparkline_1row — single-row block-element sparkline
+
+_BLOCKS_1ROW = ' ▁▂▃▄▅▆▇█'
+
+
+def _strip(s: str) -> str:
+    return re.sub(r'\033\[[0-9;]*m', '', s)
+
+
+def test_sparkline_1row_empty() -> None:
+    assert _ge.sparkline_1row([]) == ''
+
+
+def test_sparkline_1row_flat_history_blank_cells() -> None:
+    # All zero → every cell is the blank level.
+    assert _strip(_ge.sparkline_1row([0, 0, 0, 0])) == '    '
+
+
+def test_sparkline_1row_glyphs_only_from_block_set() -> None:
+    rising  = _strip(_ge.sparkline_1row([1, 2, 3, 4, 5, 6, 7, 8]))
+    falling = _strip(_ge.sparkline_1row([8, 7, 6, 5, 4, 3, 2, 1]))
+    for glyphs in (rising, falling):
+        assert all(c in _BLOCKS_1ROW for c in glyphs), glyphs
+        # No U+1FBxx "Symbols for Legacy Computing" glyph appears.
+        assert not any(0x1FB00 <= ord(c) <= 0x1FBFF for c in glyphs)

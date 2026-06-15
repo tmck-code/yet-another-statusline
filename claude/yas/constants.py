@@ -13,8 +13,24 @@ DEFAULT_MAX_WIDTH    = 140
 DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
+DEFAULT_SHOW_DAY_STATS = True
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
+# Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
+# the row cannot hold both columns at full size plus the rate/spark leader, so
+# build_wide drops it for the compact context line instead of overflowing the
+# box. The exact, content-aware minimum is computed per-render by
+# Renderer.tokens_cost (its ``min_width`` return) — this constant is the
+# realistic-widest floor (the wide layout owns box >= MEDIUM_WIDTH=80, and the
+# row first fits around box 84-85 for typical 6-7 digit token magnitudes).
+TOKENS_COST_MIN_WIDTH = 85
+
+# Minimum gap between the narrow tasks-header's left cluster (glyph + done/total)
+# and its right-anchored active-task timer. The timer is flush to the content
+# edge to use the otherwise-dead trailing space as a second anchor (mirroring the
+# subagent rows' two-anchor read); this floor guarantees a readable separation
+# and triggers the middle-ellipsis fallback before left + timer would collide.
+TASK_HEADER_RIGHT_GAP_MIN = 2
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 # Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1
@@ -115,18 +131,6 @@ WORKFLOW_RUN_CAP          = 2
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
-
-# Sparkline slope glyphs from U+1FB3C-U+1FB6B "Symbols for Legacy Computing".
-# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
-# peak cell pairs with a 'fall' char on the next cell to form a /\ shape.
-SPARK_RISE_SMALL  = '\U0001fb48'  # small rise (bot row, idx 1-3)
-SPARK_FALL_SMALL  = '\U0001fb3d'  # small fall (bot row, idx 1-3)
-SPARK_RISE_MED    = '\U0001fb4a'  # medium rise (bot row, idx 4-7)
-SPARK_FALL_MED    = '\U0001fb3f'  # medium fall (bot row, idx 4-7)
-SPARK_RISE_TALL   = '\U0001fb45'  # tall rise (bot row, idx 8+)
-SPARK_FALL_TALL   = '\U0001fb50'  # tall fall (bot row, idx 8+)
-SPARK_RISE_TOP    = '\U0001fb4b'  # top-row rise (idx 9+)
-SPARK_FALL_TOP    = '\U0001fb40'  # top-row fall (idx 9+)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block

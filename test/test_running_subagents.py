@@ -300,6 +300,96 @@ def test_end_ts_set_when_end_turn_present(tmp_home: Path) -> None:
     assert 1779472799 < sub.end_ts < 1779472801
 
 
+def _assistant_line_full(
+    msg_id: str,
+    stop_reason: str | None,
+    *,
+    input_tokens: int   = 0,
+    cache_creation: int = 0,
+    cache_read: int     = 0,
+    output_tokens: int  = 0,
+    timestamp: str | None = None,
+    model: str | None     = None,
+    content: list | None  = None,
+) -> str:
+    '''Assistant+usage line with an explicit stop_reason (which may be null).
+
+    Mirrors the streaming transcript shape the production parser reads: the same
+    message.id is written first as a partial (stop_reason: null) then again as a
+    final write (stop_reason: "end_turn"), with identical usage numbers.
+    '''
+    d: dict = {
+        'type': 'assistant',
+        'message': {
+            'id': msg_id,
+            'stop_reason': stop_reason,
+            'usage': {
+                'input_tokens': input_tokens,
+                'cache_creation_input_tokens': cache_creation,
+                'cache_read_input_tokens': cache_read,
+                'output_tokens': output_tokens,
+            },
+        },
+    }
+    if timestamp:
+        d['timestamp'] = timestamp
+    if model is not None:
+        d['message']['model'] = model
+    if content is not None:
+        d['message']['content'] = content
+    return json.dumps(d) + '\n'
+
+
+def test_end_turn_detected_when_id_shared_with_earlier_partial(tmp_home: Path) -> None:
+    # Regression (2.1): streaming writes the same message.id twice — an early
+    # partial with stop_reason: null, then a final write with end_turn. The
+    # message-id dedup must NOT suppress the terminal-state capture on the final
+    # write; before the fix end_ts stayed 0 and the agent looked active forever.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    end_turn_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-streamed-done',
+        jsonl_lines=[
+            # early partial: same id, stop_reason null, not yet terminal
+            _assistant_line_full('m1', None, input_tokens=10, output_tokens=5, timestamp='2026-05-22T17:59:59.000Z'),
+            # final write: SAME id, now end_turn — dedup must not skip end_ts capture
+            _assistant_line_full('m1', 'end_turn', input_tokens=10, output_tokens=5, timestamp=end_turn_ts),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts > 0
+    # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
+    assert 1779472799 < sub.end_ts < 1779472801
+
+
+def test_shared_id_usage_counted_exactly_once(tmp_home: Path) -> None:
+    # 2.2: the partial and the final write share message.id AND usage numbers;
+    # token accumulation stays behind the dedup guard, so tokens must be counted
+    # exactly once (no double-count from the two writes of the same message).
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-streamed-tokens',
+        jsonl_lines=[
+            _assistant_line_full('m1', None,       input_tokens=10, cache_creation=7, output_tokens=20, timestamp='2026-05-22T17:59:59.000Z'),
+            _assistant_line_full('m1', 'end_turn', input_tokens=10, cache_creation=7, output_tokens=20, timestamp='2026-05-22T18:00:00.000Z'),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # Counted once: a single message's billed_in (input + cache_creation) and output.
+    assert sub.billed_in == 17
+    assert sub.output    == 20
+    # And the agent is still detected as Done.
+    assert sub.end_ts > 0
+
+
 def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -315,3 +405,110 @@ def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
     assert sub.end_ts == 0.0
+
+
+def _text(s: str) -> dict:
+    return {'type': 'text', 'text': s}
+
+
+def _tool(name: str = 'Bash') -> dict:
+    return {'type': 'tool_use', 'name': name, 'input': {'command': 'ls'}}
+
+
+def test_terminal_text_null_stop_reason_detects_done(tmp_home: Path) -> None:
+    # Regression: some sidechain (sub-agent) transcripts NEVER emit
+    # stop_reason: "end_turn". Every assistant line is either "tool_use" or null,
+    # including the final result message. The agent is finished, but the strict
+    # end_turn rule left end_ts == 0 so it rendered as running forever. The
+    # terminal-text fallback marks it Done from the LAST assistant line: a text
+    # block with no tool_use. Interstitial null-stop text lines mid-stream
+    # (below) must NOT trigger it — only the final line decides.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    final_ts = '2026-05-22T18:00:10.000Z'
+    _write_agent(
+        sdir, 'agent-null-done',
+        jsonl_lines=[
+            # interstitial narration: text, null stop, NOT terminal (work follows)
+            _assistant_line_full('m1', None, output_tokens=2, content=[_text('Let me check.')],
+                                 timestamp='2026-05-22T18:00:00.000Z'),
+            # a tool turn
+            _assistant_line_full('m2', 'tool_use', output_tokens=2, content=[_tool('Read')],
+                                 timestamp='2026-05-22T18:00:05.000Z'),
+            # tool result
+            json.dumps({'type': 'user', 'message': {'role': 'user', 'content': []}}) + '\n',
+            # final result message: text, null stop, no end_turn anywhere
+            _assistant_line_full('m3', None, output_tokens=9, content=[_text('Done. Synced.')],
+                                 timestamp=final_ts),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts > 0
+    # 2026-05-22T18:00:10Z → epoch ≈ 1779472810
+    assert 1779472809 < sub.end_ts < 1779472811
+
+
+def test_last_line_tool_use_not_done(tmp_home: Path) -> None:
+    # A still-running agent whose final assistant line is a tool_use (awaiting a
+    # result) and has no end_turn must NOT be marked Done by the fallback.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-mid-tool',
+        jsonl_lines=[
+            _assistant_line_full('m1', None, output_tokens=2, content=[_text('Working.')],
+                                 timestamp='2026-05-22T18:00:00.000Z'),
+            _assistant_line_full('m2', 'tool_use', output_tokens=2, content=[_tool('Bash')],
+                                 timestamp='2026-05-22T18:00:05.000Z'),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts == 0.0
+
+
+def test_interstitial_text_with_trailing_tool_use_not_done(tmp_home: Path) -> None:
+    # The hazard the LAST-line rule guards against: an assistant message that
+    # carries text AND a tool_use ([text, tool_use]) is mid-turn work, not a
+    # terminal text result — must not be Done even though a text block exists.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-text-then-tool',
+        jsonl_lines=[
+            _assistant_line_full('m1', None, output_tokens=4,
+                                 content=[_text('Now I will run it.'), _tool('Bash')],
+                                 timestamp='2026-05-22T18:00:00.000Z'),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts == 0.0
+
+
+def test_end_turn_takes_precedence_over_terminal_text_fallback(tmp_home: Path) -> None:
+    # When end_turn IS present its timestamp wins; the fallback must not override
+    # it with a later/earlier terminal-text timestamp.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    end_turn_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-endturn-primary',
+        jsonl_lines=[
+            _assistant_line_full('m1', 'end_turn', output_tokens=5,
+                                 content=[_text('All done.')], timestamp=end_turn_ts),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
+    assert 1779472799 < sub.end_ts < 1779472801

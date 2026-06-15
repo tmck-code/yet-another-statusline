@@ -65,6 +65,7 @@ from yas.constants import (
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
+    TASK_HEADER_RIGHT_GAP_MIN,
 )
 from yas.render.gradient import (
     GradientEngine,
@@ -284,8 +285,8 @@ class Renderer:
         trailing = ' ' if leader else '  '
         return f'{" " * lead}{color}│{self.R}{trailing}'
 
-    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
-        return self.gradient.sparkline(history, live)
+    def sparkline_1row(self, history: list[int], live: bool = False) -> str:
+        return self.gradient.sparkline_1row(history, live)
 
     def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         return self.gradient.spark_rgb(t, dim)
@@ -311,7 +312,7 @@ class Renderer:
 
     def path_git(
         self, short_pwd: str, git: GitInfo,
-        *, show_commit: bool = True, show_dirty: bool = True,
+        *, show_path: bool = True, show_commit: bool = True, show_dirty: bool = True,
     ) -> str:
         dirty = ''
         if show_dirty:
@@ -326,13 +327,25 @@ class Renderer:
             if dirty:
                 dirty = ' ' + dirty
         commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
+        # The cwd path is a whole unit: shown in full or omitted entirely (no
+        # middle-ellipsis). show_path=False yields the branch-only rung (glyph +
+        # arrow + branch) used as a width-degradation step below the path forms.
+        path_part = f'{self.PWD}{short_pwd}{self.R} ' if show_path else ''
 
         return (
-            f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}{GLYPH_FOLDER}  {path_part}'
+            f'{self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{commit_part}{dirty}'
         )
+
+    def path_glyph_only(self) -> str:
+        """Presence-glyph floor: the folder glyph alone (1 visible column).
+
+        The overflow-safe terminal state of the path ladder — it can never
+        exceed the available width or disturb the box border math.
+        """
+        return f'{self.ICON_PATH}{GLYPH_FOLDER}{self.R}'
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
@@ -348,6 +361,11 @@ class Renderer:
         def fits(s: str) -> bool:
             return _visible_width(s) <= target_w
 
+        # Whole-unit include/omit ladder; first candidate that fits wins.
+        # full → drop commit → drop commit+dirty → compact path+branch →
+        # branch-only (path omitted) → glyph-only floor. The path is never
+        # middle-ellipsized: it is shown in full or dropped whole, and the
+        # branch outlives the path. compact_only enters at the compact rung.
         if not compact_only:
             for kwargs in (
                 {},
@@ -362,24 +380,15 @@ class Renderer:
         if fits(compact):
             return compact
 
-        # Ellipsis on short_pwd only
-        for pwd_w in range(target_w - 1, 0, -1):
-            trunc_pwd = _middle_ellipsis(short_pwd, pwd_w)
-            candidate = self.path_git_compact(trunc_pwd, git)
-            if fits(candidate):
-                return candidate
-
-        # Ellipsis on both short_pwd and branch
-        # Overhead of path_git_compact with empty strings is 5 visible chars.
-        half = max(1, (target_w - 5) // 2)
-        trunc_pwd    = _middle_ellipsis(short_pwd,  half)
-        trunc_branch = _middle_ellipsis(git.branch, half)
-        truncated_git = GitInfo(
-            branch=trunc_branch, commit=git.commit,
-            modified=git.modified, untracked=git.untracked,
-            deleted=git.deleted, renamed=git.renamed,
+        # Path omitted whole, branch retained (glyph + arrow + branch).
+        branch_only = self.path_git(
+            short_pwd, git, show_path=False, show_commit=False, show_dirty=False,
         )
-        return self.path_git_compact(trunc_pwd, truncated_git)
+        if fits(branch_only):
+            return branch_only
+
+        # Glyph-only presence floor — 1 visible column, always within target.
+        return self.path_glyph_only()
 
     def model_colour(self, model_name: str) -> str:
         return self.theme.models[model_key(model_name)].label
@@ -756,7 +765,18 @@ class Renderer:
                 f'  {self.CTX}{tool_verb}{self.R}'
             )
         left_n_w = _visible_width(left_n)
-        pad_n    = max(1, target_w - left_n_w - right_n_w)
+        # Budget the left segment so the row never overflows the right border:
+        # the bounded right cluster (hourglass + tok + dur) stays intact, and
+        # the marker/type/model/verb run truncates with a middle ellipsis when
+        # it would otherwise push past target_w (reserving a 1-col gap).
+        left_budget = target_w - right_n_w - 1
+        if left_n_w > left_budget:
+            left_n   = _middle_ellipsis(left_n, max(1, left_budget))
+            left_n_w = _visible_width(left_n)
+        # Right-anchor the metric cluster (hourglass + tok + dur) flush to the
+        # closing border so the tokens and elapsed columns line up down stacked
+        # rows; the slack between the left run and the cluster is the gap.
+        pad_n = max(1, target_w - left_n_w - right_n_w)
         return f'{left_n}{" " * pad_n}{right_n}'
 
     def workflow_header(self, run: RunningWorkflow, content_width: int) -> str:
@@ -815,14 +835,29 @@ class Renderer:
         glyph_s = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}'
         count_p = f'{self.SKILLS}{count_s}{self.R}'
 
-        # --- compact branch (narrow): glyph + done/total + active live timer ---
+        # --- compact branch (narrow): glyph + done/total on the left, the active
+        # task's live timer right-anchored to the content edge. The header is a
+        # lone row (no per-task checklist below it to column-align against), so
+        # the timer fills the otherwise-dead trailing space as a second anchor,
+        # reading like the subagent rows. Falls back to the bare left cluster
+        # when no task is actively timing.
         if compact:
-            head = f'{glyph_s}  {count_p}'
+            head   = f'{glyph_s}  {count_p}'
             active = tasks.active
-            if active is not None and active.started_at is not None:
-                live = fmt_duration(now - active.started_at)
-                return [f'{head}  {BRT}{BOLD}{live}{self.R}']
-            return [head]
+            if active is None or active.started_at is None:
+                return [head]
+            live    = fmt_duration(now - active.started_at)
+            right   = f'{BRT}{BOLD}{live}{self.R}'
+            right_w = _visible_width(right)
+            head_w  = _visible_width(head)
+            # Reserve the floor gap; if left + gap + timer would overflow the
+            # content width, truncate the left cluster with a middle ellipsis so
+            # the timer stays flush right and the row never overruns the border.
+            if head_w + TASK_HEADER_RIGHT_GAP_MIN + right_w > content_width:
+                head   = _middle_ellipsis(head, max(1, content_width - TASK_HEADER_RIGHT_GAP_MIN - right_w))
+                head_w = _visible_width(head)
+            mid = max(TASK_HEADER_RIGHT_GAP_MIN, content_width - head_w - right_w)
+            return [f'{head}{" " * mid}{right}']
 
         # --- full-list branch (wide/medium): header + windowed items ---
         elapsed   = total_elapsed(tasks, now)
@@ -929,72 +964,132 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> tuple[list[str], tuple[int, int], int]:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int, int]:
+        """One content line: tokens │ cost │ rate-and-sparkline.
+
+        With ``show_day_stats`` (default), session and day figures merge per
+        field as ``session/day`` with a paired cache parenthetical. When off,
+        the row is session-only and keeps the original per-field justification.
+        The tokens and cost columns are sized to the *measured* content (floored
+        at a realistic-widest budget), so the two ``│`` dividers always land on
+        the rendered content's divider column — they never detach from the
+        ┬/┴ elbows above/below. Returns ``([line], (col1, col2), 0, min_width)``:
+        the divider columns for the builder's elbow threading, the dead mark_col
+        (the old 60s tick marker is gone, =0), and ``min_width`` — the smallest
+        box width at which this row fits without overflow, so the builder can
+        fall back to a compact form below it.
+        """
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
         in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
         out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
 
-        sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
-        day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
-        sess_cache_s = fmt_tok(sess_cache).rjust(self.CACHE_W)
-        day_cache_s  = fmt_tok(day_cache).rjust(self.CACHE_W)
-        sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
-        day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
+        if show_day_stats:
+            # Merged session/day per field; variable width, no fixed rjust (D2).
+            cache = (f'{self.TOK_DIM}({fmt_tok(sess_cache)}{self.R}'
+                     f'{self.TOK_DAY_DIM}/{fmt_tok(day_cache)}{self.R}'
+                     f'{self.TOK_DIM}){self.R}')
+            tokens_col = (
+                f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
+                f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R} '
+                f'{cache}'
+                f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
+                f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
+            )
+            cost_col = (f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
+                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
+        else:
+            # Session-only: original per-field justification (D2).
+            sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
+            sess_cache_s = fmt_tok(sess_cache).rjust(self.CACHE_W)
+            sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
+            tokens_col = (f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} '
+                          f'{self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} '
+                          f'{self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}')
+            cost_col = f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
 
         vsep_w        = 4
         vsep_leader_w = 4
+        label_w       = 15
 
-        middle1 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}'
-        middle2 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK_DAY}{day_out_s}{self.R}'
-
-        cost1 = f'${sess_cost:,.2f}'
-        cost2 = f'${day_cost:,.2f}'
-        cost_width = max(_visible_width(cost1), _visible_width(cost2))
-
-        end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
-        end2 = f'  {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
-
-        label_w = 15
-        w_middle = _visible_width(middle1)
-        w_end    = max(_visible_width(end1), _visible_width(end2))
         content_w = box_width - 3
-        leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
+        inner     = content_w - vsep_w - vsep_leader_w  # tokens + cost + leader budget
 
-        col1 = w_middle + 5                  # 1-indexed position of vsep │
+        # Section widths track the *measured* content so each column hugs its
+        # content and the two │ dividers sit directly after it (only the vsep's
+        # built-in 2-space lead remains as the gap). There is no inflated floor:
+        # the budget IS the measured width. Measure with _visible_width (the
+        # strings carry ANSI; never len()). The honest floor further down
+        # (``w_middle = max(w_middle, tokens_w)`` etc.) still guarantees pad>=0,
+        # so col1/col2 always land on the rendered │ and never detach from their
+        # ┬/┴ elbows above/below. The intrinsic minimum box width this needs is
+        # returned to the caller (see ``min_width`` below) so the builder can fall
+        # back to a compact form rather than overflow the box.
+        tokens_w = _visible_width(tokens_col)
+        cost_w   = _visible_width(cost_col)
+        TOKENS_BUDGET = tokens_w
+        COST_BUDGET   = cost_w
+        # The rate/spark leader can never compress below its bare ``<rate> t/m``
+        # label; measure it here so the budget split and min_width are exact (when
+        # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
+        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label_w = _visible_width(rate_label)
+        leader_min   = max(label_w + 1, rate_label_w)
+
+        # The smallest box that holds both columns at their measured size plus the
+        # two vseps and the leader. Derived from the measured content, so it tracks
+        # token/cost/rate magnitude rather than being hardcoded. The leader floor
+        # here is the bare ``rate_label_w``, not ``leader_min``: at the tightest
+        # box the sparkline is omitted (bar_w<10) and the leader collapses to the
+        # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
+        # width. The builder only emits this row when ``box_width >= min_width``.
+        min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
+
+        avail = inner - leader_min                 # room left after the leader minimum
+        if TOKENS_BUDGET + COST_BUDGET <= avail:
+            w_middle, w_end = TOKENS_BUDGET, COST_BUDGET
+        else:
+            # Over budget: give each column at least its measured content, then
+            # share any slack proportionally. Clamping at content (not the inflated
+            # proportional share) keeps the cell sum from spilling past col1/col2.
+            w_middle = max(tokens_w, avail * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
+            w_end    = max(cost_w, avail - w_middle)
+
+        # Honest floor: never allocate a cell narrower than its own content. This
+        # keeps the trailing pad >= 0 so the │ lands exactly at col1/col2.
+        w_middle = max(w_middle, tokens_w)
+        w_end    = max(w_end, cost_w)
+
+        # Left-justify each column to its (content-floored) width. The trailing pad
+        # lands the │ at the divider column col1/col2 regardless of content.
+        tokens_col += ' ' * max(0, w_middle - tokens_w)
+        cost_col   += ' ' * max(0, w_end   - cost_w)
+
+        leader_w = max(label_w + 1, inner - w_middle - w_end)
+
+        col1 = w_middle + 5                   # 1-indexed position of vsep │
         col2 = w_middle + vsep_w + w_end + 5  # 1-indexed position of vsep_leader │
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
-        # bar_w = leader_w - label_w
 
-        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
-        rate_label_w = _visible_width(rate_label)
-        rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
         bar_w = leader_w - rate_label_w
 
-        if bar_w <= 0:
-            leader1 = rate_label_padded
-            leader2 = ' ' * label_w
+        if bar_w < 10:
+            leader = rate_label
         else:
             if session_id:
-                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
-                top_row, bot_row = self.sparkline(spark_history[::-1], live=True)
+                # 1 second per char (D4): span the most recent bar_w seconds, one
+                # char each (window == bar_w → 1s buckets). History is
+                # oldest→newest, so reverse it to put the newest (live) bucket on
+                # the LEFT, next to the t/m label — sparkline_1row dims that
+                # now-leftmost cell.
+                spark_history = TokenRate.history(session_id, bar_w, float(bar_w))[::-1]
+                spark = self.sparkline_1row(spark_history, live=True)
             else:
-                top_row, bot_row = ' ' * bar_w, ' ' * bar_w
-            leader1 = f'{rate_label_padded}{top_row}'
-            # leader2 = f'{" " * label_w}{bot_row}'
-            leader2 = f'{" " * rate_label_w}{bot_row}'
+                spark = ' ' * bar_w
+            leader = f'{rate_label}{spark}'
 
-        # 1-indexed column of the WINDOW (60s) tick inside the sparkline. History
-        # spans WINDOW*2 (=120s) across bar_w buckets reversed so index 0 is "now",
-        # which puts the 60s boundary at bar_w // 2. col2 is the vsep_leader │
-        # column; sparkline starts rate_label_w cells past that.
-        mark_col = col2 + rate_label_w + (bar_w // 2) if bar_w > 0 else 0
-
-        return [
-            f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
-            f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
-        ], (col1, col2), mark_col
+        return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0, min_width
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
