@@ -57,6 +57,8 @@ from yas.constants import (
     GLYPH_TASK_DONE,
     GLYPH_TASK_PENDING,
     GLYPH_THINKING,
+    GLYPH_WF_HEADER,
+    GLYPH_WF_SUMMARY,
     ICON_COST,
     ICON_TOK_RATE,
     PILL_LEFT,
@@ -80,6 +82,7 @@ from yas.render.pill import Pill
 from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
+from yas.info.workflows import RunningWorkflow
 from yas.info.tasks import TaskList
 from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
 from yas.tokens import TokenRate
@@ -775,6 +778,48 @@ class Renderer:
         # rows; the slack between the left run and the cluster is the gap.
         pad_n = max(1, target_w - left_n_w - right_n_w)
         return f'{left_n}{" " * pad_n}{right_n}'
+
+    def workflow_header(self, run: RunningWorkflow, content_width: int) -> str:
+        """Group header for a workflow run: ``▸  <name>  [<phase>]``.
+
+        The phase segment is omitted when the run has no known phase. The name
+        is middle-ellipsised to whatever width the glyph and phase leave; the
+        whole line is clamped to ``content_width`` as a final safety net.
+        """
+        step   = rainbow_step()
+        c_hdr  = rainbow_at(step, 4)
+        if run.phase:
+            phase_seg = f'  {self.LABEL}[{self.R}{self.CTX}{run.phase}{self.R}{self.LABEL}]{self.R}'
+        else:
+            phase_seg = ''
+        glyph_w  = 3  # ▸ + two spaces
+        name_max = max(1, content_width - glyph_w - _visible_width(phase_seg))
+        name     = _middle_ellipsis(run.name, name_max)
+        line     = f'{c_hdr}{BOLD}{GLYPH_WF_HEADER}{self.R}  {self.SKILLS}{name}{self.R}{phase_seg}'
+        if _visible_width(line) > content_width:
+            line = _middle_ellipsis(line, content_width)
+        return line
+
+    def workflow_summary(self, run: RunningWorkflow, content_width: int, *, hidden_agents: int = 0) -> str:
+        """Summary footer for a workflow run: ``└  N agents · M done · <tok>``.
+
+        ``hidden_agents`` (agents beyond the per-run cap) appends ``+K hidden``.
+        Token total is the run's aggregate from the per-agent transcript parse.
+        """
+        step  = rainbow_step()
+        c_sum = rainbow_at(step, 7)
+        sep   = f' {self.LABEL}·{self.R} '
+        parts = [
+            f'{self.CTX}{run.agent_count}{self.R} {self.LABEL}agents{self.R}',
+            f'{self.CTX}{run.done_count}{self.R} {self.LABEL}done{self.R}',
+            f'{self.CTX}{fmt_tok(run.total_tokens)}{self.R}',
+        ]
+        if hidden_agents > 0:
+            parts.append(f'{self.LABEL}+{hidden_agents} hidden{self.R}')
+        line = f'{c_sum}{GLYPH_WF_SUMMARY}{self.R}  {sep.join(parts)}'
+        if _visible_width(line) > content_width:
+            line = _middle_ellipsis(line, content_width)
+        return line
 
     def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()

@@ -12,6 +12,8 @@ from yas.constants import (
     GLYPH_CONFIG_WARN,
     RESET,
     TOKENS_COST_MIN_WIDTH,
+    WORKFLOW_AGENT_CAP,
+    WORKFLOW_RUN_CAP,
 )
 from yas.info import SessionView
 from yas.info.subagents import read_last_prompt_ts
@@ -91,6 +93,46 @@ def zip_columns(
     return rows
 
 
+def build_workflow_rows(
+    view: SessionView,
+    width: int,
+    r: Renderer,
+    *,
+    per_agent: bool,
+) -> list[RowSpec]:
+    """Content RowSpecs for the visible workflow runs (no leading separator).
+
+    Returns [] when no run is visible. Each visible run contributes a header
+    row, optionally up to ``WORKFLOW_AGENT_CAP`` per-agent rows (when
+    ``per_agent`` — wide layouts only; narrow/medium collapse to header+summary),
+    and a summary footer. Agents beyond the cap fold into the footer's
+    ``+K hidden``; runs beyond ``WORKFLOW_RUN_CAP`` fold into a single
+    ``+N more workflows`` content row. The rows carry no internal dividers, so
+    callers thread elbows only on the separator they place above the block.
+    """
+    last_prompt_ts = read_last_prompt_ts(view.session.session_id)
+    runs = view.workflows.visible(time.time(), last_prompt_ts)
+    if not runs:
+        return []
+    shown       = runs[:WORKFLOW_RUN_CAP]
+    hidden_runs = len(runs) - len(shown)
+    inner       = width - 4
+    out: list[RowSpec] = []
+    for run in shown:
+        out.append(RowSpec('content', content=r.workflow_header(run, inner)))
+        hidden_agents = 0
+        if per_agent:
+            agents        = run.agents[:WORKFLOW_AGENT_CAP]  # sorted by first_timestamp
+            hidden_agents = run.agent_count - len(agents)
+            for sub in agents:
+                for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=0).split('\n'):
+                    out.append(RowSpec('content', content=line))
+        out.append(RowSpec('content', content=r.workflow_summary(run, inner, hidden_agents=hidden_agents)))
+    if hidden_runs > 0:
+        out.append(RowSpec('content', content=f'{r.LABEL}+{hidden_runs} more workflows{r.R}'))
+    return out
+
+
 def build_narrow(
     view: SessionView,
     width: int,
@@ -145,6 +187,10 @@ def build_narrow(
         for sub in visible_subs:
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
+        rows.append(RowSpec('separator_dim'))
+    wf_rows = build_workflow_rows(view, width, r, per_agent=False)
+    if wf_rows:
+        rows.extend(wf_rows)
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
@@ -215,6 +261,10 @@ def build_medium(
         for sub in visible_subs:
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
+        rows.append(RowSpec('separator_dim'))
+    wf_rows = build_workflow_rows(view, width, r, per_agent=False)
+    if wf_rows:
+        rows.extend(wf_rows)
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
@@ -444,6 +494,17 @@ def build_wide(
                 for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout).split('\n'):
                     rows.append(RowSpec('content', content=line))
             pending_ups = ()
+
+    # Workflow cohort: each visible run as a header / per-agent rows / summary
+    # block, after the subagent cohort and task row. The leading separator
+    # closes off any still-pending dividers (tokens vseps, side-by-side divider)
+    # so the plain content rows below carry no elbows.
+    wf_rows = build_workflow_rows(view, width, r, per_agent=True)
+    if wf_rows:
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups))
+        rows.extend(wf_rows)
+        pending_ups = ()
+        tail_ups    = ()
 
     if openspec_bars:
         rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups))
