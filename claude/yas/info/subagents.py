@@ -162,6 +162,17 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     # null-stop text mid-stream never triggers it.
     if end_ts == 0.0 and last_ts and last_has_text and not last_has_tool and last_stop != 'tool_use':
         end_ts = last_ts
+    # Structured-output done detection. Workflow agents finish by calling
+    # StructuredOutput with stop_reason: "tool_use" (not awaiting results).
+    # Detect this as a completion signal.
+    if end_ts == 0.0 and last_ts and last_has_tool and last_stop == 'tool_use':
+        # Check if the only tool_use in the final message is StructuredOutput.
+        # This is a completion signal, not an intermediate tool call.
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'tool_use':
+                if item.get('name') == 'StructuredOutput':
+                    end_ts = last_ts
+                    break
     return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
 
 

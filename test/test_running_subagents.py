@@ -512,3 +512,29 @@ def test_end_turn_takes_precedence_over_terminal_text_fallback(tmp_home: Path) -
     sub = result.subagents[0]
     # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
     assert 1779472799 < sub.end_ts < 1779472801
+
+
+def test_structured_output_tool_use_detects_done(tmp_home: Path) -> None:
+    # Workflow agents finish by calling StructuredOutput with stop_reason:
+    # "tool_use" (not "end_turn"). This is a completion signal, not an
+    # intermediate tool call awaiting results. end_ts should be set.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    struct_out_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-struct-done',
+        jsonl_lines=[
+            _assistant_line_full(
+                'm1', 'tool_use', output_tokens=5, timestamp=struct_out_ts,
+                content=[{'type': 'tool_use', 'name': 'StructuredOutput', 'input': {'schema': '{}', 'json': '{}'}}]
+            ),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # StructuredOutput completion should set end_ts
+    assert sub.end_ts > 0
+    # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
+    assert 1779472799 < sub.end_ts < 1779472801
