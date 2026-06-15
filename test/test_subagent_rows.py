@@ -147,6 +147,15 @@ def test_two_line_continuation_shows_activity() -> None:
     assert 'Bash[pytest -q]' in strip_ansi(line2)
 
 
+def test_two_line_continuation_tool_arg_strips_newlines() -> None:
+    sub = _make_sub(last_activity=('tool_use', 'Bash', {'command': 'echo hi\nrm -rf /\necho bye'}))
+    _, line2 = _two(sub)
+    plain = strip_ansi(line2)
+    assert 'Bash[echo hi]' in plain
+    assert '\n' not in plain
+    assert 'rm -rf' not in plain
+
+
 def test_two_line_continuation_has_no_metrics() -> None:
     sub = _make_sub(model='claude-sonnet-4-6')
     si  = (sub.total_input + sub.output) * 2
@@ -318,6 +327,18 @@ def test_one_line_done_frozen_duration() -> None:
     sub = _make_done_sub()
     out = strip_ansi(_one(sub))
     assert '1m30s' in out
+
+
+def test_one_line_done_no_activity_verb() -> None:
+    # Done agents should not show their last activity (no "Bash", "Edit", etc.)
+    sub = _make_done_sub(last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    # Check the marker, type, and model are shown
+    assert '✓' in out
+    assert 'general-purpose' in out
+    assert 'sonnet' in out
+    # But the activity verb (Bash) should NOT be shown
+    assert 'Bash' not in out
 
 
 @pytest.mark.parametrize('content_width', [60, 96])

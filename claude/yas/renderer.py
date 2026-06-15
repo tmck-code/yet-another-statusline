@@ -57,6 +57,7 @@ from yas.constants import (
     GLYPH_TASK_DONE,
     GLYPH_TASK_PENDING,
     GLYPH_THINKING,
+    GLYPH_WF_CURRENT,
     GLYPH_WF_HEADER,
     GLYPH_WF_SUMMARY,
     ICON_COST,
@@ -66,6 +67,9 @@ from yas.constants import (
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
     TASK_HEADER_RIGHT_GAP_MIN,
+    WF_NAME_MIN,
+    WF_PHASE_DOT,
+    WF_PHASE_GAP,
 )
 from yas.render.gradient import (
     GradientEngine,
@@ -609,10 +613,12 @@ class Renderer:
             key = TOOL_ARG_KEY.get(name)
             if key and key in inp:
                 raw = str(inp[key])
+                raw = raw.split('\n')[0]
                 if key == 'file_path':
                     raw = Path(raw).name
             elif inp:
                 raw = str(next(iter(inp.values())))
+                raw = raw.split('\n')[0]
             else:
                 raw = ''
             if _visible_width(raw) > cap:
@@ -738,11 +744,15 @@ class Renderer:
             return f'{line1}\n{line2}'
 
         # --- one-line collapse (D6): drops ↑output; marker/type/model/verb kept ---
-        kind = sub.last_activity[0]
-        tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
-            '(thinking)' if kind == 'thinking' else
-            '(replying)' if kind == 'text' else ''
-        )
+        # Only show activity status for running agents; done agents freeze state.
+        if is_done:
+            tool_verb = ''
+        else:
+            kind = sub.last_activity[0]
+            tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
+                '(thinking)' if kind == 'thinking' else
+                '(replying)' if kind == 'text' else ''
+            )
 
         right_n = (
             f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
@@ -755,7 +765,6 @@ class Renderer:
                 f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
                 f'{self.CTX_DIM}{type_text}{self.R}'
                 f'  {self.CTX_DIM}{short_model}{self.R}'
-                f'  {self.CTX_DIM}{tool_verb}{self.R}'
             )
         else:
             left_n = (
@@ -780,25 +789,58 @@ class Renderer:
         return f'{left_n}{" " * pad_n}{right_n}'
 
     def workflow_header(self, run: RunningWorkflow, content_width: int) -> str:
-        """Group header for a workflow run: ``▸  <name>  [<phase>]``.
+        """Group header for a workflow run.
 
-        The phase segment is omitted when the run has no known phase. The name
-        is middle-ellipsised to whatever width the glyph and phase leave; the
-        whole line is clamped to ``content_width`` as a final safety net.
+        With a known phase list the header renders the phases inline as a
+        dot-separated trail — ``▸  <name>  P1 · ❯P2 · P3`` — where the phase
+        matching ``run.phase`` is highlighted (SKILLS colour, ``❯`` prefix) and
+        the rest dimmed; an empty ``run.phase`` (live run) dims all of them with
+        no marker. Without a phase list it falls back to the ``[<phase>]``
+        bracket form (omitted when no phase is known).
+
+        The name keeps a minimum width: when the phase trail is wide the trail
+        itself is truncated with ``…`` before the name shrinks below that floor.
+        The whole line is clamped to ``content_width`` as a final safety net.
         """
-        step   = rainbow_step()
-        c_hdr  = rainbow_at(step, 4)
-        if run.phase:
+        step  = rainbow_step()
+        c_hdr = rainbow_at(step, 4)
+        glyph_w = 3  # ▸ + two spaces
+
+        if run.phases:
+            phase_seg = self._workflow_phase_list(run)
+            # Reserve a name floor so a long phase trail truncates first.
+            name_floor = min(_visible_width(run.name), WF_NAME_MIN)
+            trail_max  = content_width - glyph_w - name_floor - WF_PHASE_GAP
+            if _visible_width(phase_seg) > max(0, trail_max):
+                phase_seg = _middle_ellipsis(phase_seg, max(1, trail_max))
+            phase_seg = f'  {phase_seg}'
+        elif run.phase:
             phase_seg = f'  {self.LABEL}[{self.R}{self.CTX}{run.phase}{self.R}{self.LABEL}]{self.R}'
         else:
             phase_seg = ''
-        glyph_w  = 3  # ▸ + two spaces
+
         name_max = max(1, content_width - glyph_w - _visible_width(phase_seg))
         name     = _middle_ellipsis(run.name, name_max)
         line     = f'{c_hdr}{BOLD}{GLYPH_WF_HEADER}{self.R}  {self.SKILLS}{name}{self.R}{phase_seg}'
         if _visible_width(line) > content_width:
             line = _middle_ellipsis(line, content_width)
         return line
+
+    def _workflow_phase_list(self, run: RunningWorkflow) -> str:
+        """Dot-separated phase trail: current phase highlighted, rest dimmed.
+
+        The current phase (``run.phase``) gets the SKILLS colour and a ``❯``
+        marker; every other phase — and all phases when ``run.phase`` is empty —
+        renders in ``CTX_DIM``. Separator dots are dim throughout.
+        """
+        sep   = f' {self.CTX_DIM}{WF_PHASE_DOT}{self.R} '
+        parts = []
+        for title in run.phases:
+            if run.phase and title == run.phase:
+                parts.append(f'{self.SKILLS}{GLYPH_WF_CURRENT}{title}{self.R}')
+            else:
+                parts.append(f'{self.CTX_DIM}{title}{self.R}')
+        return sep.join(parts)
 
     def workflow_summary(self, run: RunningWorkflow, content_width: int, *, hidden_agents: int = 0) -> str:
         """Summary footer for a workflow run: ``└  N agents · M done · <tok>``.
