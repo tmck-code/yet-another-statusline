@@ -66,6 +66,7 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     last_has_tool             = False
     last_has_text             = False
     last_ts                   = 0.0
+    last_content: list[str]   = []  # content from the final terminal-state line
     try:
         with jsonl.open('r', errors='ignore') as fh:
             for ln in fh:
@@ -105,6 +106,7 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     last_has_tool = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in cont)
                     last_has_text = any(isinstance(b, dict) and b.get('type') == 'text'     for b in cont)
                     last_stop, last_ts = stop, line_ts
+                    last_content = cont
                 except (ValueError, TypeError, AttributeError):
                     pass
                 if not mid or mid in seen:
@@ -163,12 +165,15 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     if end_ts == 0.0 and last_ts and last_has_text and not last_has_tool and last_stop != 'tool_use':
         end_ts = last_ts
     # Structured-output done detection. Workflow agents finish by calling
-    # StructuredOutput with stop_reason: "tool_use" (not awaiting results).
-    # Detect this as a completion signal.
-    if end_ts == 0.0 and last_ts and last_has_tool and last_stop == 'tool_use':
+    # StructuredOutput as their terminal action. The final assistant line may
+    # carry stop_reason: "tool_use" OR stop_reason: null (a streamed write whose
+    # stop never got finalized on disk) — both mean done. The StructuredOutput
+    # call IS the completion marker; a later retry (schema mismatch) would append
+    # further assistant lines, so only a truly terminal call reaches here.
+    if end_ts == 0.0 and last_ts and last_has_tool and last_stop in ('tool_use', None):
         # Check if the only tool_use in the final message is StructuredOutput.
         # This is a completion signal, not an intermediate tool call.
-        for item in content:
+        for item in last_content:
             if isinstance(item, dict) and item.get('type') == 'tool_use':
                 if item.get('name') == 'StructuredOutput':
                     end_ts = last_ts

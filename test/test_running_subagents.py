@@ -538,3 +538,62 @@ def test_structured_output_tool_use_detects_done(tmp_home: Path) -> None:
     assert sub.end_ts > 0
     # 2026-05-22T18:00:00Z → epoch ≈ 1779472800
     assert 1779472799 < sub.end_ts < 1779472801
+
+
+def test_structured_output_null_stop_reason_detects_done(tmp_home: Path) -> None:
+    # Regression: real workflow transcripts sometimes end with the
+    # StructuredOutput tool_use carrying stop_reason: null (a streamed write
+    # whose stop was never finalized on disk), not "tool_use". This previously
+    # fell through both fallbacks, undercounting a run's done agents (e.g.
+    # "12 done" when 15 were finished). A null stop on a final StructuredOutput
+    # call must still be detected as done.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    struct_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-struct-null',
+        jsonl_lines=[
+            _assistant_line_full(
+                'm1', None, output_tokens=4, timestamp=struct_ts,
+                content=[{'type': 'tool_use', 'name': 'StructuredOutput', 'input': {'schema': '{}', 'json': '{}'}}]
+            ),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts > 0
+    assert 1779472799 < sub.end_ts < 1779472801
+
+
+def test_structured_output_duplicate_message_detects_done(tmp_home: Path) -> None:
+    # Bug fix: when the final message in the transcript is a duplicate
+    # (same mid already seen), the StructuredOutput detection must still work.
+    # This happens when a message is re-streamed (partial then final write).
+    # The code must use the content from the final write, not an earlier message.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    struct_ts = '2026-05-22T18:00:00.000Z'
+    _write_agent(
+        sdir, 'agent-struct-dup',
+        jsonl_lines=[
+            # First write: partial with StructuredOutput, stop_reason null
+            _assistant_line_full(
+                'm1', None, output_tokens=3, timestamp=struct_ts,
+                content=[{'type': 'tool_use', 'name': 'StructuredOutput', 'input': {'schema': '{}', 'json': '{}'}}]
+            ),
+            # Final write: same message id, stop_reason tool_use
+            _assistant_line_full(
+                'm1', 'tool_use', output_tokens=3, timestamp=struct_ts,
+                content=[{'type': 'tool_use', 'name': 'StructuredOutput', 'input': {'schema': '{}', 'json': '{}'}}]
+            ),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # StructuredOutput completion should set end_ts even when it's a duplicate message
+    assert sub.end_ts > 0
+    assert 1779472799 < sub.end_ts < 1779472801

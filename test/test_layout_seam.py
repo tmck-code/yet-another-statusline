@@ -117,6 +117,38 @@ def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPat
         assert below[col] in ('┴', '┼'), f'no ┴ below at col {col}: {below[col]!r}'
 
 
+def _make_sub_labelled(label: str, started: float) -> subagents_mod.RunningSubagent:
+    return subagents_mod.RunningSubagent(
+        agent_type      = label,
+        description     = '',
+        billed_in       = 1000,
+        output          = 100,
+        first_timestamp = started,
+        model           = 'claude-sonnet-4-6',
+        cache_read_in   = 0,
+        total_input     = 1000,
+        last_activity   = ('tool_use', 'Bash', {'command': 'pytest'}),
+        mtime           = started,
+    )
+
+
+def test_subagent_cohort_caps_at_six_most_recent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eight live subagents collapse to the six most recently started, shown
+    in chronological (first_timestamp ascending) order."""
+    from helper import strip_ansi
+    from yas.constants import SUBAGENT_DISPLAY_CAP
+    _silence_dynamic(monkeypatch)
+    now  = time.time()
+    subs = [_make_sub_labelled(f'sub-{i}', now - (8 - i)) for i in range(8)]
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)))
+    spec = layout.build_wide(_view(), _tick(), 160, _r)
+    texts = ' '.join(strip_ansi(row.content) for row in spec.rows if row.kind == 'content')
+    shown = [i for i in range(8) if f'sub-{i}' in texts]
+    assert len(shown) == SUBAGENT_DISPLAY_CAP
+    assert shown == [2, 3, 4, 5, 6, 7]  # oldest two (0, 1) dropped, chronological
+
+
 def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
@@ -516,3 +548,72 @@ def test_wide_bottom_band_drops_three_segment_tokens_row(
 
     assert not has_tokens_row(layout.build_wide(_view(), _tick(), 82, _r))
     assert has_tokens_row(layout.build_wide(_view(), _tick(), 100, _r))
+
+
+def test_workflow_two_column_pairing_threshold() -> None:
+    """Section 6: at width >= TWO_COL_WF_WIDTH (120) workflow agents pair
+    two-per-row; just below it each agent gets its own row. Two agents -> one
+    paired row vs two stacked rows."""
+    from helper import strip_ansi
+    from yas.info.subagents import RunningSubagent
+    from yas.info.workflows import RunningWorkflow, RunningWorkflows
+
+    now    = time.time()
+    agents = [
+        RunningSubagent(
+            agent_type      = f'agent-{i}',
+            description     = '',
+            billed_in       = 0,
+            output          = 0,
+            first_timestamp = now + i,
+            total_input     = 0,
+            end_ts          = 0.0,
+            mtime           = now,
+            agent_id        = f'a{i}',
+        )
+        for i in range(2)
+    ]
+    run = RunningWorkflow(run_id='wf_x', name='wf_x', phase='', agents=agents)
+
+    def _view_with(run):
+        view = _view()
+        view.__dict__['workflows'] = RunningWorkflows(workflows=[run])
+        return view
+
+    def agent_rows(width: int) -> list[layout.RowSpec]:
+        rows = layout.build_workflow_rows(_view_with(run), width, _r, per_agent=True)
+        # strip the header (first) and summary (last) rows
+        return rows[1:-1]
+
+    # width 120 (== TWO_COL_WF_WIDTH): the two agents share a single paired
+    # content row. The block carries no internal separators — the divider ``│``
+    # is embedded in every row and the bracketing ┬/┴ are threaded by build_wide.
+    rows = agent_rows(120)
+    assert all(row.kind == 'content' for row in rows)
+    assert len(rows) == 1
+    assert 'agent-0' in rows[0].content and 'agent-1' in rows[0].content
+    # Every row of the block (header, paired agents, summary) embeds the divider
+    # at the shared column so the bar stays straight top-to-bottom.
+    div_col = layout.workflow_divider_col(120)
+    full    = layout.build_workflow_rows(_view_with(run), 120, _r, per_agent=True)
+    for row in full:
+        line = strip_ansi(row.content)
+        assert len(line) > div_col - 3 and line[div_col - 3] == '│'
+
+    # build_wide threads the matching ┬ onto the separator above the header and
+    # carries the ┴ down to the border below the summary.
+    spec       = layout.build_wide(_view_with(run), _tick(), 120, _r)
+    wide_lines = [strip_ansi(line) for line in layout.render_layout(spec, _r)]
+    hdr_idx    = next(i for i, ln in enumerate(wide_lines) if '▸' in ln)
+    # div_col is a 1-indexed visual column, so the glyph sits at index div_col-1.
+    assert wide_lines[hdr_idx - 1][div_col - 1] == '┬'   # separator above the title
+    last_sum   = max(i for i, ln in enumerate(wide_lines) if '└' in ln and 'agents' in ln)
+    assert wide_lines[last_sum + 1][div_col - 1] == '┴'  # border below the summary
+
+    # width 119: single-column — no row contains both agents (each renders in
+    # its own row(s), the existing behaviour).
+    stacked = agent_rows(119)
+    assert not any('agent-0' in row.content and 'agent-1' in row.content
+                   for row in stacked)
+    assert any('agent-0' in row.content for row in stacked)
+    assert any('agent-1' in row.content for row in stacked)

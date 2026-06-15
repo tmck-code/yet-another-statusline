@@ -75,6 +75,35 @@ def _first_prompt_line(jsonl: Path) -> str:
     return ''
 
 
+# The phases live in a ``meta.phases: [ ... ]`` array inside the workflow
+# script. Each phase object carries a ``title: '...'`` (single or double
+# quoted). We match the bracketed block narrowly, then pull each title in order.
+_PHASES_BLOCK_RE = re.compile(r'phases:\s*\[(.*?)\]', re.DOTALL)
+_TITLE_RE        = re.compile(r"""title:\s*(['"])(.*?)\1""", re.DOTALL)
+
+
+def _parse_script_phases(scripts_dir: Path, run_id: str) -> list[str]:
+    """Phase titles for ``run_id`` from its workflow script, in order.
+
+    The script is written to ``workflows/scripts/<name>-<runId>.js`` at run
+    start and is the only on-disk source of phase titles during a live run.
+    Locates it by the ``*-<runId>.js`` suffix, regex-parses the ``phases:[...]``
+    block, and extracts each ``title:`` string. Returns ``[]`` on ANY error
+    (missing dir, no matching script, unreadable file, no parseable block).
+    """
+    try:
+        scripts = sorted(scripts_dir.glob(f'*-{run_id}.js'))
+        if not scripts:
+            return []
+        body  = scripts[0].read_text(errors='ignore')
+        block = _PHASES_BLOCK_RE.search(body)
+        if not block:
+            return []
+        return [m.group(2) for m in _TITLE_RE.finditer(block.group(1))]
+    except OSError:
+        return []
+
+
 @dataclass
 class RunningWorkflow:
     """One Workflow-tool run and the agents it spawned."""
@@ -84,6 +113,7 @@ class RunningWorkflow:
     phase:  str
     agents: list[RunningSubagent] = field(default_factory=list)
     status: str = ''  # raw run-JSON status ('' when no JSON); liveness hint only
+    phases: list[str] = field(default_factory=list)
 
     @property
     def agent_count(self) -> int:
@@ -134,6 +164,7 @@ class RunningWorkflows:
                     continue
                 wf = RunningWorkflow(run_id=run_dir.name, name=run_dir.name, phase='', agents=agents)
                 cls._enrich(wf, session_dir)
+                wf.phases = _parse_script_phases(session_dir / 'workflows' / 'scripts', wf.run_id)
                 workflows.append(wf)
         except OSError:
             pass

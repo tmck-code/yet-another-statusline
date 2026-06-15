@@ -11,7 +11,9 @@ from yas.constants import (
     DEFAULT_SOFT_LIMIT,
     GLYPH_CONFIG_WARN,
     RESET,
+    SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
+    TWO_COL_WF_WIDTH,
     WORKFLOW_AGENT_CAP,
     WORKFLOW_RUN_CAP,
 )
@@ -93,6 +95,20 @@ def zip_columns(
     return rows
 
 
+def workflow_divider_col(width: int) -> int:
+    """1-indexed visual column of the two-column workflow divider ``│``.
+
+    ``border_line`` draws the box ``│`` at col 1 and a lead space at col 2, so
+    content begins at col 3; within the content the divider sits at index
+    ``half_w + 2`` (a ``  │  `` block after the left half). Shared by
+    ``build_workflow_rows`` (which embeds the bar in every row of the block) and
+    ``build_wide`` (which threads the matching ``┬``/``┴`` onto the separators
+    that bracket the block).
+    """
+    half_w = ((width - 4) - 5) // 2
+    return 3 + half_w + 2
+
+
 def build_workflow_rows(
     view: SessionView,
     width: int,
@@ -107,8 +123,14 @@ def build_workflow_rows(
     ``per_agent`` — wide layouts only; narrow/medium collapse to header+summary),
     and a summary footer. Agents beyond the cap fold into the footer's
     ``+K hidden``; runs beyond ``WORKFLOW_RUN_CAP`` fold into a single
-    ``+N more workflows`` content row. The rows carry no internal dividers, so
-    callers thread elbows only on the separator they place above the block.
+    ``+N more workflows`` content row.
+
+    In two-column mode (``per_agent`` and ``width >= TWO_COL_WF_WIDTH``) the
+    column divider ``│`` is embedded in *every* row of the block — header,
+    paired/odd agent rows, summary and overflow — so the bar runs unbroken from
+    the header down to the summary. The rows carry no internal separators; the
+    caller (``build_wide``) threads the matching ``┬``/``┴`` onto the separator
+    above the block and the border below it via ``workflow_divider_col``.
     """
     last_prompt_ts = read_last_prompt_ts(view.session.session_id)
     runs = view.workflows.visible(time.time(), last_prompt_ts)
@@ -117,12 +139,45 @@ def build_workflow_rows(
     shown       = runs[:WORKFLOW_RUN_CAP]
     hidden_runs = len(runs) - len(shown)
     inner       = width - 4
+    two_col     = per_agent and width >= TWO_COL_WF_WIDTH
     out: list[RowSpec] = []
+
+    if two_col:
+        half_w  = (inner - 5) // 2
+        divider = f'  {r.BORDER}│{r.R}  '
+
+        def left_only(text: str) -> str:
+            # Left-half content padded to the divider, then the bar; the right
+            # half is left blank for border_line to pad. Keeps the divider column
+            # straight under the header, summary and overflow rows.
+            return f'{text}{" " * max(0, half_w - _visible_width(text))}{divider}'
+
+        for run in shown:
+            out.append(RowSpec('content', content=left_only(r.workflow_header(run, half_w))))
+            agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
+            hidden_agents = run.agent_count - len(agents)
+            # Pair agents sequentially in first_timestamp order. An odd trailing
+            # agent renders in the left column with a blank right half so it
+            # stays inside the L/R section and the divider stays unbroken.
+            for i in range(0, len(agents), 2):
+                left = r.subagent_row(agents[i], half_w, twoline=False, session_inout=0)
+                left = f'{left}{" " * max(0, half_w - _visible_width(left))}'
+                if i + 1 < len(agents):
+                    right = r.subagent_row(agents[i + 1], half_w, twoline=False, session_inout=0)
+                    right = f'{right}{" " * max(0, half_w - _visible_width(right))}'
+                    out.append(RowSpec('content', content=f'{left}{divider}{right}'))
+                else:
+                    out.append(RowSpec('content', content=f'{left}{divider}'))
+            out.append(RowSpec('content', content=left_only(r.workflow_summary(run, half_w, hidden_agents=hidden_agents))))
+        if hidden_runs > 0:
+            out.append(RowSpec('content', content=left_only(f'{r.LABEL}+{hidden_runs} more workflows{r.R}')))
+        return out
+
     for run in shown:
         out.append(RowSpec('content', content=r.workflow_header(run, inner)))
         hidden_agents = 0
         if per_agent:
-            agents        = run.agents[:WORKFLOW_AGENT_CAP]  # sorted by first_timestamp
+            agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
             hidden_agents = run.agent_count - len(agents)
             for sub in agents:
                 for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=0).split('\n'):
@@ -162,7 +217,7 @@ def build_narrow(
     tasks     = view.tasks
     subagents = view.subagents
     last_prompt_ts = read_last_prompt_ts(session.session_id)
-    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)[-SUBAGENT_DISPLAY_CAP:]
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     if pill_pct:
         rows: list[RowSpec] = [
@@ -251,7 +306,7 @@ def build_medium(
     tasks     = view.tasks
     subagents = view.subagents
     last_prompt_ts = read_last_prompt_ts(session.session_id)
-    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)[-SUBAGENT_DISPLAY_CAP:]
     rows: list[RowSpec] = [top_row, content_row, sep_row]
     if tasks.is_visible():
         for line in r.task_row(tasks, width - 4):
@@ -448,7 +503,7 @@ def build_wide(
         pending_ups = ()
 
     last_prompt_ts = read_last_prompt_ts(session.session_id)
-    visible_subs   = subagents.visible(time.time(), last_prompt_ts)
+    visible_subs   = subagents.visible(time.time(), last_prompt_ts)[-SUBAGENT_DISPLAY_CAP:]
 
     # Side-by-side composition (D2/D3/D5/D7): when the wide layout has BOTH a
     # visible checklist AND >=1 visible subagent, lay the checklist (left) and
@@ -501,10 +556,15 @@ def build_wide(
     # so the plain content rows below carry no elbows.
     wf_rows = build_workflow_rows(view, width, r, per_agent=True)
     if wf_rows:
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups))
+        # Two-column workflow blocks embed a column divider in every row; thread
+        # its ┬ onto the separator above the header and carry the ┴ down to the
+        # border/separator below the summary, so the bar joins the box at both
+        # ends instead of floating with its own internal seams.
+        wf_downs: tuple[int, ...] = (workflow_divider_col(width),) if width >= TWO_COL_WF_WIDTH else ()
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups, downs=wf_downs))
         rows.extend(wf_rows)
         pending_ups = ()
-        tail_ups    = ()
+        tail_ups    = wf_downs
 
     if openspec_bars:
         rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups))

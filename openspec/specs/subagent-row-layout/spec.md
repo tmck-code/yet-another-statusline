@@ -61,6 +61,15 @@ callers without width context (the floor); the line-2 renderer passes
 `min(100, available_width)`, so the cap rises up to a ceiling of 100 visible
 columns when the terminal has spare horizontal space.
 
+When the tool argument contains newline characters, only the first line SHALL
+be used for display. Subsequent lines SHALL be discarded before the width cap
+is applied.
+
+#### Scenario: Multi-line tool argument shows only first line
+
+- **WHEN** the tool argument string contains newline characters (e.g. a multi-line Bash command)
+- **THEN** only the content before the first newline is displayed; subsequent lines are not rendered
+
 #### Scenario: Tool use wins over trailing text in the same message
 
 - **WHEN** the latest assistant message contains both a `tool_use` block and a

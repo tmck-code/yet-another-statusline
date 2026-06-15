@@ -253,6 +253,53 @@ class TestWorkflowEnrichment:
         assert (result.run_id, result.name, result.phase) == expected
 
 
+def _write_workflow_script(root: Path, run_id: str, body: str) -> Path:
+    scripts_dir = root / 'workflows' / 'scripts'
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    path = scripts_dir / f'my-workflow-{run_id}.js'
+    path.write_text(body)
+    return path
+
+
+class TestWorkflowPhaseParsing:
+
+    def test_three_phase_script_yields_titles_in_order(self, tmp_home):
+        # setup
+        now  = time.time()
+        root = _session_root(tmp_home)
+        _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
+        _write_workflow_script(root, 'wf_x', """
+            export const meta = {
+              phases: [
+                { title: 'Discover', steps: 1 },
+                { title: "Scan" },
+                { title: 'Verify' },
+              ],
+            };
+        """)
+
+        # run
+        result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
+
+        # expected
+        expected = ['Discover', 'Scan', 'Verify']
+
+        # assert
+        assert result.phases == expected
+
+    def test_missing_script_yields_empty_phases(self, tmp_home):
+        # setup: a workflow run with no script file written
+        now  = time.time()
+        root = _session_root(tmp_home)
+        _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
+
+        # run
+        result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
+
+        # assert: no phases, no exception raised
+        assert result.phases == []
+
+
 class TestWorkflowLiveness:
 
     def test_visible_during_between_phase_lull(self, tmp_home):
@@ -519,11 +566,12 @@ class TestWorkflowLayout:
         rows  = layout.build_workflow_rows(view, 160, _r, per_agent=True)
         texts = [strip_ansi(row.content) for row in rows]
 
-        # assert: the first 6 agents render (sorted by first_timestamp), agents
-        # 6-8 do not, hidden count is 3. The summary is matched by its text since
-        # its glyph (└) collides with the twoline subagent continuation glyph.
+        # assert: the most recent 6 agents render (chronological, first_timestamp
+        # asc), agents 0-2 fold into the hidden count of 3. The summary is matched
+        # by its text since its glyph (└) collides with the twoline subagent
+        # continuation glyph.
         shown_agent_labels = [i for i in range(9) if any(f'agent-{i}' in t for t in texts)]
-        assert shown_agent_labels == [0, 1, 2, 3, 4, 5]
+        assert shown_agent_labels == [3, 4, 5, 6, 7, 8]
         assert any('+3 hidden' in t for t in texts)
         assert sum(1 for t in texts if GLYPH_WF_HEADER in t) == 1
         assert sum(1 for t in texts if GLYPH_WF_SUMMARY in t and 'agents' in t and 'done' in t) == 1
