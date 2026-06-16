@@ -147,6 +147,15 @@ def test_two_line_continuation_shows_activity() -> None:
     assert 'Bash[pytest -q]' in strip_ansi(line2)
 
 
+def test_two_line_continuation_tool_arg_strips_newlines() -> None:
+    sub = _make_sub(last_activity=('tool_use', 'Bash', {'command': 'echo hi\nrm -rf /\necho bye'}))
+    _, line2 = _two(sub)
+    plain = strip_ansi(line2)
+    assert 'Bash[echo hi]' in plain
+    assert '\n' not in plain
+    assert 'rm -rf' not in plain
+
+
 def test_two_line_continuation_has_no_metrics() -> None:
     sub = _make_sub(model='claude-sonnet-4-6')
     si  = (sub.total_input + sub.output) * 2
@@ -320,6 +329,18 @@ def test_one_line_done_frozen_duration() -> None:
     assert '1m30s' in out
 
 
+def test_one_line_done_no_activity_verb() -> None:
+    # Done agents should not show their last activity (no "Bash", "Edit", etc.)
+    sub = _make_done_sub(last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    # Check the marker, type, and model are shown
+    assert '✓' in out
+    assert 'general-purpose' in out
+    assert 'sonnet' in out
+    # But the activity verb (Bash) should NOT be shown
+    assert 'Bash' not in out
+
+
 @pytest.mark.parametrize('content_width', [60, 96])
 def test_one_line_fits_content_width(content_width: int) -> None:
     out = _one(_make_sub(), content_width)
@@ -338,10 +359,10 @@ def test_one_line_long_name_padded_flush_to_width(content_width: int) -> None:
 
 
 def test_one_line_metrics_right_anchored_at_wide_width() -> None:
-    # The right metric cluster (hourglass + tok + dur) is flush to the closing
-    # border so the tokens/elapsed columns line up down stacked rows; the slack
-    # between the left run and the cluster is the interior gap (no trailing
-    # space after the duration). The row fills exactly to content_width.
+    # The right metric cluster (model + hourglass + tok + dur) is flush to the
+    # closing border so the model/tokens/elapsed columns line up down stacked
+    # rows; the slack between the left run and the cluster is the interior gap
+    # (no trailing space after the duration). Fills exactly to content_width.
     content_width = 90
     sub = _make_sub(agent_type='grep-bot',
                     last_activity=('tool_use', 'Grep', {}))
@@ -350,6 +371,63 @@ def test_one_line_metrics_right_anchored_at_wide_width() -> None:
     assert _visible_width(out) == content_width
     # No trailing space: the duration is the last visible glyph on the row.
     assert text == text.rstrip()
+
+
+def test_one_line_model_in_right_cluster_not_after_type() -> None:
+    # The model moved out of the left run into the right-anchored cluster: it
+    # now sits between the agent type and the token figure, not directly abutting
+    # the type. The verb (left run) precedes the model (right cluster).
+    sub = _make_sub(agent_type='general-purpose',
+                    model='claude-sonnet-4-6',
+                    last_activity=('tool_use', 'Bash', {}))
+    text = strip_ansi(_one(sub))
+    # type, then verb (left), then model (right cluster), then token count.
+    assert text.index('general-purpose') < text.index('Bash') < text.index('sonnet')
+    assert text.index('sonnet') < text.index(fmt_tok(sub.total_input))
+
+
+def test_one_line_model_forms_right_aligned_column() -> None:
+    # Two stacked rows with differing left widths and token widths must align
+    # their model, token, and duration fields into vertical columns because the
+    # whole cluster is fixed-width (model rjust 6, tok rjust 6, dur rjust 5) and
+    # right-anchored to the border.
+    content_width = 90
+    a = _make_sub(agent_type='synth', model='claude-3-5-haiku',
+                  total_input=6800, first_timestamp=time.time() - 90,
+                  last_activity=('tool_use', 'Edit', {}))
+    b = _make_sub(agent_type='fetch-notebook-worker', model='claude-sonnet-4-6',
+                  total_input=11500, first_timestamp=time.time() - 50,
+                  last_activity=('tool_use', 'Read', {}))
+    row_a = strip_ansi(_one(a, content_width))
+    row_b = strip_ansi(_one(b, content_width))
+    # The model column start (left edge of the rjust-6 field) lines up.
+    assert row_a.index('haiku') - 1 == row_b.index('sonnet')
+    # Both rows fill to exactly content_width, so the duration column also lines
+    # up by construction.
+    assert _visible_width(row_a) == content_width == _visible_width(row_b)
+
+
+def test_one_line_six_char_token_keeps_model_aligned() -> None:
+    # A workflow agent routinely exceeds 100K tokens, so fmt_tok yields a 6-char
+    # figure ('115.0K'). The one-line token field is rjust(6), so a 6-char value
+    # fills the column without widening the right cluster — the model column stays
+    # right-edge aligned with a row carrying a smaller (4-char) token value.
+    content_width = 90
+    big   = _make_sub(agent_type='synth', model='claude-sonnet-4-6',
+                      total_input=115000, first_timestamp=time.time() - 90,
+                      last_activity=('tool_use', 'Edit', {}))
+    small = _make_sub(agent_type='synth', model='claude-sonnet-4-6',
+                      total_input=6800, first_timestamp=time.time() - 90,
+                      last_activity=('tool_use', 'Edit', {}))
+    # The 6-char value really is wider than the 4-char one (the bug's premise).
+    assert len(fmt_tok(big.total_input)) == 6
+    assert len(fmt_tok(small.total_input)) == 4
+    row_big   = strip_ansi(_one(big, content_width))
+    row_small = strip_ansi(_one(small, content_width))
+    # Same model glyph column despite the differing token widths.
+    assert row_big.index('sonnet') == row_small.index('sonnet')
+    # Both rows fill flush to the border, so the right cluster did not widen.
+    assert _visible_width(row_big) == content_width == _visible_width(row_small)
 
 
 # G. Duration formatting ------------------------------------------------------

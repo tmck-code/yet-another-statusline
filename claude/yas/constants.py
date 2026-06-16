@@ -16,6 +16,11 @@ DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
+# Box width at/above which the wide layout's workflow cohort pairs agents into
+# two side-by-side columns (each ~half the inner width minus the 5-col divider).
+# Below this the agents stack single-column. Set under DEFAULT_MAX_WIDTH=140 so
+# the two-column layout is actually reachable in a default-config wide terminal.
+TWO_COL_WF_WIDTH = 120
 # Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
 # the row cannot hold both columns at full size plus the rate/spark leader, so
 # build_wide drops it for the compact context line instead of overflowing the
@@ -117,6 +122,32 @@ GLYPH_HOURGLASS    = ''  # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE          = ''  # nf-fa-pie_chart     (subagent session share)
 GLYPH_CONFIG_WARN  = '⚠'  # U+26A0 WARNING SIGN (config-error row marker)
 GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
+GLYPH_WF_HEADER    = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE (workflow run header)
+GLYPH_WF_SUMMARY   = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
+GLYPH_WF_CURRENT   = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
+GLYPH_WF_DIVIDER   = '\u250a'  # \u250a U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL (two-column workflow divider)
+
+# Workflow cohort thresholds. A run is kept visible while any agent transcript
+# was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
+# cohort's windows so a run rides through between-phase lulls). At most
+# WORKFLOW_AGENT_CAP agent rows render per run and WORKFLOW_RUN_CAP run blocks
+# render concurrently; overflow is summarised, never dropped silently.
+WORKFLOW_LIVENESS_SECONDS = 120
+WORKFLOW_AGENT_CAP        = 6
+WORKFLOW_RUN_CAP          = 2
+
+# At most SUBAGENT_DISPLAY_CAP subagent rows render in the standalone cohort;
+# the layout builders keep the most recent (latest-started) rows and drop the
+# older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
+SUBAGENT_DISPLAY_CAP      = 6
+
+# Workflow run-header phase-trail layout. WF_NAME_MIN is the minimum run-name
+# width preserved before the inline phase trail truncates with `…`; WF_PHASE_GAP
+# is the spaces reserved between the name and the trail (the header prepends
+# two). WF_PHASE_DOT separates phases in the trail.
+WF_NAME_MIN   = 12
+WF_PHASE_GAP  = 2
+WF_PHASE_DOT  = '·'  # · U+00B7 MIDDLE DOT (workflow phase-trail separator)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5

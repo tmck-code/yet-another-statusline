@@ -57,6 +57,9 @@ from yas.constants import (
     GLYPH_TASK_DONE,
     GLYPH_TASK_PENDING,
     GLYPH_THINKING,
+    GLYPH_WF_CURRENT,
+    GLYPH_WF_HEADER,
+    GLYPH_WF_SUMMARY,
     ICON_COST,
     ICON_TOK_RATE,
     PILL_LEFT,
@@ -64,6 +67,9 @@ from yas.constants import (
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
     TASK_HEADER_RIGHT_GAP_MIN,
+    WF_NAME_MIN,
+    WF_PHASE_DOT,
+    WF_PHASE_GAP,
 )
 from yas.render.gradient import (
     GradientEngine,
@@ -80,6 +86,7 @@ from yas.render.pill import Pill
 from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
+from yas.info.workflows import RunningWorkflow
 from yas.info.tasks import TaskList
 from yas.render.text import _middle_ellipsis, _visible_width, fmt_dur, fmt_tok
 from yas.tokens import TokenRate
@@ -606,10 +613,12 @@ class Renderer:
             key = TOOL_ARG_KEY.get(name)
             if key and key in inp:
                 raw = str(inp[key])
+                raw = raw.split('\n')[0]
                 if key == 'file_path':
                     raw = Path(raw).name
             elif inp:
                 raw = str(next(iter(inp.values())))
+                raw = raw.split('\n')[0]
             else:
                 raw = ''
             if _visible_width(raw) > cap:
@@ -641,7 +650,6 @@ class Renderer:
         else:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
-        tok_s   = fmt_tok(sub.total_input)
 
         short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
         model_clr   = self.model_colour(sub.model)
@@ -734,15 +742,28 @@ class Renderer:
 
             return f'{line1}\n{line2}'
 
-        # --- one-line collapse (D6): drops ↑output; marker/type/model/verb kept ---
-        kind = sub.last_activity[0]
-        tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
-            '(thinking)' if kind == 'thinking' else
-            '(replying)' if kind == 'text' else ''
-        )
+        # --- one-line collapse (D6): drops ↑output; marker/type/verb on the
+        # left, model right-anchored into the metric column ---
+        # Only show activity status for running agents; done agents freeze state.
+        if is_done:
+            tool_verb = ''
+        else:
+            kind = sub.last_activity[0]
+            tool_verb = sub.last_activity[1] if kind == 'tool_use' else (
+                '(thinking)' if kind == 'thinking' else
+                '(replying)' if kind == 'text' else ''
+            )
 
+        # The model is a fixed-width, right-justified field at the head of the
+        # right cluster so it forms a vertical column with the tokens and
+        # duration (also right-justified) down stacked rows. Reading order:
+        # `{model:>6}  {hourglass} {tok:>5}  {dur:>5}`. Model dims when Done.
+        model_field = short_model.rjust(6)
+        model_n_clr = self.CTX_DIM if is_done else model_clr
+        tok_n       = fmt_tok(sub.total_input).rjust(6)
         right_n = (
-            f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
+            f'{model_n_clr}{model_field}{self.R}'
+            f'  {ctx_clr}{GLYPH_HOURGLASS} {tok_n}{self.R}'
             f'  {self.CTX}{dur_s}{self.R}'
         )
         right_n_w = _visible_width(right_n)
@@ -751,30 +772,103 @@ class Renderer:
             left_n = (
                 f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
                 f'{self.CTX_DIM}{type_text}{self.R}'
-                f'  {self.CTX_DIM}{short_model}{self.R}'
-                f'  {self.CTX_DIM}{tool_verb}{self.R}'
             )
         else:
             left_n = (
                 f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
                 f'{self.SKILLS}{type_text}{self.R}'
-                f'  {model_clr}{short_model}{self.R}'
                 f'  {self.CTX}{tool_verb}{self.R}'
             )
         left_n_w = _visible_width(left_n)
         # Budget the left segment so the row never overflows the right border:
-        # the bounded right cluster (hourglass + tok + dur) stays intact, and
-        # the marker/type/model/verb run truncates with a middle ellipsis when
-        # it would otherwise push past target_w (reserving a 1-col gap).
+        # the bounded right cluster (model + hourglass + tok + dur) stays
+        # intact, and the marker/type/verb run truncates with a middle ellipsis
+        # when it would otherwise push past target_w (reserving a 1-col gap).
         left_budget = target_w - right_n_w - 1
         if left_n_w > left_budget:
             left_n   = _middle_ellipsis(left_n, max(1, left_budget))
             left_n_w = _visible_width(left_n)
-        # Right-anchor the metric cluster (hourglass + tok + dur) flush to the
-        # closing border so the tokens and elapsed columns line up down stacked
-        # rows; the slack between the left run and the cluster is the gap.
+        # Right-anchor the metric cluster (model + hourglass + tok + dur) flush
+        # to the closing border so the model, tokens and elapsed columns line
+        # up down stacked rows; the slack between the left run and the cluster
+        # is the gap.
         pad_n = max(1, target_w - left_n_w - right_n_w)
         return f'{left_n}{" " * pad_n}{right_n}'
+
+    def workflow_header(self, run: RunningWorkflow, content_width: int) -> str:
+        """Group header for a workflow run.
+
+        With a known phase list the header renders the phases inline as a
+        dot-separated trail — ``▸  <name>  P1 · ❯P2 · P3`` — where the phase
+        matching ``run.phase`` is highlighted (SKILLS colour, ``❯`` prefix) and
+        the rest dimmed; an empty ``run.phase`` (live run) dims all of them with
+        no marker. Without a phase list it falls back to the ``[<phase>]``
+        bracket form (omitted when no phase is known).
+
+        The name keeps a minimum width: when the phase trail is wide the trail
+        itself is truncated with ``…`` before the name shrinks below that floor.
+        The whole line is clamped to ``content_width`` as a final safety net.
+        """
+        step  = rainbow_step()
+        c_hdr = rainbow_at(step, 4)
+        glyph_w = 3  # ▸ + two spaces
+
+        if run.phases:
+            phase_seg = self._workflow_phase_list(run)
+            # Reserve a name floor so a long phase trail truncates first.
+            name_floor = min(_visible_width(run.name), WF_NAME_MIN)
+            trail_max  = content_width - glyph_w - name_floor - WF_PHASE_GAP
+            if _visible_width(phase_seg) > max(0, trail_max):
+                phase_seg = _middle_ellipsis(phase_seg, max(1, trail_max))
+            phase_seg = f'  {phase_seg}'
+        elif run.phase:
+            phase_seg = f'  {self.LABEL}[{self.R}{self.CTX}{run.phase}{self.R}{self.LABEL}]{self.R}'
+        else:
+            phase_seg = ''
+
+        name_max = max(1, content_width - glyph_w - _visible_width(phase_seg))
+        name     = _middle_ellipsis(run.name, name_max)
+        line     = f'{c_hdr}{BOLD}{GLYPH_WF_HEADER}{self.R}  {self.SKILLS}{name}{self.R}{phase_seg}'
+        if _visible_width(line) > content_width:
+            line = _middle_ellipsis(line, content_width)
+        return line
+
+    def _workflow_phase_list(self, run: RunningWorkflow) -> str:
+        """Dot-separated phase trail: current phase highlighted, rest dimmed.
+
+        The current phase (``run.phase``) gets the SKILLS colour and a ``❯``
+        marker; every other phase — and all phases when ``run.phase`` is empty —
+        renders in ``CTX_DIM``. Separator dots are dim throughout.
+        """
+        sep   = f' {self.CTX_DIM}{WF_PHASE_DOT}{self.R} '
+        parts = []
+        for title in run.phases:
+            if run.phase and title == run.phase:
+                parts.append(f'{self.SKILLS}{GLYPH_WF_CURRENT}{title}{self.R}')
+            else:
+                parts.append(f'{self.CTX_DIM}{title}{self.R}')
+        return sep.join(parts)
+
+    def workflow_summary(self, run: RunningWorkflow, content_width: int, *, hidden_agents: int = 0) -> str:
+        """Summary footer for a workflow run: ``└  N agents · M done · <tok>``.
+
+        ``hidden_agents`` (agents beyond the per-run cap) appends ``+K hidden``.
+        Token total is the run's aggregate from the per-agent transcript parse.
+        """
+        step  = rainbow_step()
+        c_sum = rainbow_at(step, 7)
+        sep   = f' {self.LABEL}·{self.R} '
+        parts = [
+            f'{self.CTX}{run.agent_count}{self.R} {self.LABEL}agents{self.R}',
+            f'{self.CTX}{run.done_count}{self.R} {self.LABEL}done{self.R}',
+            f'{self.CTX}{fmt_tok(run.total_tokens)}{self.R}',
+        ]
+        if hidden_agents > 0:
+            parts.append(f'{self.LABEL}+{hidden_agents} hidden{self.R}')
+        line = f'{c_sum}{GLYPH_WF_SUMMARY}{self.R}  {sep.join(parts)}'
+        if _visible_width(line) > content_width:
+            line = _middle_ellipsis(line, content_width)
+        return line
 
     def task_row(self, tasks: TaskList, content_width: int, *, compact: bool = False) -> list[str]:
         step    = rainbow_step()

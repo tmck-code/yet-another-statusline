@@ -104,6 +104,30 @@ _No longer rendered._ This was cumulative average token throughput for a running
 **Session Share %**:
 This subagent's fraction of the whole session's token spend, computed as `sub_inout / (main_inout + Σ subagent_inout)`. Rendered as a fixed-width `NN.N%` figure (one decimal) in the two-line subagent row's line-1 right cluster, before the `<N>K` token count. A `·` separator precedes the cluster. The figure is colour-mapped by magnitude via the fill gradient so the dominant agent glows hot. Omitted when the session denominator is 0.
 
+### Workflow cohort
+
+Agents spawned by the **Workflow** tool (multi-agent orchestrations) live one directory deeper than ordinary subagents — `subagents/workflows/<runId>/agent-*.jsonl` — and their `meta.json` is just `{"agentType":"workflow-subagent"}` with no label. They are surfaced as their own grouped block, separate from the **Running Subagent** cohort.
+
+**Workflow Run**:
+One Workflow-tool invocation and the agents it spawned, keyed by its `<runId>` (e.g. `wf_d8212a1d-34a`). Detected purely from the filesystem — a run exists the instant any `agent-*.jsonl` appears under `subagents/workflows/<runId>/`, independent of the session-level `workflows/<runId>.json`. Each agent transcript is parsed with the same parser as an ordinary subagent (tokens, activity snippet, `first_timestamp`, `mtime`, `end_ts`), so a workflow agent's **Done state** rule is identical (`stop_reason == "end_turn"`). Sourced by `RunningWorkflows.from_session` in `info/workflows.py`.
+
+**Run Name**:
+The display name of a **Workflow Run**, shown in the run header after `▸` (`GLYPH_WF_HEADER`). Taken from `workflowName` in `workflows/<runId>.json` when that JSON is present and parseable; otherwise it falls back to the `<runId>`. Because the run JSON is written *at completion only*, during a live run the `<runId>` fallback is the **primary** path, not an edge case.
+
+**Phase**:
+A best-effort header hint shown as `[<phase>]` after the **Run Name**, derived from the latest `workflow_phase` entry in the run JSON's `workflowProgress`. Omitted entirely when no phase is known (including every live run before its JSON is written). Never inferred positionally — a wrong phase is worse than none.
+
+**Agent Label**:
+The per-agent identity shown in each workflow agent row (reusing the **Running Subagent** row renderer). Taken from the matching `agentId → label` entry in `workflowProgress`; falls back to the sanitized first non-empty line of the agent transcript's first user message, middle-ellipsised. The `agentId` is the transcript filename stem (`agent-<id>.jsonl` → `<id>`).
+
+**Run Summary**:
+The footer row of a **Workflow Run** block, prefixed with `└` (`GLYPH_WF_SUMMARY`). Format: `<N> agents · <M> done · <tok>`, with `+K hidden` appended when the per-run agent cap elides rows. The `<tok>` total is summed from the per-agent transcript parse — **not** the run JSON's `totalTokens` (a completion-only hint that is not trusted).
+
+**Workflow liveness**:
+A **Workflow Run** stays visible while any of its agents' transcripts were written within `WORKFLOW_LIVENESS_SECONDS` (120 — longer than the subagent cohort's 30/60s windows so a run rides through a between-phase lull), OR while its run JSON reports a non-terminal status. A settled run (terminal status, or all agents Done) retires once its newest transcript falls outside that window. Caps: at most `WORKFLOW_AGENT_CAP` (6) agent rows per run (overflow → `+K hidden` in the **Run Summary**) and `WORKFLOW_RUN_CAP` (2) run blocks concurrently (overflow → a single `+N more workflows` row). At narrow/medium width a run collapses to its header and **Run Summary** only.
+
+_Avoid_: conflating a workflow agent with a **Running Subagent** — they share a row renderer and Done rule but are different cohorts with different liveness windows and grouping.
+
 ### Task tracking
 
 **Task**:
@@ -175,7 +199,7 @@ _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single 
 ### Derived session state
 
 **SessionView**:
-The lazy, pure-read view of all *derived* session state, built once per render from a parsed **SessionInfo** plus **Config** and consumed by the layout builders. Each field — `git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes` (**OpenSpec** changes), `elapsed`, `session_cost`, `session_inout` — is a `@cached_property` that reads its source on first access and caches, so a narrow render pays only for the fields it draws (no git subprocess, transcript scan, or openspec walk it never shows). Lives in `claude/yas/info/__init__.py`, below the render layer in the DAG: it imports the six filesystem readers, `metrics`, and `tokens` (cost compute only) but never `Renderer`. Holds no render geometry (the bar **fill**, the pill percentage, **Anchor**/**Shift**) — those stay render-side — and performs no disk writes.
+The lazy, pure-read view of all *derived* session state, built once per render from a parsed **SessionInfo** plus **Config** and consumed by the layout builders. Each field — `git`, `skills`, `subagents`, `workflows` (**Workflow Run** cohort), `tasks`, `transcript_usage`, `changes` (**OpenSpec** changes), `elapsed`, `session_cost`, `session_inout` — is a `@cached_property` that reads its source on first access and caches, so a narrow render pays only for the fields it draws (no git subprocess, transcript scan, or openspec walk it never shows). Lives in `claude/yas/info/__init__.py`, below the render layer in the DAG: it imports the filesystem readers, `metrics`, and `tokens` (cost compute only) but never `Renderer`. Holds no render geometry (the bar **fill**, the pill percentage, **Anchor**/**Shift**) — those stay render-side — and performs no disk writes.
 _Avoid_: "session model" (that is **SessionInfo**, the raw JSON parse; **SessionView** is the gathered layer above it) and "snapshot" (fields resolve at first access, not at one frozen instant — only `now` is frozen for time math).
 
 **Session In/Out** (`session_inout`):
@@ -226,10 +250,11 @@ The statusline source lives in `claude/yas/` as a layered package with two subpa
 
 | Module | Canonical concept |
 |--------|-------------------|
-| `__init__` | `SessionView` — lazy `@cached_property` gather seam for all derived session state (`git`, `skills`, `subagents`, `tasks`, `transcript_usage`, `changes`, `elapsed`, `session_cost`, `session_inout`); `_fmt_elapsed` pure formatter |
+| `__init__` | `SessionView` — lazy `@cached_property` gather seam for all derived session state (`git`, `skills`, `subagents`, `workflows`, `tasks`, `transcript_usage`, `changes`, `elapsed`, `session_cost`, `session_inout`); `_fmt_elapsed` pure formatter |
 | `git` | `GitInfo` — working-tree branch/dirty state |
 | `skills` | `LoadedSkills` — skill files on disk |
-| `subagents` | `RunningSubagents` — active sub-agent processes |
+| `subagents` | `RunningSubagents` — active sub-agent processes; `parse_transcript` shared transcript parser |
+| `workflows` | `RunningWorkflow`, `RunningWorkflows` — **Workflow Run** cohort (agents under `subagents/workflows/<runId>/`, run-JSON enrichment) |
 | `tasks` | `Task`, `TaskList` — Claude task tracking |
 | `transcript` | `TranscriptUsage` — per-transcript token counts |
 | `openspec` | `OpenSpec` — active OpenSpec change |

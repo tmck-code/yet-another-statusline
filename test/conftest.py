@@ -11,6 +11,7 @@ import yas.config as _sl_config
 import yas.constants as _sl_constants
 import yas.session as _sl_session
 import yas.info.subagents as _sl_subagents
+import yas.info.workflows as _sl_workflows
 import yas.tokens as _sl_tokens
 
 _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
@@ -54,5 +55,6 @@ def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(_sl_constants, 'CLAUDE_DIR', claude_dir)
     monkeypatch.setattr(_sl_session,   'CLAUDE_DIR', claude_dir)
     monkeypatch.setattr(_sl_subagents, 'CLAUDE_DIR', claude_dir)
+    monkeypatch.setattr(_sl_workflows, 'CLAUDE_DIR', claude_dir)
     monkeypatch.setattr(_sl_tokens,    'CLAUDE_DIR', claude_dir)
     return tmp_path
