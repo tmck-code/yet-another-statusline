@@ -10,10 +10,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    # "mypy",
+    "mypy",
     "pytest",
-    # "ruff",
-    # "uv",
+    "ruff",
+    "uv",
 ]
 
 [tool.pytest.ini_options]
