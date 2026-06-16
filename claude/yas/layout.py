@@ -10,6 +10,7 @@ from yas.constants import (
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
     GLYPH_CONFIG_WARN,
+    GLYPH_WF_DIVIDER,
     RESET,
     SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
@@ -96,14 +97,14 @@ def zip_columns(
 
 
 def workflow_divider_col(width: int) -> int:
-    """1-indexed visual column of the two-column workflow divider ``│``.
+    """1-indexed visual column of the two-column workflow divider ``┊``.
 
     ``border_line`` draws the box ``│`` at col 1 and a lead space at col 2, so
     content begins at col 3; within the content the divider sits at index
-    ``half_w + 2`` (a ``  │  `` block after the left half). Shared by
-    ``build_workflow_rows`` (which embeds the bar in every row of the block) and
-    ``build_wide`` (which threads the matching ``┬``/``┴`` onto the separators
-    that bracket the block).
+    ``half_w + 2`` (a ``  │  `` block after the left half). Used by
+    ``build_workflow_rows`` to embed the dashed bar in every row of the block
+    and to colour it from the border gradient at this column. The bar floats
+    free — no ``┬``/``┴`` elbows bracket it.
     """
     half_w = ((width - 4) - 5) // 2
     return 3 + half_w + 2
@@ -115,6 +116,7 @@ def build_workflow_rows(
     r: Renderer,
     *,
     per_agent: bool,
+    fill: float = 1.0,
 ) -> list[RowSpec]:
     """Content RowSpecs for the visible workflow runs (no leading separator).
 
@@ -126,11 +128,12 @@ def build_workflow_rows(
     ``+N more workflows`` content row.
 
     In two-column mode (``per_agent`` and ``width >= TWO_COL_WF_WIDTH``) the
-    column divider ``│`` is embedded in *every* row of the block — header,
+    column divider ``┊`` (a dashed vertical, softer than the solid box ``│``)
+    is embedded in *every* row of the block — header,
     paired/odd agent rows, summary and overflow — so the bar runs unbroken from
-    the header down to the summary. The rows carry no internal separators; the
-    caller (``build_wide``) threads the matching ``┬``/``┴`` onto the separator
-    above the block and the border below it via ``workflow_divider_col``.
+    the header down to the summary. The rows carry no internal separators, and
+    the dashed bar floats free of the frame: ``build_wide`` threads no
+    ``┬``/``┴`` elbow onto the separator above or the border below it.
     """
     last_prompt_ts = read_last_prompt_ts(view.session.session_id)
     runs = view.workflows.visible(time.time(), last_prompt_ts)
@@ -143,8 +146,9 @@ def build_workflow_rows(
     out: list[RowSpec] = []
 
     if two_col:
-        half_w  = (inner - 5) // 2
-        divider = f'  {r.BORDER}│{r.R}  '
+        half_w    = (inner - 5) // 2
+        div_color = r.grad_at(workflow_divider_col(width) - 1, width, fill=fill)
+        divider   = f'  {div_color}{GLYPH_WF_DIVIDER}{RESET}  '
 
         def left_only(text: str) -> str:
             # Left-half content padded to the divider, then the bar; the right
@@ -554,17 +558,16 @@ def build_wide(
     # block, after the subagent cohort and task row. The leading separator
     # closes off any still-pending dividers (tokens vseps, side-by-side divider)
     # so the plain content rows below carry no elbows.
-    wf_rows = build_workflow_rows(view, width, r, per_agent=True)
+    wf_rows = build_workflow_rows(view, width, r, per_agent=True, fill=fill)
     if wf_rows:
-        # Two-column workflow blocks embed a column divider in every row; thread
-        # its ┬ onto the separator above the header and carry the ┴ down to the
-        # border/separator below the summary, so the bar joins the box at both
-        # ends instead of floating with its own internal seams.
-        wf_downs: tuple[int, ...] = (workflow_divider_col(width),) if width >= TWO_COL_WF_WIDTH else ()
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups, downs=wf_downs))
+        # Two-column workflow blocks embed a dashed column divider in every row,
+        # but it floats free of the frame — no ┬/┴ elbows thread it into the
+        # separator above the header or the border below the summary. The dashed
+        # bar reads as an internal hint rather than splitting the box in two.
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups))
         rows.extend(wf_rows)
         pending_ups = ()
-        tail_ups    = wf_downs
+        tail_ups    = ()
 
     if openspec_bars:
         rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups))

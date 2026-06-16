@@ -503,7 +503,7 @@ def _elbow_gaps(lines: list[str]) -> int:
             c += 2 if _is_wide(ch) else 1
         return cols
     g = [grid(ln) for ln in lines]
-    vert = set('│┃┤├┼')
+    vert = set('│┃┤├┼┊')  # ┊ = dashed two-column workflow divider
     join = set('┬┴┳┻')
     gaps = 0
     for i, cols in enumerate(g):
@@ -586,7 +586,7 @@ def test_workflow_two_column_pairing_threshold() -> None:
         return rows[1:-1]
 
     # width 120 (== TWO_COL_WF_WIDTH): the two agents share a single paired
-    # content row. The block carries no internal separators — the divider ``│``
+    # content row. The block carries no internal separators — the divider ``┊``
     # is embedded in every row and the bracketing ┬/┴ are threaded by build_wide.
     rows = agent_rows(120)
     assert all(row.kind == 'content' for row in rows)
@@ -598,17 +598,17 @@ def test_workflow_two_column_pairing_threshold() -> None:
     full    = layout.build_workflow_rows(_view_with(run), 120, _r, per_agent=True)
     for row in full:
         line = strip_ansi(row.content)
-        assert len(line) > div_col - 3 and line[div_col - 3] == '│'
+        assert len(line) > div_col - 3 and line[div_col - 3] == '┊'
 
-    # build_wide threads the matching ┬ onto the separator above the header and
-    # carries the ┴ down to the border below the summary.
+    # The dashed divider floats free: build_wide threads NO ┬/┴ elbow onto the
+    # separator above the header or the border below the summary at div_col.
     spec       = layout.build_wide(_view_with(run), _tick(), 120, _r)
     wide_lines = [strip_ansi(line) for line in layout.render_layout(spec, _r)]
     hdr_idx    = next(i for i, ln in enumerate(wide_lines) if '▸' in ln)
     # div_col is a 1-indexed visual column, so the glyph sits at index div_col-1.
-    assert wide_lines[hdr_idx - 1][div_col - 1] == '┬'   # separator above the title
+    assert wide_lines[hdr_idx - 1][div_col - 1] not in '┬┼'   # plain rule above the title
     last_sum   = max(i for i, ln in enumerate(wide_lines) if '└' in ln and 'agents' in ln)
-    assert wide_lines[last_sum + 1][div_col - 1] == '┴'  # border below the summary
+    assert wide_lines[last_sum + 1][div_col - 1] not in '┴┼'  # plain border below the summary
 
     # width 119: single-column — no row contains both agents (each renders in
     # its own row(s), the existing behaviour).

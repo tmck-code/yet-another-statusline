@@ -650,7 +650,6 @@ class Renderer:
         else:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
-        tok_s   = fmt_tok(sub.total_input)
 
         short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
         model_clr   = self.model_colour(sub.model)
@@ -743,7 +742,8 @@ class Renderer:
 
             return f'{line1}\n{line2}'
 
-        # --- one-line collapse (D6): drops ↑output; marker/type/model/verb kept ---
+        # --- one-line collapse (D6): drops ↑output; marker/type/verb on the
+        # left, model right-anchored into the metric column ---
         # Only show activity status for running agents; done agents freeze state.
         if is_done:
             tool_verb = ''
@@ -754,8 +754,16 @@ class Renderer:
                 '(replying)' if kind == 'text' else ''
             )
 
+        # The model is a fixed-width, right-justified field at the head of the
+        # right cluster so it forms a vertical column with the tokens and
+        # duration (also right-justified) down stacked rows. Reading order:
+        # `{model:>6}  {hourglass} {tok:>5}  {dur:>5}`. Model dims when Done.
+        model_field = short_model.rjust(6)
+        model_n_clr = self.CTX_DIM if is_done else model_clr
+        tok_n       = fmt_tok(sub.total_input).rjust(6)
         right_n = (
-            f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
+            f'{model_n_clr}{model_field}{self.R}'
+            f'  {ctx_clr}{GLYPH_HOURGLASS} {tok_n}{self.R}'
             f'  {self.CTX}{dur_s}{self.R}'
         )
         right_n_w = _visible_width(right_n)
@@ -764,27 +772,26 @@ class Renderer:
             left_n = (
                 f'{self.CTX_DIM}{GLYPH_SUBAGENT_DONE}{self.R}  '
                 f'{self.CTX_DIM}{type_text}{self.R}'
-                f'  {self.CTX_DIM}{short_model}{self.R}'
             )
         else:
             left_n = (
                 f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
                 f'{self.SKILLS}{type_text}{self.R}'
-                f'  {model_clr}{short_model}{self.R}'
                 f'  {self.CTX}{tool_verb}{self.R}'
             )
         left_n_w = _visible_width(left_n)
         # Budget the left segment so the row never overflows the right border:
-        # the bounded right cluster (hourglass + tok + dur) stays intact, and
-        # the marker/type/model/verb run truncates with a middle ellipsis when
-        # it would otherwise push past target_w (reserving a 1-col gap).
+        # the bounded right cluster (model + hourglass + tok + dur) stays
+        # intact, and the marker/type/verb run truncates with a middle ellipsis
+        # when it would otherwise push past target_w (reserving a 1-col gap).
         left_budget = target_w - right_n_w - 1
         if left_n_w > left_budget:
             left_n   = _middle_ellipsis(left_n, max(1, left_budget))
             left_n_w = _visible_width(left_n)
-        # Right-anchor the metric cluster (hourglass + tok + dur) flush to the
-        # closing border so the tokens and elapsed columns line up down stacked
-        # rows; the slack between the left run and the cluster is the gap.
+        # Right-anchor the metric cluster (model + hourglass + tok + dur) flush
+        # to the closing border so the model, tokens and elapsed columns line
+        # up down stacked rows; the slack between the left run and the cluster
+        # is the gap.
         pad_n = max(1, target_w - left_n_w - right_n_w)
         return f'{left_n}{" " * pad_n}{right_n}'
 

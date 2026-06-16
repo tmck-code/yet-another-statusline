@@ -125,6 +125,7 @@ GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
 GLYPH_WF_HEADER    = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE (workflow run header)
 GLYPH_WF_SUMMARY   = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
 GLYPH_WF_CURRENT   = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
+GLYPH_WF_DIVIDER   = '\u250a'  # \u250a U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL (two-column workflow divider)
 
 # Workflow cohort thresholds. A run is kept visible while any agent transcript
 # was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
