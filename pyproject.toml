@@ -1,6 +1,6 @@
 [project]
 name = "yet-another-statusline"
-version = "0.2.17"
+version = "0.2.18"
 description = "Claude Code statusline showing info at a glance: tokens, context, model, subagents, burn rate, skills, plugins, OpenSpec specs, task lists, and more"
 readme = "README.md"
 
@@ -10,10 +10,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "mypy",
+    # "mypy",
     "pytest",
-    "ruff",
-    "uv",
+    # "ruff",
+    # "uv",
 ]
 
 [tool.pytest.ini_options]
