@@ -28,7 +28,7 @@ _Avoid_: "graph" (it is a one-row glyph strip, not a plotted axis), and the old 
 The `show_day_stats` **Config** knob (`YAS_SHOW_DAY_STATS`, `[tokens].show_day_stats`, default on). When off, the tokens row drops every `/day` figure and the day cost, rendering session-only; the three-column structure and the **Token-Rate Sparkline** are unchanged.
 
 **Cache Countdown**:
-The time remaining before this session's prompt cache expires, shown as `<cache-glyph> <m:ss>` (e.g. `3m07s`, `42s`) in its own vsep-delimited section on the path/model row, between the rate-limit helper and the model pill. The anchor is the `timestamp` of the most recent transcript line that touched the prompt cache (`cache_read_input_tokens > 0` or `cache_creation_input_tokens > 0`); `remaining = ttl − (now − anchor)`. The **Cache TTL** is 300 s by default, 3600 s when the anchor line wrote to the 1-hour ephemeral tier (`cache_creation.ephemeral_1h_input_tokens > 0`). Re-derived from the transcript every render against the frozen `now` — no per-session state file. The figure is coloured by `fill_colour(elapsed_pct)` where `elapsed_pct = 100 − round(remaining·100/ttl)`, so it runs green when fresh → red near expiry (the same safe/warn/alert ladder as the rate-limit percentages). The whole section — divider included — is hidden when there has never been a cache event, when `remaining ≤ 0` (expired), or when the row is too narrow to fit it (it sheds first, before the path truncates).
+The time remaining before this session's prompt cache expires, shown as `<cache-glyph> <MM:SS>` (e.g. `03:07`, `00:42`), rolling to `H:MM:SS` at or above 3600 s, in its own vsep-delimited section on the path/model row, between the rate-limit helper and the model pill. The anchor is the `timestamp` of the most recent transcript line that touched the prompt cache (`cache_read_input_tokens > 0` or `cache_creation_input_tokens > 0`); `remaining = ttl − (now − anchor)`. The **Cache TTL** is 300 s by default, 3600 s when the anchor line wrote to the 1-hour ephemeral tier (`cache_creation.ephemeral_1h_input_tokens > 0`). Re-derived from the transcript every render against the frozen `now` — no per-session state file. The figure is coloured by `fill_colour(elapsed_pct)` where `elapsed_pct = 100 − round(remaining·100/ttl)`, so it runs green when fresh → red near expiry (the same safe/warn/alert ladder as the rate-limit percentages). The whole section — divider included — is hidden when there has never been a cache event, when `remaining ≤ 0` (expired), or when the row is too narrow to fit it (it sheds first, before the path truncates).
 _Avoid_: "Cache Read" (that is the `cache_read_input_tokens` token figure in the tokens row — a token count, not a time), and "cache TTL" as the *displayed* term (the **Cache TTL** is the 300/3600 s lifetime constant; the **Cache Countdown** is the live remaining time derived from it).
 
 ### Context window
@@ -46,8 +46,16 @@ _Avoid_: "context full" — the bar fills against the 150K soft limit, so it can
 ### Thinking effort
 
 **Effort Level**:
-The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
+The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Rendered as parenthesised text `(value)` after the model name in the pill (e.g. `Sonnet 4.6 (high)`); omitted entirely when the value is empty. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
 _Avoid_: "thinking level" (overloaded — the *level* names a setting, the *effort* names the resource it spends).
+
+**Model Glyph**:
+The single lead icon in the model pill: `GLYPH_MODEL_LIGHT` (nf-md-lightbulb_on_40, 󱩑, `\U000f1a51`). Replaces the prior two-glyph pair (monitor + brain). In fast-mode the glyph swaps to `GLYPH_BURN_FAST`. One space of left padding follows the pill edge before the glyph.
+_Avoid_: "model icon" or "brain glyph" (both old terms — **Model Glyph** is canonical and always refers to the single lightbulb-on-40 icon).
+
+**Session Timer**:
+The elapsed wall-clock time for the current session, shown in the path/model row as a fixed 8-column right-justified field. Format: `MM:SS` when under one hour (no leading `0:`; e.g. `   13:27`), rolling to `H:MM:SS` or `HH:MM:SS` at or above one hour. The 8-column reservation keeps the surrounding separators stable as the timer ticks.
+_Avoid_: "session elapsed" (that term refers to the `SessionView.elapsed` field; the **Session Timer** is the formatted string rendered in the row).
 
 **Anchor**:
 The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
@@ -166,13 +174,13 @@ _Avoid_: "scroll window" (nothing scrolls — the slice is recomputed each rende
 ### Rate limits
 
 **Five-Hour Limit**:
-The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `<pct>% T-<time-to-reset>`.
+The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `ICON_LIMIT_5H (nf-md-timer_outline, 󰔛) (-H:MM) <pct>%` — reset countdown at the front in `(-H:MM)` form (seconds dropped, leading minus, single-digit hour), usage percentage to one decimal place (e.g. `58.0%`), omitted when there is no reset window. 5-hour and 7-day segments are separated by ` ┆ ` (dotted vertical, U+2506).
 
 **Seven-Day Limit**:
-The weekly quota in `rate_limits.seven_day`. Rendered in the wide layout model row as `| <pct>%` (with optional **Burndown Trend** suffix).
+The weekly quota in `rate_limits.seven_day`. Rendered in the wide layout model row as `ICON_LIMIT_7D (nf-md-calendar_week_begin, 󰨴) <pct>%` with usage percentage to one decimal place (e.g. `49.0%`) and an optional **Burndown Trend** suffix.
 
 **Burndown Trend**:
-A velocity indicator rendered alongside each active rate-limit bucket's `<pct>%`. Computed as `delta = used_percentage - ideal_pct`, where `ideal_pct = (elapsed_minutes / window_minutes) * 100` and `elapsed_minutes` is derived from `resets_at` and the window constant. Formatted as:
+A velocity indicator rendered alongside each active rate-limit bucket's `<pct>%`. Computed as `delta = used_percentage - ideal_pct`, where `ideal_pct = (elapsed_minutes / window_minutes) * 100` and `elapsed_minutes` is derived from `resets_at` and the window constant. Formatted as one decimal place (e.g. `+3.0%`, `-2.0%`):
 - `▲<abs>%` when `delta > +0.5` (over-burn, red ramp: safe → warn → alert at 5%/15%)
 - `▼<abs>%` when `delta < -0.5` (under-burn, green ramp: dim → mid → bright at 5%/15%)
 - `·` when `|delta| ≤ 0.5` (on-pace)
@@ -236,7 +244,7 @@ The statusline source lives in `claude/yas/` as a layered package with two subpa
 
 | Module | Canonical concept |
 |--------|-------------------|
-| `constants` | ANSI colours, glyph/icon escape constants, width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
+| `constants` | ANSI colours, glyph/icon escape constants (`GLYPH_MODEL_LIGHT`, `ICON_LIMIT_5H`, `ICON_LIMIT_7D`, `SEP_RATE`, …), width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
 | `session` | Session data model: `SessionInfo`, `Model`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, … |
 | `config` | `Config` — env/argv/toml resolution; no import-time singleton |
 | `metrics` | (see `yas/render/metrics`) |

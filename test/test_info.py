@@ -172,8 +172,8 @@ def test_elapsed_does_not_trigger_file_stat(monkeypatch):
     with patch('pathlib.Path.stat', side_effect=AssertionError('unexpected Path.stat call')):
         result = view.elapsed
 
-    # Result should be the formatted duration from the payload (807557ms → 0:13:27).
-    assert result == '0:13:27'
+    # Result should be the formatted duration from the payload (807557ms → 13:27).
+    assert result == '13:27'
 
 
 # ---------------------------------------------------------------------------
@@ -493,3 +493,62 @@ def test_cache_countdown_uses_frozen_now():
     # With frozen_now the math is deterministic: 300 - 90 = 210 remaining
     assert remaining   == 210.0
     assert elapsed_pct == 30
+
+
+# ---------------------------------------------------------------------------
+# Task 6.3 — _fmt_elapsed_clock MM:SS and H:MM:SS
+# ---------------------------------------------------------------------------
+
+from yas.info import _fmt_elapsed_clock  # noqa: E402
+
+
+def test_fmt_elapsed_clock_zero_returns_empty() -> None:
+    assert _fmt_elapsed_clock(0) == ''
+
+
+def test_fmt_elapsed_clock_negative_returns_empty() -> None:
+    assert _fmt_elapsed_clock(-1000) == ''
+
+
+def test_fmt_elapsed_clock_sub_hour_drops_hours_digit() -> None:
+    # 13 min 27 s = 807000 ms
+    assert _fmt_elapsed_clock(807_000) == '13:27'
+
+
+def test_fmt_elapsed_clock_sub_hour_leading_zeros() -> None:
+    # 5 min 3 s = 303000 ms
+    assert _fmt_elapsed_clock(303_000) == '05:03'
+
+
+def test_fmt_elapsed_clock_exactly_one_hour() -> None:
+    # 3600 s = 3600000 ms
+    assert _fmt_elapsed_clock(3_600_000) == '1:00:00'
+
+
+def test_fmt_elapsed_clock_over_one_hour() -> None:
+    # 1h 13m 27s = 4407000 ms
+    assert _fmt_elapsed_clock(4_407_000) == '1:13:27'
+
+
+def test_fmt_elapsed_clock_double_digit_hour() -> None:
+    # 10h 0m 0s
+    assert _fmt_elapsed_clock(36_000_000) == '10:00:00'
+
+
+# Task 6.3 — 8-column timer field in elapsed_section
+def test_elapsed_section_fixed_8_col_width() -> None:
+    import yas.renderer as renderer_mod
+    r = renderer_mod.Renderer()
+    _text, w = r.elapsed_section('13:27')
+    assert w == 8
+    _text2, w2 = r.elapsed_section('99:59:59')
+    assert w2 == 8
+
+
+def test_elapsed_section_right_justified() -> None:
+    import yas.renderer as renderer_mod
+    from helper import strip_ansi
+    r = renderer_mod.Renderer()
+    text, _ = r.elapsed_section('05:03')
+    stripped = strip_ansi(text)
+    assert stripped == '   05:03'  # right-justified to 8 cols (3 spaces + 5-char clock)

@@ -43,9 +43,8 @@ from yas.constants import (
     GLYPH_CONTINUATION,
     GLYPH_FOLDER,
     GLYPH_CACHE,
-    GLYPH_HELPER,
     GLYPH_HOURGLASS,
-    GLYPH_MODEL,
+    GLYPH_MODEL_LIGHT,
     GLYPH_PLUGINS,
     GLYPH_RENAMED,
     GLYPH_REPLYING,
@@ -61,9 +60,12 @@ from yas.constants import (
     GLYPH_WF_HEADER,
     GLYPH_WF_SUMMARY,
     ICON_COST,
+    ICON_LIMIT_5H,
+    ICON_LIMIT_7D,
     ICON_TOK_RATE,
     PILL_LEFT,
     PILL_RIGHT,
+    SEP_RATE,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
     TASK_HEADER_RIGHT_GAP_MIN,
@@ -405,11 +407,22 @@ class Renderer:
         return self.safe
 
     def elapsed_section(self, elapsed: str) -> tuple[str, int]:
-        text = f'{self.SESSION}{elapsed}{self.R}'
+        padded = elapsed.rjust(8)
+        text   = f'{self.SESSION}{padded}{self.R}'
         return text, _visible_width(text)
 
     def cache_section(self, remaining: float, elapsed_pct: int) -> tuple[str, int]:
-        dur    = fmt_dur(remaining)
+        total_s = int(remaining)
+        if total_s >= 3600:
+            h   = total_s // 3600
+            rem = total_s % 3600
+            m   = rem // 60
+            sec = rem % 60
+            dur = f'{h}:{m:02d}:{sec:02d}'
+        else:
+            m   = total_s // 60
+            sec = total_s % 60
+            dur = f'{m:02d}:{sec:02d}'
         colour = self.fill_colour(elapsed_pct)
         text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
         return text, _visible_width(text)
@@ -438,7 +451,7 @@ class Renderer:
         pct_clr   = self.fill_colour(float(pct))
         step      = rainbow_step()
         c_helper  = rainbow_at(step, 9)
-        rate_pct  = f'{pct_clr}{pct}%{self.R}'
+        rate_pct  = f'{pct_clr}{float(pct):.1f}%{self.R}'
 
         rate_with_time = None
         try:
@@ -457,7 +470,7 @@ class Renderer:
         def _build(name: str, rate: str) -> tuple[str, int]:
             if pct_bg:
                 cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((GLYPH_MODEL_LIGHT, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 for ch in name:
@@ -470,12 +483,12 @@ class Renderer:
                 return (
                     f'{painted}'
                     f'{self.LABEL}|{self.R}'
-                    f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
+                    f' {c_helper}{BOLD}{ICON_LIMIT_5H}{self.R} {rate}'
                 ), pw
             return (
-                f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+                f'{model_clr}{GLYPH_MODEL_LIGHT}  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
-                f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
+                f' {c_helper}{BOLD}{ICON_LIMIT_5H}{self.R} {rate}'
             ), 0
 
         if rate_with_time:
@@ -492,50 +505,51 @@ class Renderer:
         return _build(model_name[:name_budget] + '…', rate_pct)
 
     def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
-        step      = rainbow_step()
-        c_think   = rainbow_at(step, 0)
-        c_helper  = rainbow_at(step, 9)
-        model_clr = self.model_colour(model_name)
-        pct       = self._model_bg_pct(effort_level)
-        glyph     = GLYPH_BURN_FAST if fast_mode else GLYPH_THINKING
+        step       = rainbow_step()
+        c_helper   = rainbow_at(step, 9)
+        model_clr  = self.model_colour(model_name)
+        pct        = self._model_bg_pct(effort_level)
+        lead_glyph = GLYPH_BURN_FAST if fast_mode else GLYPH_MODEL_LIGHT
 
         if pct:
             anchor, shift = self._model_anchor_pair(model_name)
             cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-            cells.append((GLYPH_MODEL,    anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((' ',            anchor, False, False))
+            cells.append((' ',          anchor, False, False))   # extra left padding
+            cells.append((lead_glyph,  anchor, False, False))
+            cells.append((' ',         anchor, False, False))
+            cells.append((' ',         anchor, False, False))
             for ch in model_name:
                 cells.append((ch, anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((glyph,          anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            for ch in model_thinking:
-                cells.append((ch, anchor, False, True))
+            if model_thinking:
+                cells.append((' ', anchor, False, False))
+                cells.append(('(', anchor, False, False))
+                for ch in model_thinking:
+                    cells.append((ch, anchor, False, True))
+                cells.append((')', anchor, False, False))
             cells.append((' ', anchor, False, False))
             pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
             pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
             right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
         elif model_thinking:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+            right_text = f'{model_clr} {lead_glyph}  {model_name}{self.R} {model_clr}({model_thinking}){RESET}'
         else:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
+            right_text = f'{model_clr} {lead_glyph}  {model_name}{self.R}'
 
         right_w = _visible_width(right_text)
 
-        helper_text = f'{c_helper}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        helper_text = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
-            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            seven_trend = self.burndown_trend(
+            seven_clr     = self.fill_colour(float(seven_day.used_percentage or 0))
+            seven_pct_str = f'{float(seven_day.used_percentage or 0):.1f}'
+            seven_trend   = self.burndown_trend(
                 float(seven_day.used_percentage or 0),
                 seven_day.resets_at,
                 SEVEN_DAY_MINUTES,
                 SEVEN_DAY_WARMUP_MINUTES,
             )
             seven_trend_part = f' {seven_trend}' if seven_trend else ''
-            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}{seven_trend_part}'
+            helper_text += f' {self.LABEL}{SEP_RATE}{self.R} {c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
 
         return helper_text, right_text, right_w
 
@@ -545,7 +559,7 @@ class Renderer:
         anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
         pct       = rate_limits.five_hour.used_percentage or 0
         pct_clr   = self.fill_colour(float(pct))
-        rate_text = f'{pct_clr}{pct}%{self.R}'
+        rate_text = f'{pct_clr}{float(pct):.1f}%{self.R}'
         try:
             if rate_limits.five_hour.resets_at:
                 resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
@@ -569,7 +583,7 @@ class Renderer:
         def _make_right(name: str) -> tuple[str, int]:
             if pct_bg:
                 cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((GLYPH_MODEL_LIGHT, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 for ch in name:
@@ -579,7 +593,7 @@ class Renderer:
                 pill_r  = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
                 painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
                 return painted, _visible_width(painted)
-            text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+            text = f'{model_clr}{GLYPH_MODEL_LIGHT}  {name}{self.R}'
             return text, _visible_width(text)
 
         right_text, right_w = _make_right(model_name)
@@ -1341,21 +1355,26 @@ class Renderer:
         colour = self.gradient.gradient_color(t)
         glyph = GLYPH_BURN_FAST if delta > 0 else GLYPH_BURN_SLOW  # colour modulation carries over/under-burn direction
         sign  = '-' if delta < 0 else '+'
-        return f'{colour}{glyph} {sign}{abs_delta:05.2f}%{self.R}'
+        return f'{colour}{glyph} {sign}{abs_delta:.1f}%{self.R}'
 
     def helper(self, five_hour: RateBucket) -> str:
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
+        pct_str = f'{float(five_hour.used_percentage or 0):.1f}'
         try:
             if not five_hour.resets_at:
                 if not five_hour.used_percentage:
                     return '∞'
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
+                return f'{pct_clr}{pct_str}%{self.R} {self.COMMIT}∞'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
                     return '∞'
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
+                return f'{pct_clr}{pct_str}%{self.R} {self.COMMIT}∞'
+            total_s   = int(delta.total_seconds())
+            h, rem    = divmod(total_s, 3600)
+            m         = rem // 60
+            countdown = f'(-{h}:{m:02d})'
             trend = self.burndown_trend(
                 float(five_hour.used_percentage or 0),
                 five_hour.resets_at,
@@ -1363,6 +1382,6 @@ class Renderer:
                 FIVE_HOUR_WARMUP_MINUTES,
             )
             trend_part = f' {trend}' if trend else ''
-            return f'{pct_clr}{five_hour.used_percentage}%{self.R}{trend_part} {self.COMMIT}T-{delta}'
+            return f'{self.COMMIT}{countdown}{self.R} {pct_clr}{pct_str}%{self.R}{trend_part}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'

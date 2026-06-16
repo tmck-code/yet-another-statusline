@@ -190,7 +190,8 @@ def test_seam_renders_solid_not_heavy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When cache_countdown is None the top border and separator_dim each carry only one elbow."""
+    """When cache_countdown is None the top border and separator_dim carry elbows for
+    path + elapsed + sep_rate (the ┆ between 5h and 7d rate-limit segments) but NOT cache."""
     _silence_dynamic(monkeypatch)
     view = _view()
     view.__dict__['cache_countdown'] = None
@@ -199,8 +200,9 @@ def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> N
     separator_dim = spec.rows[2]
     assert top_border.kind == 'top_border'
     assert separator_dim.kind == 'separator_dim'
-    assert len(top_border.downs) == 2,  f'expected 2 downs (path + elapsed), got {top_border.downs}'
-    assert len(separator_dim.ups) == 2, f'expected 2 ups (path + elapsed), got {separator_dim.ups}'
+    # path + elapsed + sep_rate (┆) = 3; cache is absent so no fourth elbow.
+    assert len(top_border.downs) == 3,  f'expected 3 downs (path + elapsed + sep_rate), got {top_border.downs}'
+    assert len(separator_dim.ups) == 3, f'expected 3 ups (path + elapsed + sep_rate), got {separator_dim.ups}'
 
 
 def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,18 +240,18 @@ def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
     lines_shed = layout.render_layout(spec_shed, _r)
     assert not any(GLYPH_CACHE in ln for ln in lines_shed), \
         f'cache glyph present at width={min_keep - 1} (should be shed)'
-    assert len(spec_shed.rows[0].downs) == 2, \
-        f'expected 2 top_border downs (path + elapsed) at shed width, got {spec_shed.rows[0].downs}'
+    assert len(spec_shed.rows[0].downs) == 3, \
+        f'expected 3 top_border downs (path + elapsed + sep_rate) at shed width, got {spec_shed.rows[0].downs}'
 
-    # 20 cols wider: cache present, three elbows (path + elapsed + cache).
+    # 20 cols wider: cache present, four elbows (path + elapsed + sep_rate + cache).
     view_keep = _view()
     view_keep.__dict__['cache_countdown'] = countdown
     spec_keep  = layout.build_wide(view_keep, _tick(), min_keep + 20, _r)
     lines_keep = layout.render_layout(spec_keep, _r)
     assert any(GLYPH_CACHE in ln for ln in lines_keep), \
         f'cache glyph absent at width={min_keep + 20} (should be kept)'
-    assert len(spec_keep.rows[0].downs) == 3, \
-        f'expected 3 top_border downs (path + elapsed + cache) at keep width, got {spec_keep.rows[0].downs}'
+    assert len(spec_keep.rows[0].downs) == 4, \
+        f'expected 4 top_border downs (path + elapsed + sep_rate + cache) at keep width, got {spec_keep.rows[0].downs}'
 
 
 def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +308,7 @@ def test_cache_countdown_content_row_contains_glyph_and_time(
     assert path_row.kind == 'content'
     visible = strip_ansi(path_row.content)
     assert GLYPH_CACHE in visible
-    assert '3m07s' in visible
+    assert '03:07' in visible
 
 
 def test_cache_countdown_divider_threaded_into_borders(
@@ -333,6 +335,90 @@ def test_cache_countdown_divider_threaded_into_borders(
     # cache_div_col must appear in both tuples (it's the second entry).
     cache_div_col = top_row.downs[-1]
     assert cache_div_col in sep_row.ups
+
+
+def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ┆ separator between 5h and 7d rate-limit segments in the wide path/model
+    row must have matching ┬/┴ elbows in the top border and separator_dim at the
+    same visual column.
+
+    Uses the default example session (seven_day.used_percentage=89) so SEP_RATE is
+    present in helper_text. Uses render_layout to verify glyphs land at the
+    correct column position after border painting.
+    """
+    from helper import strip_ansi
+    from yas.constants import SEP_RATE
+    _silence_dynamic(monkeypatch)
+    # The example session has both 5h and 7d buckets active, so SEP_RATE appears.
+    spec  = layout.build_wide(_view(), _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    content_idx    = top_border_idx + 1
+    sep_dim_idx    = next(
+        i for i, row in enumerate(spec.rows)
+        if row.kind == 'separator_dim' and i > top_border_idx
+    )
+    assert spec.rows[content_idx].kind == 'content', 'expected content row after top_border'
+
+    # Confirm SEP_RATE is actually in the content row.
+    content_plain = strip_ansi(spec.rows[content_idx].content)
+    assert SEP_RATE in content_plain, f'SEP_RATE not found in content row: {content_plain!r}'
+
+    # Locate the 1-indexed visual column of ┆ in the full rendered line.
+    # border_line places content at col 3 (│, space, then content at index 2).
+    full_line = lines[content_idx]
+    sep_0idx  = full_line.index(SEP_RATE)  # 0-indexed in the rendered full line
+    sep_col   = sep_0idx + 1               # 1-indexed visual column
+
+    # The top border must carry a ┬ at sep_col.
+    top_line = lines[top_border_idx]
+    assert top_line[sep_0idx] in ('┬', '┼'), (
+        f'expected ┬ in top border at col {sep_col}, got {top_line[sep_0idx]!r}\n'
+        f'top: {top_line}\ncontent: {full_line}'
+    )
+
+    # The separator_dim must carry a ┴ at sep_col.
+    sep_line = lines[sep_dim_idx]
+    assert sep_line[sep_0idx] in ('┴', '┼'), (
+        f'expected ┴ in separator_dim at col {sep_col}, got {sep_line[sep_0idx]!r}\n'
+        f'sep: {sep_line}\ncontent: {full_line}'
+    )
+
+    # Also verify via the RowSpec that sep_rate_col is in the downs/ups tuples.
+    top_row = spec.rows[top_border_idx]
+    sep_row = spec.rows[sep_dim_idx]
+    assert sep_col in top_row.downs, f'sep_rate_col {sep_col} not in top_border.downs {top_row.downs}'
+    assert sep_col in sep_row.ups,   f'sep_rate_col {sep_col} not in separator_dim.ups {sep_row.ups}'
+
+
+def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the 7-day bucket is absent (used_percentage=0, resets_at=0), SEP_RATE does
+    not appear in the content row and no stray ┬/┴ elbows are added for it."""
+    from helper import strip_ansi
+    from yas.constants import SEP_RATE
+    from yas.session import RateBucket
+    _silence_dynamic(monkeypatch)
+
+    # Build a session with no 7-day bucket active.
+    sess = _session()
+    import dataclasses
+    zero_limits = dataclasses.replace(sess.rate_limits, seven_day=RateBucket(used_percentage=0, resets_at=0))
+    sess = dataclasses.replace(sess, rate_limits=zero_limits)
+
+    view = SessionView(sess, Config())
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    content_idx    = top_border_idx + 1
+    content_plain  = strip_ansi(spec.rows[content_idx].content)
+
+    # SEP_RATE must be absent when 7-day is zero.
+    assert SEP_RATE not in content_plain, f'SEP_RATE found unexpectedly: {content_plain!r}'
+
+    # No elbow gap: every ┬ has a │ below and every ┴ has a │ above.
+    assert _elbow_gaps(lines) == 0, 'stray ┬/┴ elbows with no matching │ when 7-day absent'
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +589,7 @@ def _elbow_gaps(lines: list[str]) -> int:
             c += 2 if _is_wide(ch) else 1
         return cols
     g = [grid(ln) for ln in lines]
-    vert = set('│┃┤├┼┊')  # ┊ = dashed two-column workflow divider
+    vert = set('│┃┤├┼┊┆')  # ┊ = dashed two-column workflow divider; ┆ = SEP_RATE rate-limit separator
     join = set('┬┴┳┻')
     gaps = 0
     for i, cols in enumerate(g):
@@ -617,3 +703,21 @@ def test_workflow_two_column_pairing_threshold() -> None:
                    for row in stacked)
     assert any('agent-0' in row.content for row in stacked)
     assert any('agent-1' in row.content for row in stacked)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.4 — cache_section sub-hour and over-hour format
+# ---------------------------------------------------------------------------
+
+def test_cache_section_sub_hour_format() -> None:
+    from helper import strip_ansi
+    text, _w = _r.cache_section(187.0, 38)
+    stripped = strip_ansi(text)
+    assert '03:07' in stripped
+
+
+def test_cache_section_over_hour_format() -> None:
+    from helper import strip_ansi
+    text, _w = _r.cache_section(3905.0, 38)
+    stripped = strip_ansi(text)
+    assert '1:05:05' in stripped

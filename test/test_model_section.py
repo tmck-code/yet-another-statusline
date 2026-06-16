@@ -290,3 +290,69 @@ class TestNarrowLayoutNoBurndown:
     def test_narrow_no_down_arrow(self) -> None:
         out, _w = self._r.model_section_compact('Sonnet 4.6', self._narrow_rate(), max_width=55)
         assert '▼' not in strip_ansi(out)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.1 — single lightbulb glyph, leading padding, parenthesised effort
+# ---------------------------------------------------------------------------
+
+from yas.constants import GLYPH_MODEL_LIGHT  # noqa: E402 (after class defs)
+
+
+def test_model_right_section_uses_lightbulb_glyph() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    stripped = strip_ansi(right)
+    assert GLYPH_MODEL_LIGHT in stripped
+
+
+def test_model_right_section_pill_no_effort_no_parens() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Opus 4.7 1M', '', RateLimits(), effort_level='high')
+    stripped = strip_ansi(right)
+    assert '(' not in stripped
+    assert ')' not in stripped
+
+
+def test_model_right_section_pill_with_effort_shows_parens() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Opus 4.7 1M', 'medium', RateLimits(), effort_level='high')
+    stripped = strip_ansi(right)
+    assert '(medium)' in stripped
+
+
+def test_model_right_section_fast_mode_swaps_to_burn_glyph() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits(), fast_mode=True)
+    stripped = strip_ansi(right)
+    assert GLYPH_BURN_FAST in stripped
+    assert GLYPH_MODEL_LIGHT not in stripped
+
+
+def test_model_section_compact_uses_lightbulb_glyph() -> None:
+    r = Renderer()
+    out, _ = r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55)
+    stripped = strip_ansi(out)
+    assert GLYPH_MODEL_LIGHT in stripped
+
+
+def test_model_right_section_compact_uses_lightbulb_glyph() -> None:
+    r = Renderer()
+    _rate, right, _w = r.model_right_section_compact('Sonnet 4.6', RateLimits(), max_right_width=40)
+    stripped = strip_ansi(right)
+    assert GLYPH_MODEL_LIGHT in stripped
+
+
+def test_model_right_section_plain_text_no_effort_no_parens() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    stripped = strip_ansi(right)
+    assert GLYPH_MODEL_LIGHT in stripped
+    assert '(' not in stripped
+
+
+def test_model_right_section_plain_text_with_effort_shows_parens() -> None:
+    r = Renderer()
+    _helper, right, _w = r.model_right_section('Sonnet 4.6', 'low', RateLimits())
+    stripped = strip_ansi(right)
+    assert '(low)' in stripped

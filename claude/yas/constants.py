@@ -126,6 +126,10 @@ GLYPH_WF_HEADER    = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANG
 GLYPH_WF_SUMMARY   = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
 GLYPH_WF_CURRENT   = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
 GLYPH_WF_DIVIDER   = '\u250a'  # \u250a U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL (two-column workflow divider)
+ICON_LIMIT_5H      = '\U000f051b'  # nf-md-timer_outline      (5-hour rate-limit icon)
+ICON_LIMIT_7D      = '\U000f0a34'  # nf-md-calendar_week_begin (7-day rate-limit icon)
+GLYPH_MODEL_LIGHT  = '\U000f1a51'  # nf-md-lightbulb_on_40    (single model-pill glyph)
+SEP_RATE           = '\u250A'      # U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL (rate-limit separator)
 
 # Workflow cohort thresholds. A run is kept visible while any agent transcript
 # was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent

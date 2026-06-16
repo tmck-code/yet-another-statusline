@@ -43,9 +43,10 @@ def _fmt_duration_ms(ms: int) -> str:
 
 
 def _fmt_elapsed_clock(ms: int) -> str:
-    """Format a duration in milliseconds as H:MM:SS clock time.
+    """Format a duration in milliseconds as a clock string.
 
-    Returns '' for zero or negative ms; otherwise H:MM:SS (e.g. '0:13:01').
+    Returns '' for zero or negative ms. Under an hour returns MM:SS (e.g.
+    '13:27'); one hour or more returns H:MM:SS or HH:MM:SS (e.g. '1:13:27').
     """
     if ms <= 0:
         return ''
@@ -53,6 +54,8 @@ def _fmt_elapsed_clock(ms: int) -> str:
     h   = s // 3600
     m   = (s % 3600) // 60
     sec = s % 60
+    if h == 0:
+        return f'{m:02d}:{sec:02d}'
     return f'{h}:{m:02d}:{sec:02d}'
 
 

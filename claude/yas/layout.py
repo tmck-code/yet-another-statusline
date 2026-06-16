@@ -12,11 +12,13 @@ from yas.constants import (
     GLYPH_CONFIG_WARN,
     GLYPH_WF_DIVIDER,
     RESET,
+    SEP_RATE,
     SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
     TWO_COL_WF_WIDTH,
     WORKFLOW_AGENT_CAP,
     WORKFLOW_RUN_CAP,
+    _ANSI_RE,
 )
 from yas.info import SessionView
 from yas.info.subagents import read_last_prompt_ts
@@ -439,6 +441,21 @@ def build_wide(
         elapsed_vsep    = ''
 
     helper_anchor = elapsed_div_col if elapsed_div_col is not None else path_div_col
+
+    # Compute absolute column of SEP_RATE (┆) for elbow threading.
+    # helper_text starts at helper_anchor + 2 (one col for │, one for trailing space).
+    sep_rate_col: int | None = None
+    if SEP_RATE in helper_text:
+        _stripped = _ANSI_RE.sub('', helper_text)
+        _sep_idx  = _stripped.find(SEP_RATE)
+        if _sep_idx != -1:
+            _w_before    = _visible_width(_stripped[:_sep_idx])
+            sep_rate_col = helper_anchor + 2 + _w_before
+
+    if sep_rate_col is not None:
+        _sep_clr    = r.grad_at(sep_rate_col - 1, width, fill=fill)
+        helper_text = helper_text.replace(SEP_RATE, f'{_sep_clr}{SEP_RATE}{RESET}', 1)
+
     cache_div_col = helper_anchor + helper_w + vsep_w if cache_section_w else None
     cache_vsep    = r.vsep_block(cache_div_col, width, fill=fill, leader=False) if cache_div_col else ''
 
@@ -456,6 +473,8 @@ def build_wide(
     path_row_cols: list[int] = [path_div_col]
     if elapsed_section_w:
         path_row_cols.append(elapsed_div_col)  # type: ignore[arg-type]
+    if sep_rate_col is not None:
+        path_row_cols.append(sep_rate_col)
     if cache_section_w:
         path_row_cols.append(cache_div_col)    # type: ignore[arg-type]
     path_row_downs = tuple(path_row_cols)
