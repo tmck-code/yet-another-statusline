@@ -1358,7 +1358,7 @@ class Renderer:
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
+            prefix = f'{a}{fmt_tok(total_tokens)}{self.R}{secondary} {a}{BOLD}{pct_soft:.0f}%{self.R} '
             bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
