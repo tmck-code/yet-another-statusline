@@ -270,7 +270,8 @@ def build_narrow(
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
         for sub in visible_subs:
-            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
+            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
+                                       stats_col=100 if width >= 125 else None).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -344,7 +345,8 @@ def build_medium(
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
         for sub in visible_subs:
-            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0).split('\n'):
+            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
+                                       stats_col=100 if width >= 125 else None).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -696,7 +698,8 @@ def build_wide(
         if visible_subs:
             rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
             for sub in visible_subs:
-                for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout).split('\n'):
+                for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
+                                           stats_col=100 if width >= 125 else None).split('\n'):
                     rows.append(RowSpec('content', content=line))
             pending_ups = ()
 

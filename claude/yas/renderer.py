@@ -676,6 +676,7 @@ class Renderer:
         *,
         twoline: bool = False,
         session_inout: int = 0,
+        stats_col: int | None = None,
     ) -> str:
         now     = time.time()
         is_done = sub.end_ts > 0
@@ -731,32 +732,73 @@ class Renderer:
                     seg += f'{ctx_clr}{tok_field}{self.R} {self.LABEL}·{self.R} '
                 return seg + f'{model_clr}{model_str}{self.R}'
 
-            # Pick the richest cluster that fits alongside the front + a 1-col gap.
-            cluster = build_cluster(False, False)  # model-only fallback
-            for show_share, show_tok in ((True, True), (False, True)):
-                cand = build_cluster(show_share, show_tok)
-                if front_w + 1 + _visible_width(cand) <= target_w:
-                    cluster = cand
-                    break
-            cluster_w = _visible_width(cluster)
+            # Decide whether the stats cluster anchors at a fixed content
+            # column (wide layouts) or right-aligns to the content edge. The
+            # anchor only applies when even the model-only fallback fits within
+            # the slack to the right of `stats_col`; otherwise we fall through
+            # to the right-aligned path so very narrow widths stay sane.
+            model_only_w = _visible_width(build_cluster(False, False))
+            anchored     = stats_col is not None and (target_w - stats_col) >= model_only_w
 
-            # Fill the description into the space left over (truncates first).
-            desc_text  = sub.description or ''
-            desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
-            sep_desc   = ''
-            sep_desc_w = 0
-            if desc_text and desc_max > 0:
-                if _visible_width(desc_text) > desc_max:
-                    desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
-                desc_w = _visible_width(desc_text)
-                if is_done:
-                    sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
-                else:
-                    sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
-                sep_desc_w = 3 + desc_w
+            if anchored:
+                assert stats_col is not None  # narrowed by `anchored`
+                avail = target_w - stats_col  # slack to the right of the anchor
+                # Pick the richest cluster that fits within the anchored slack.
+                cluster = build_cluster(False, False)  # model-only fallback
+                for show_share, show_tok in ((True, True), (False, True)):
+                    cand = build_cluster(show_share, show_tok)
+                    if _visible_width(cand) <= avail:
+                        cluster = cand
+                        break
+                cluster_w = _visible_width(cluster)
 
-            pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
-            line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+                # Truncate the description so it stops before the stats column
+                # with at least a 1-col gap. ' · ' separator is 3 cols wide.
+                desc_text  = sub.description or ''
+                desc_max   = stats_col - front_w - 3 - 1
+                sep_desc   = ''
+                sep_desc_w = 0
+                if desc_text and desc_max > 0:
+                    if _visible_width(desc_text) > desc_max:
+                        desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                    desc_w = _visible_width(desc_text)
+                    if is_done:
+                        sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                    else:
+                        sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                    sep_desc_w = 3 + desc_w
+
+                # Anchor the cluster's first `·` at content-offset stats_col.
+                pad1  = max(1, stats_col - front_w - sep_desc_w)
+                line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+                line1 += ' ' * max(0, target_w - _visible_width(line1))
+            else:
+                # Pick the richest cluster that fits alongside the front + a 1-col gap.
+                cluster = build_cluster(False, False)  # model-only fallback
+                for show_share, show_tok in ((True, True), (False, True)):
+                    cand = build_cluster(show_share, show_tok)
+                    if front_w + 1 + _visible_width(cand) <= target_w:
+                        cluster = cand
+                        break
+                cluster_w = _visible_width(cluster)
+
+                # Fill the description into the space left over (truncates first).
+                desc_text  = sub.description or ''
+                desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
+                sep_desc   = ''
+                sep_desc_w = 0
+                if desc_text and desc_max > 0:
+                    if _visible_width(desc_text) > desc_max:
+                        desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                    desc_w = _visible_width(desc_text)
+                    if is_done:
+                        sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                    else:
+                        sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                    sep_desc_w = 3 + desc_w
+
+                pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
+                line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
 
             # --- line 2: activity-only continuation, no right metrics (D6) ---
             # The snippet grows with the spare width line 2 has (no right

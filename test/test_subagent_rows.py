@@ -242,6 +242,68 @@ def test_shed_model_and_duration_always_kept() -> None:
         assert '47s' in plain, f'width={w} dropped duration'
 
 
+# D2. Line-1 stats anchoring (stats_col) -------------------------------------
+
+def _cluster_dot_offset(line1: str) -> int:
+    """Content-offset of the stats cluster's leading `·`.
+
+    The line may carry a leading ` · ` *description* separator; the cluster's
+    own `·` is the last `·`-led group, so we find the rightmost one that begins
+    a `· ` token at/after a high column.
+    """
+    plain = strip_ansi(line1)
+    return plain.rfind('· ', plain.find('%') - 4 if '%' in plain else 0)
+
+
+def test_stats_col_anchors_cluster_dot_at_column() -> None:
+    # At a wide content width the cluster's leading `·` sits at exactly
+    # stats_col, with the description truncated before it.
+    sub = _make_sub(description='x' * 200, total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 156, session_inout=si, stats_col=100)
+    plain = strip_ansi(line1)
+    assert plain[100] == '·'              # cluster dot anchored at stats_col
+    assert _visible_width(line1) == 156   # still fills the content edge
+    assert '…' in plain                   # description truncated before stats
+
+
+def test_stats_col_none_keeps_right_alignment() -> None:
+    # Default (no stats_col) is unchanged: the cluster right-aligns to the edge
+    # so its leading `·` is well past stats_col=100 at this width.
+    sub = _make_sub(description='short', total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 156, session_inout=si)
+    plain = strip_ansi(line1)
+    assert plain[100] != '·'              # not anchored at 100
+    assert _cluster_dot_offset(line1) > 100  # cluster pushed to the right edge
+    assert _visible_width(line1) == 156
+
+
+def test_stats_col_narrow_falls_back_to_right_align() -> None:
+    # When even the model-only cluster cannot fit to the right of stats_col
+    # (model-only is `· <model>` = 8 cols, so content width 105 leaves only 5
+    # cols of slack), the row falls back to right-alignment exactly as if
+    # stats_col were None. This is the defensive guard for narrow rows.
+    sub = _make_sub(description='short', total_input=12345, output=678)
+    si  = (sub.total_input + sub.output) * 2
+    line1_anchor, _ = _two(sub, 105, session_inout=si, stats_col=100)
+    line1_default, _ = _two(sub, 105, session_inout=si)
+    assert strip_ansi(line1_anchor) == strip_ansi(line1_default)
+    assert strip_ansi(line1_anchor)[100] != '·'
+
+
+def test_stats_col_richest_cluster_that_fits_at_anchor() -> None:
+    # Slack to the right of the anchor governs which cluster is chosen. With
+    # generous slack the full share%+tok+model cluster anchors at stats_col.
+    sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6')
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 156, session_inout=si, stats_col=100)
+    plain = strip_ansi(line1)
+    tok   = fmt_tok(sub.total_input)
+    assert plain[100] == '·'
+    assert '%' in plain and tok in plain and 'sonnet' in plain
+
+
 # E. Done vs running treatment -----------------------------------------------
 
 def _make_done_sub(**kw) -> RunningSubagent:
