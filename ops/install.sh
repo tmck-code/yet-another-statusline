@@ -243,7 +243,7 @@ do_wire() {
 
     local _result
     if ! _result=$(jq --arg cmd "$NEW_CMD" \
-        '.statusLine = {"async":true,"command":$cmd,"refreshInterval":1,"type":"command"}' \
+        '.statusLine = {"async":true,"command":$cmd,"refreshInterval":1,"type":"command","padding":1}' \
         "$SETTINGS") || [ -z "$_result" ]; then
         printf "! jq failed — settings.json unchanged\n"; exit 1
     fi
