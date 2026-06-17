@@ -220,14 +220,14 @@ def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
     sess      = _session()
 
     # Measure renderer geometry so threshold is exact rather than hand-coded.
-    helper_text, _, right_w = _r.model_right_section(
+    h5h, h7d, _, right_w = _r.model_right_section(
         sess.model_name,
         sess.model_thinking,
         sess.rate_limits,
         '',
         fast_mode=sess.fast_mode,
     )
-    helper_w        = _visible_width(helper_text)
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
     _, cache_w      = _r.cache_section(*countdown)
     cache_section_w = vsep_w + cache_w
     # Minimum width where the cache section is NOT shed (path budget == 5).
@@ -338,18 +338,17 @@ def test_cache_countdown_divider_threaded_into_borders(
 
 
 def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ┆ separator between 5h and 7d rate-limit segments in the wide path/model
+    """The │ separator between 5h and 7d rate-limit segments in the wide path/model
     row must have matching ┬/┴ elbows in the top border and separator_dim at the
     same visual column.
 
-    Uses the default example session (seven_day.used_percentage=89) so SEP_RATE is
-    present in helper_text. Uses render_layout to verify glyphs land at the
+    Uses the default example session (seven_day.used_percentage=89) so the 7d vsep
+    is present in the content row. Uses render_layout to verify glyphs land at the
     correct column position after border painting.
     """
     from helper import strip_ansi
-    from yas.constants import SEP_RATE
     _silence_dynamic(monkeypatch)
-    # The example session has both 5h and 7d buckets active, so SEP_RATE appears.
+    # The example session has both 5h and 7d buckets active, so the 7d vsep │ appears.
     spec  = layout.build_wide(_view(), _tick(), 160, _r)
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
 
@@ -361,48 +360,50 @@ def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -
     )
     assert spec.rows[content_idx].kind == 'content', 'expected content row after top_border'
 
-    # Confirm SEP_RATE is actually in the content row.
-    content_plain = strip_ansi(spec.rows[content_idx].content)
-    assert SEP_RATE in content_plain, f'SEP_RATE not found in content row: {content_plain!r}'
-
-    # Locate the 1-indexed visual column of ┆ in the full rendered line.
-    # border_line places content at col 3 (│, space, then content at index 2).
-    full_line = lines[content_idx]
-    sep_0idx  = full_line.index(SEP_RATE)  # 0-indexed in the rendered full line
-    sep_col   = sep_0idx + 1               # 1-indexed visual column
-
-    # The top border must carry a ┬ at sep_col.
-    top_line = lines[top_border_idx]
-    assert top_line[sep_0idx] in ('┬', '┼'), (
-        f'expected ┬ in top border at col {sep_col}, got {top_line[sep_0idx]!r}\n'
-        f'top: {top_line}\ncontent: {full_line}'
-    )
-
-    # The separator_dim must carry a ┴ at sep_col.
-    sep_line = lines[sep_dim_idx]
-    assert sep_line[sep_0idx] in ('┴', '┼'), (
-        f'expected ┴ in separator_dim at col {sep_col}, got {sep_line[sep_0idx]!r}\n'
-        f'sep: {sep_line}\ncontent: {full_line}'
-    )
-
-    # Also verify via the RowSpec that sep_rate_col is in the downs/ups tuples.
     top_row = spec.rows[top_border_idx]
     sep_row = spec.rows[sep_dim_idx]
-    assert sep_col in top_row.downs, f'sep_rate_col {sep_col} not in top_border.downs {top_row.downs}'
-    assert sep_col in sep_row.ups,   f'sep_rate_col {sep_col} not in separator_dim.ups {sep_row.ups}'
+
+    # sep_rate_col (7d vsep │) is the last column in downs that sits past the
+    # session-id span (the session-id covers cols 4–39 at width 160, so we find
+    # the rightmost downs col as the one that is visible as ┬ in the top border).
+    full_line = lines[content_idx]
+    top_line  = lines[top_border_idx]
+    sep_line  = lines[sep_dim_idx]
+
+    # Locate the sep_rate_col: rightmost col in top_row.downs that actually has a ┬.
+    sep_rate_col = None
+    for col in top_row.downs:
+        if top_line[col - 1] in ('┬', '┼'):
+            sep_rate_col = col
+    assert sep_rate_col is not None, (
+        f'no ┬ found at any of top_border.downs {top_row.downs}\ntop: {top_line}'
+    )
+
+    # Verify content row has │ at sep_rate_col.
+    assert full_line[sep_rate_col - 1] == '│', (
+        f'expected │ in content at col {sep_rate_col}, got {full_line[sep_rate_col-1]!r}'
+    )
+
+    # Verify separator_dim has ┴ at sep_rate_col.
+    assert sep_line[sep_rate_col - 1] in ('┴', '┼'), (
+        f'expected ┴ in separator_dim at col {sep_rate_col}, got {sep_line[sep_rate_col-1]!r}'
+    )
+
+    # Verify downs and ups are consistent.
+    assert sep_rate_col in top_row.downs, f'sep_rate_col {sep_rate_col} not in top_border.downs {top_row.downs}'
+    assert sep_rate_col in sep_row.ups,   f'sep_rate_col {sep_rate_col} not in separator_dim.ups {sep_row.ups}'
 
 
 def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the 7-day bucket is absent (used_percentage=0, resets_at=0), SEP_RATE does
-    not appear in the content row and no stray ┬/┴ elbows are added for it."""
+    """When the 7-day bucket is absent (used_percentage=0, resets_at=0), the 7d vsep
+    does not appear in the content row and no stray ┬/┴ elbows are added for it."""
     from helper import strip_ansi
-    from yas.constants import SEP_RATE
     from yas.session import RateBucket
+    import dataclasses
     _silence_dynamic(monkeypatch)
 
     # Build a session with no 7-day bucket active.
     sess = _session()
-    import dataclasses
     zero_limits = dataclasses.replace(sess.rate_limits, seven_day=RateBucket(used_percentage=0, resets_at=0))
     sess = dataclasses.replace(sess, rate_limits=zero_limits)
 
@@ -411,11 +412,14 @@ def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
 
     top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
-    content_idx    = top_border_idx + 1
-    content_plain  = strip_ansi(spec.rows[content_idx].content)
+    top_row = spec.rows[top_border_idx]
 
-    # SEP_RATE must be absent when 7-day is zero.
-    assert SEP_RATE not in content_plain, f'SEP_RATE found unexpectedly: {content_plain!r}'
+    # When 7d is absent, sep_rate_col is None so fewer downs than with 7d active.
+    spec_with_7d = layout.build_wide(_view(), _tick(), 160, _r)
+    top_with_7d  = spec_with_7d.rows[next(i for i, r in enumerate(spec_with_7d.rows) if r.kind == 'top_border')]
+    assert len(top_row.downs) < len(top_with_7d.downs), (
+        f'expected fewer downs without 7d ({top_row.downs}) vs with 7d ({top_with_7d.downs})'
+    )
 
     # No elbow gap: every ┬ has a │ below and every ┴ has a │ above.
     assert _elbow_gaps(lines) == 0, 'stray ┬/┴ elbows with no matching │ when 7-day absent'
@@ -807,10 +811,10 @@ def test_clear_timer_degrades_to_clear_only_when_both_dont_fit(
 
     # Measure the geometry so we find the exact shed boundary
     sess       = _session()
-    helper_txt, _, right_w = _r.model_right_section(
+    h5h, h7d, _, right_w = _r.model_right_section(
         sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
     )
-    helper_w = _visible_width(helper_txt)
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
     vsep_w   = 5
     now      = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33
@@ -850,10 +854,10 @@ def test_clear_timer_sheds_entire_cell_on_path_protection(
     _silence_dynamic(monkeypatch)
 
     sess       = _session()
-    helper_txt, _, right_w = _r.model_right_section(
+    h5h, h7d, _, right_w = _r.model_right_section(
         sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
     )
-    helper_w = _visible_width(helper_txt)
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
     vsep_w   = 5
     now      = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33

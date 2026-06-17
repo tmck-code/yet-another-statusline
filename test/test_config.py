@@ -60,6 +60,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.theme == 'claude-dark'
     assert cfg.bg_shift == 'warm'
     assert cfg.show_day_stats is True
+    assert cfg.justify is False
     assert cfg.errors == ()
 
 
@@ -422,3 +423,39 @@ def test_render_clean_config_no_warning(
     out = app.render(info, 50)
     lines = [strip_ansi(ln) for ln in out.split('\n') if ln.strip()]
     assert all(GLYPH_CONFIG_WARN not in ln for ln in lines)
+
+
+# justify knob (task 4.1)
+
+def test_justify_default_is_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.justify is False
+
+
+def test_env_yas_justify_1_enables(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_JUSTIFY': '1'}, config_dir=tmp_path)
+    assert cfg.justify is True
+
+
+def test_env_yas_justify_0_disables(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_JUSTIFY': '0'}, config_dir=tmp_path)
+    assert cfg.justify is False
+
+
+def test_env_yas_justify_invalid_falls_back_to_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_JUSTIFY': 'yes'}, config_dir=tmp_path)
+    assert cfg.justify is False
+
+
+@requires_tomllib
+def test_toml_layout_justify_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\njustify = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.justify is True
+
+
+@requires_tomllib
+def test_env_justify_overrides_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\njustify = true\n')
+    cfg = config.Config.load(env={'YAS_JUSTIFY': '0'}, config_dir=tmp_path)
+    assert cfg.justify is False

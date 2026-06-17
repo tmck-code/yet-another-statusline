@@ -7,18 +7,18 @@ from dataclasses import dataclass, field
 
 from yas.config import Config
 from yas.constants import (
+    _ANSI_RE,
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
     GLYPH_CONFIG_WARN,
+    GLYPH_RENAMED,
     GLYPH_WF_DIVIDER,
     RESET,
-    SEP_RATE,
     SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
     TWO_COL_WF_WIDTH,
     WORKFLOW_AGENT_CAP,
     WORKFLOW_RUN_CAP,
-    _ANSI_RE,
 )
 from yas.info import SessionView, _fmt_elapsed_clock
 from yas.info.subagents import read_last_prompt_ts
@@ -26,6 +26,30 @@ from yas.render.pill import Pill
 from yas.renderer import Renderer
 from yas.render.text import _visible_width
 from yas.tokens import TickRecord
+
+# Characters that can start a dirty-status block in the plain-text path string.
+# The block is always preceded by a single space so we search for ' ' + one of
+# these. Untracked (•), modified (*), deleted (-), and renamed (GLYPH_RENAMED).
+_DIRTY_CHARS = frozenset('•*-' + GLYPH_RENAMED)
+
+# The branch-separator glyph used in path_git / path_git_compact.
+_BRANCH_SEP = '∈'   # U+2208 ELEMENT OF (plain Unicode, not PUA)
+
+
+def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
+    """Return the byte (str index) in *ansi* that corresponds to plain-text
+    position *plain_idx* (0-indexed visible character count, ANSI escapes
+    excluded). Returns ``len(ansi)`` when *plain_idx* >= visible width."""
+    pos = 0   # current byte position in `ansi`
+    vis = 0   # visible characters counted so far
+    while pos < len(ansi) and vis < plain_idx:
+        m = _ANSI_RE.match(ansi, pos)
+        if m:
+            pos = m.end()
+            continue
+        pos += 1
+        vis += 1
+    return pos
 
 
 @dataclass
@@ -365,7 +389,7 @@ def build_wide(
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     session_inout = view.session_inout
 
-    helper_text, right_text, right_w = r.model_right_section(
+    helper_5h, helper_7d, right_text, right_w = r.model_right_section(
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
@@ -398,8 +422,11 @@ def build_wide(
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
 
-    vsep_w   = 5
-    helper_w = _visible_width(helper_text)
+    vsep_w     = 5
+    helper_5h_w = _visible_width(helper_5h)
+    has_7d      = bool(helper_7d)
+    helper_7d_w = _visible_width(helper_7d) if has_7d else 0
+    helper_w    = helper_5h_w + (4 + helper_7d_w if has_7d else 0)
 
     # Cache countdown section: glyph + time, vsep-delimited, sheds before path truncates.
     cache_cd = view.cache_countdown
@@ -439,6 +466,84 @@ def build_wide(
     line_path = r.fit_path(session.short_pwd, git, target_w, compact_only=False)
     path_w   = _visible_width(line_path)
 
+    # Justify: distribute horizontal slack evenly across active top-row sections
+    # (path, [elapsed], 5h, [7d], [cache], last-slot). Gate on cfg.justify and
+    # total_slack > 0; fall through silently when total_slack == 0 (D3).
+    total_slack = target_w - path_w
+    path_extra = elapsed_extra = h5_left = h5_right = h7_left = h7_right = cache_extra = last_extra = 0
+    if view.cfg.justify and total_slack > 0:
+        _has_elapsed = elapsed_section_w > 0
+        _has_cache   = cache_section_w > 0
+        _N           = 3 + (1 if _has_elapsed else 0) + (1 if has_7d else 0) + (1 if _has_cache else 0)
+        _extra_per   = total_slack // _N
+        _remainder   = total_slack % _N
+        _extras      = [_extra_per + (1 if i < _remainder else 0) for i in range(_N)]
+        _idx         = 0
+        path_extra   = _extras[_idx]
+        _idx += 1
+        if _has_elapsed:
+            elapsed_extra = _extras[_idx]
+            _idx += 1
+        h5_extra = _extras[_idx]
+        _idx += 1
+        h5_left  = h5_extra // 2
+        h5_right = h5_extra - h5_left
+        if has_7d:
+            h7_extra = _extras[_idx]
+            _idx += 1
+            # RHS has 2 more built-in spaces than LHS (sep_rate trailing=1 vs
+            # explicit-space+cache_vsep-lead=3), so bias the split left by 1.
+            h7_left  = (h7_extra + 2) // 2
+            h7_right = h7_extra - h7_left
+        if _has_cache:
+            cache_extra = _extras[_idx]
+            _idx += 1
+        last_extra = _extras[_idx]
+        if path_extra:
+            # Distribute path_extra around the git block when one is present:
+            # half before the ∈ separator, half after the branch/commit and
+            # before the dirty-status indicator (or at the end when absent).
+            # Fall back to simple append when there is no git block.
+            _plain = _ANSI_RE.sub('', line_path)
+            _sep_i = _plain.find(_BRANCH_SEP)
+            if _sep_i != -1:
+                # Locate the dirty block: ' ' + a dirty char after the sep.
+                _dirty_i = -1
+                for _ci in range(_sep_i + 1, len(_plain) - 1):
+                    if _plain[_ci] == ' ' and _plain[_ci + 1] in _DIRTY_CHARS:
+                        _dirty_i = _ci
+                        break
+                # Split: half before ∈, half before dirty (or at end).
+                _p_left  = path_extra // 2
+                _p_right = path_extra - _p_left
+                # Byte offsets in the ANSI string for the two insertion points.
+                _b_sep   = _ansi_byte_offset(line_path, _sep_i)
+                if _dirty_i != -1:
+                    # Offset of dirty section shifts by _p_left spaces we inserted.
+                    _b_dirt = _ansi_byte_offset(line_path, _dirty_i)
+                    line_path = (
+                        line_path[:_b_sep]
+                        + ' ' * _p_left
+                        + line_path[_b_sep:_b_dirt]
+                        + ' ' * _p_right
+                        + line_path[_b_dirt:]
+                    )
+                else:
+                    line_path = (
+                        line_path[:_b_sep]
+                        + ' ' * _p_left
+                        + line_path[_b_sep:]
+                        + ' ' * _p_right
+                    )
+            else:
+                line_path = f'{line_path}{" " * path_extra}'
+            path_w += path_extra
+        if elapsed_extra:
+            _e_left           = elapsed_extra // 2
+            _e_right          = elapsed_extra - _e_left
+            elapsed_content   = f'{" " * _e_left}{elapsed_content}{" " * _e_right}'
+            elapsed_section_w += elapsed_extra
+
     pill: Pill | None = None
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
@@ -455,19 +560,27 @@ def build_wide(
 
     helper_anchor = elapsed_div_col if elapsed_div_col is not None else path_div_col
 
-    # Compute absolute column of SEP_RATE (┆) for elbow threading.
-    # helper_text starts at helper_anchor + 2 (one col for │, one for trailing space).
+    # Build the helper section from the 5h and (optional) 7d sub-sections.
+    # When 7d is active, join them with a proper vsep │ that receives ┬/┴ elbows.
+    # helper content starts at absolute col helper_anchor + 2 (one col for trailing
+    # space of the preceding vsep block; then content at +2 after that │ col).
+    padded_5h = f'{" " * h5_left}{helper_5h}{" " * h5_right}' if (h5_left or h5_right) else helper_5h
     sep_rate_col: int | None = None
-    if SEP_RATE in helper_text:
-        _stripped = _ANSI_RE.sub('', helper_text)
-        _sep_idx  = _stripped.find(SEP_RATE)
-        if _sep_idx != -1:
-            _w_before    = _visible_width(_stripped[:_sep_idx])
-            sep_rate_col = helper_anchor + 2 + _w_before
+    sep_rate_vsep = ''
+    if has_7d:
+        sep_rate_col  = helper_anchor + 2 + _visible_width(padded_5h) + 2
+        sep_rate_vsep = r.vsep_block(sep_rate_col, width, fill=fill, leader=True)
+    padded_7d = f'{" " * h7_left}{helper_7d}{" " * h7_right}' if (h7_left or h7_right) else helper_7d
+    helper_text = f'{padded_5h}{sep_rate_vsep}{padded_7d}'
+    helper_w    = _visible_width(helper_text)
 
-    if sep_rate_col is not None:
-        _sep_clr    = r.grad_at(sep_rate_col - 1, width, fill=fill)
-        helper_text = helper_text.replace(SEP_RATE, f'{_sep_clr}{SEP_RATE}{RESET}', 1)
+    if cache_extra:
+        # last_extra (= pad) lands entirely on RHS; cache vsep trailing gives 2 LHS
+        # built-in spaces. Shift split so visible LHS ≈ visible RHS.
+        _c_left         = min(cache_extra, max(0, (cache_extra + last_extra - 2) // 2))
+        _c_right        = cache_extra - _c_left
+        cache_content   = f'{" " * _c_left}{cache_content}{" " * _c_right}'
+        cache_section_w += cache_extra
 
     cache_div_col = helper_anchor + helper_w + vsep_w if cache_section_w else None
     cache_vsep    = r.vsep_block(cache_div_col, width, fill=fill, leader=False) if cache_div_col else ''
@@ -496,7 +609,7 @@ def build_wide(
     if pill_pct:
         rows += [
             RowSpec('top_border', downs=path_row_downs, pill=pill),
-            RowSpec('content', content=middle, right_pill=right_text),
+            RowSpec('content', content=f'{middle}{" " * last_extra}', right_pill=right_text),
         ]
     else:
         pad = max(1, (width - 3) - (path_w + vsep_w + elapsed_section_w + helper_w + cache_section_w + (1 if cache_section_w else 0) + right_w))

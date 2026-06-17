@@ -14,6 +14,7 @@ DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
+DEFAULT_JUSTIFY        = False
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 # Box width at/above which the wide layout's workflow cohort pairs agents into

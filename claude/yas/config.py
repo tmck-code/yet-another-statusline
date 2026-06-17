@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from yas.constants import (
     CLAUDE_DIR,
+    DEFAULT_JUSTIFY,
     DEFAULT_MAX_WIDTH,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
@@ -205,6 +206,7 @@ def _parse_models(raw: object, errors: list[str], debug: list[str]) -> list[tupl
 class Config:
     max_width: int = DEFAULT_MAX_WIDTH
     full_width: bool = False
+    justify: bool = DEFAULT_JUSTIFY
     soft_limit: int = DEFAULT_SOFT_LIMIT
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
@@ -279,12 +281,17 @@ class Config:
             'show_day_stats',
             _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
             _parse_show_day_stats, DEFAULT_SHOW_DAY_STATS, errors, debug)
+        justify = _resolve(
+            'justify',
+            _env_sources(env, 'YAS_JUSTIFY') + toml_src(layout, 'justify'),
+            _parse_bool, DEFAULT_JUSTIFY, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
         return cls(
             max_width=max_width,
             full_width=full_width,
+            justify=justify,
             soft_limit=soft_limit,
             token_window=token_window,
             theme=theme,

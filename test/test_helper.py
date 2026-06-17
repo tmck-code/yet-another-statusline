@@ -185,27 +185,27 @@ def test_helper_reset_in_future(monkeypatch: pytest.MonkeyPatch) -> None:
 # Task 6.2 — 5h/7d icons, countdown placement, separator, 1dp
 # ---------------------------------------------------------------------------
 
-from yas.constants import ICON_LIMIT_5H, ICON_LIMIT_7D, SEP_RATE  # noqa: E402
+from yas.constants import ICON_LIMIT_5H, ICON_LIMIT_7D  # noqa: E402
 
 
 def test_model_right_section_5h_icon() -> None:
     r = Renderer()
-    helper, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
-    assert ICON_LIMIT_5H in helper
+    h5h, _h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    assert ICON_LIMIT_5H in h5h
 
 
 def test_model_right_section_7d_icon_appears_when_used() -> None:
     r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-    helper, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
-    assert ICON_LIMIT_7D in helper
+    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    assert ICON_LIMIT_7D in h7d
 
 
-def test_model_right_section_dotted_separator() -> None:
+def test_model_right_section_7d_empty_when_idle() -> None:
     r = Renderer()
-    rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-    helper, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
-    assert SEP_RATE in helper
+    rate = RateLimits(seven_day=RateBucket(used_percentage=0, resets_at=0))
+    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    assert h7d == ''
 
 
 def test_helper_countdown_at_front(monkeypatch: pytest.MonkeyPatch) -> None:

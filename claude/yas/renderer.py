@@ -66,7 +66,6 @@ from yas.constants import (
     ICON_TOK_RATE,
     PILL_LEFT,
     PILL_RIGHT,
-    SEP_RATE,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
     TASK_HEADER_RIGHT_GAP_MIN,
@@ -524,7 +523,7 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
-    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, str, int]:
         step       = rainbow_step()
         c_helper   = rainbow_at(step, 9)
         model_clr  = self.model_colour(model_name)
@@ -557,7 +556,8 @@ class Renderer:
 
         right_w = _visible_width(right_text)
 
-        helper_text = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        helper_7d = ''
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr     = self.fill_colour(float(seven_day.used_percentage or 0))
@@ -569,9 +569,9 @@ class Renderer:
                 SEVEN_DAY_WARMUP_MINUTES,
             )
             seven_trend_part = f' {seven_trend}' if seven_trend else ''
-            helper_text += f' {self.LABEL}{SEP_RATE}{self.R} {c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
+            helper_7d = f'{c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
 
-        return helper_text, right_text, right_w
+        return helper_5h, helper_7d, right_text, right_w
 
     def model_right_section_compact(self, model_name: str, rate_limits: RateLimits, max_right_width: int, effort_level: str = '') -> tuple[str, str, int]:
         model_clr = self.model_colour(model_name)
