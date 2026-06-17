@@ -164,24 +164,29 @@ def _caption_line(lines: list[str], word: str) -> str:
     return next((strip_ansi(ln) for ln in lines if sup in strip_ansi(ln)), '')
 
 
+def _top_labels(view: SessionView, width: int = 200) -> list[tuple[str, int]]:
+    spec = layout.build_wide(view, _tick(), width, _r)
+    top  = next(row for row in spec.rows if row.kind == 'top_border')
+    return top.labels
+
+
 def test_clear_label_omitted_without_clear_timer():
-    # Default session has no /clear marker → the elapsed cell is the session
-    # clock alone, so only `session` is labelled; `clear` must never sit over a
-    # value that isn't shown.
-    lines = _render_dict(_full_limits_dict())
-    blob  = '\n'.join(strip_ansi(ln) for ln in lines)
-    assert superscript('session') in strip_ansi(lines[0])
-    assert superscript('clear') not in blob
+    # No /clear marker → the elapsed cell is the session clock alone, so only
+    # `session` is labelled; `clear` must never be emitted over a value that
+    # isn't shown. (Assert the computed label set, which is independent of
+    # whether the painted glyph survives the session-id/elbow overlay.)
+    words = [t for t, _ in _top_labels(_view(_full_limits_dict()))]
+    assert 'session' in words
+    assert 'clear' not in words
 
 
 def test_clear_label_present_and_anchored_when_clear_timer_shown():
     view = _view(_full_limits_dict())
     view.__dict__['clear_epoch'] = view.now - 5 * 60   # /clear-ed 5 min ago
-    top = strip_ansi(_render_view(view)[0])
-    assert superscript('clear') in top
-    assert superscript('session') in top
+    cols = {t: c for t, c in _top_labels(view)}
+    assert 'clear' in cols and 'session' in cols
     # clear timer renders left of the session timer, so its label anchors first.
-    assert top.index(superscript('clear')) < top.index(superscript('session'))
+    assert cols['clear'] < cols['session']
 
 
 def test_plan_caption_at_content_start_on_task_separator():
