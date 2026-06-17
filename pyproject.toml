@@ -12,6 +12,7 @@ dependencies = []
 dev = [
     "mypy",
     "pytest",
+    "pytest-xdist",
     "ruff",
     "uv",
 ]
