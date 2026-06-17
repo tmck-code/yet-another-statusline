@@ -43,6 +43,7 @@ from yas.constants import (
     GLYPH_CONTINUATION,
     GLYPH_FOLDER,
     GLYPH_CACHE,
+    GLYPH_CLEAR,
     GLYPH_HOURGLASS,
     GLYPH_MODEL_LIGHT,
     GLYPH_PLUGINS,
@@ -406,7 +407,26 @@ class Renderer:
             return self.warn
         return self.safe
 
-    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
+    def elapsed_section(self, elapsed: str, clear_str: str = '') -> tuple[str, int]:
+        """Compose the elapsed-cell content and its visible width.
+
+        When *clear_str* is non-empty (session has been /clear-ed), the cell
+        shows the clear timer first — ``GLYPH_CLEAR  <accent><clear_str>`` —
+        followed by the grey right-justified session timer when *elapsed* is
+        also non-empty.  Passing ``elapsed=''`` with a non-empty *clear_str*
+        gives the clear-only degradation tier (no session timer).
+
+        When both *clear_str* and *elapsed* follow their defaults (empty), the
+        result is byte-identical to the pre-change single-timer form:
+        ``<grey><elapsed rjust 8>``.
+        """
+        if clear_str:
+            sess_part = (
+                f'  {self.SESSION}{elapsed.rjust(8)}{self.R}'
+                if elapsed else ''
+            )
+            text = f'{GLYPH_CLEAR}  {CLR_CYAN}{clear_str}{RESET}{sess_part}'
+            return text, _visible_width(text)
         padded = elapsed.rjust(8)
         text   = f'{self.SESSION}{padded}{self.R}'
         return text, _visible_width(text)

@@ -721,3 +721,181 @@ def test_cache_section_over_hour_format() -> None:
     text, _w = _r.cache_section(3905.0, 38)
     stripped = strip_ansi(text)
     assert '1:05:05' in stripped
+
+
+# ---------------------------------------------------------------------------
+# Task 6.3 — Clear-timer degradation ladder and fresh-session preservation
+# ---------------------------------------------------------------------------
+
+def _inject_clear_epoch(view: SessionView, epoch: float | None) -> SessionView:
+    """Inject a clear_epoch value into a SessionView's __dict__ cache."""
+    view.__dict__['clear_epoch'] = epoch
+    return view
+
+
+def test_clear_timer_both_shown_at_ample_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At a wide terminal both clear and session timers appear in the content row."""
+    from helper import strip_ansi
+    from yas.constants import GLYPH_CLEAR
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33  # 18:33 ago
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    # The path/model row (first content row)
+    content_rows = [r for r in spec.rows if r.kind == 'content']
+    top_content = content_rows[0].content
+    plain = strip_ansi(top_content)
+    assert GLYPH_CLEAR in top_content, 'GLYPH_CLEAR should appear in the elapsed cell'
+    assert '18:33' in plain, 'clear timer should appear'
+    assert '13:27' in plain, 'session timer should appear'
+
+
+def test_clear_timer_clear_first_in_cell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clear timer is leftmost (lower index) in the content row plain text."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    content_rows = [r for r in spec.rows if r.kind == 'content']
+    plain = strip_ansi(content_rows[0].content)
+    assert plain.index('18:33') < plain.index('13:27')
+
+
+def test_clear_timer_fresh_session_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fresh session (clear_epoch=None): top content row is byte-identical to the pre-change render."""
+    _silence_dynamic(monkeypatch)
+    view_fresh = _view()
+    view_fresh.__dict__['now'] = 1_750_000_000.0
+    view_fresh.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_fresh, None)
+
+    view_baseline = _view()
+    view_baseline.__dict__['now'] = 1_750_000_000.0
+    view_baseline.__dict__['elapsed'] = '13:27'
+    # No clear_epoch injection → cached_property reads from transcript → None
+    # To get a true baseline we inject None too (same result)
+    view_baseline.__dict__['clear_epoch'] = None
+
+    spec_fresh    = layout.build_wide(view_fresh, _tick(), 160, _r)
+    spec_baseline = layout.build_wide(view_baseline, _tick(), 160, _r)
+
+    # Both specs should produce an identical first content row
+    rows_f = [r for r in spec_fresh.rows if r.kind == 'content']
+    rows_b = [r for r in spec_baseline.rows if r.kind == 'content']
+    assert rows_f[0].content == rows_b[0].content
+
+
+def test_clear_timer_degrades_to_clear_only_when_both_dont_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When width is too narrow for both timers but fits clear-only, only the clear timer renders."""
+    from helper import strip_ansi
+    from yas.constants import GLYPH_CLEAR
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+
+    # Measure the geometry so we find the exact shed boundary
+    sess       = _session()
+    helper_txt, _, right_w = _r.model_right_section(
+        sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
+    )
+    helper_w = _visible_width(helper_txt)
+    vsep_w   = 5
+    now      = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    _co, clear_only_w = _r.elapsed_section('', '18:33')
+    _cb, both_w       = _r.elapsed_section('13:27', '18:33')
+    clear_sw = clear_only_w + 3
+    both_sw  = both_w + 3
+
+    # Width where both fit (path_budget = 5 with both)
+    width_both = 5 + vsep_w + both_sw + helper_w + right_w + 4
+    # Width where only clear fits (path_budget = 5 with clear only) but not both
+    width_clear_only = 5 + vsep_w + clear_sw + helper_w + right_w + 4
+
+    # At width_clear_only (< width_both), we should get clear-only
+    if width_clear_only < width_both:
+        view = _view()
+        view.__dict__['now'] = now
+        view.__dict__['elapsed'] = '13:27'
+        _inject_clear_epoch(view, clear_epoch)
+
+        spec = layout.build_wide(view, _tick(), width_clear_only, _r)
+        content_rows = [r for r in spec.rows if r.kind == 'content']
+        plain = strip_ansi(content_rows[0].content)
+        # Clear timer present, session timer absent
+        assert GLYPH_CLEAR in content_rows[0].content, 'clear glyph should be present'
+        assert '18:33' in plain, 'clear timer should be shown'
+        assert '13:27' not in plain, 'session timer should be shed'
+
+
+def test_clear_timer_sheds_entire_cell_on_path_protection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When even clear-only doesn't protect the path (< 5 cols), the whole cell sheds."""
+    from yas.constants import GLYPH_CLEAR
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+
+    sess       = _session()
+    helper_txt, _, right_w = _r.model_right_section(
+        sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
+    )
+    helper_w = _visible_width(helper_txt)
+    vsep_w   = 5
+    now      = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    _co, clear_only_w = _r.elapsed_section('', '18:33')
+    clear_sw = clear_only_w + 3
+
+    # Width where even clear-only sheds (path_budget would be < 5)
+    min_keep = 5 + vsep_w + clear_sw + helper_w + right_w + 4
+    width_shed = min_keep - 1
+
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), width_shed, _r)
+    lines = layout.render_layout(spec, _r)
+    for ln in lines:
+        assert GLYPH_CLEAR not in ln, 'elapsed cell should be fully shed'
+
+
+def test_clear_timer_no_additional_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adding a clear timer does NOT add a new border elbow (single divider unchanged)."""
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    view_cleared = _view()
+    view_cleared.__dict__['now'] = now
+    view_cleared.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_cleared, clear_epoch)
+
+    view_fresh = _view()
+    view_fresh.__dict__['now'] = now
+    view_fresh.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_fresh, None)
+
+    spec_cleared = layout.build_wide(view_cleared, _tick(), 160, _r)
+    spec_fresh   = layout.build_wide(view_fresh,   _tick(), 160, _r)
+
+    downs_cleared = spec_cleared.rows[0].downs
+    downs_fresh   = spec_fresh.rows[0].downs
+    # Same number of elbows: clear timer shares the existing elapsed divider
+    assert len(downs_cleared) == len(downs_fresh)

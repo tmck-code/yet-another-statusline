@@ -20,7 +20,7 @@ from yas.constants import (
     WORKFLOW_RUN_CAP,
     _ANSI_RE,
 )
-from yas.info import SessionView
+from yas.info import SessionView, _fmt_elapsed_clock
 from yas.info.subagents import read_last_prompt_ts
 from yas.render.pill import Pill
 from yas.renderer import Renderer
@@ -413,14 +413,27 @@ def build_wide(
             cache_section_w = _cache_section_w
             cache_content   = _cache_txt
 
-    # Elapsed section: session clock (H:MM:SS), vsep-delimited, sheds before path truncates.
-    # elapsed_section_w = elapsed_content_w + 3 (1-lead vsep: ' │ ' = 3 visible).
-    elapsed_content, _elapsed_cw = r.elapsed_section(elapsed)
+    # Elapsed section: session clock + optional since-/clear timer.
+    # Degradation: both timers → clear-only → shed entirely (path protection outermost).
+    clear_epoch = view.clear_epoch
+    clear_str   = ''
+    if clear_epoch is not None:
+        clear_ms  = max(0.0, view.now - clear_epoch) * 1000
+        clear_str = _fmt_elapsed_clock(int(clear_ms))
+
+    elapsed_content, _elapsed_cw = r.elapsed_section(elapsed, clear_str)
     elapsed_section_w = 0
-    if elapsed:
-        _elapsed_sw = _elapsed_cw + 3
-        if (width - 4) - vsep_w - _elapsed_sw - helper_w - cache_section_w - right_w >= 5:
-            elapsed_section_w = _elapsed_sw
+    if elapsed or clear_str:
+        _sw = _elapsed_cw + 3
+        if (width - 4) - vsep_w - _sw - helper_w - cache_section_w - right_w >= 5:
+            elapsed_section_w = _sw
+        elif clear_str:
+            # Try clear-only (drop session timer)
+            _co, _cw = r.elapsed_section('', clear_str)
+            _sw_c = _cw + 3
+            if (width - 4) - vsep_w - _sw_c - helper_w - cache_section_w - right_w >= 5:
+                elapsed_content, _elapsed_cw = _co, _cw
+                elapsed_section_w = _sw_c
 
     target_w = (width - 4) - vsep_w - elapsed_section_w - helper_w - cache_section_w - right_w
     line_path = r.fit_path(session.short_pwd, git, target_w, compact_only=False)

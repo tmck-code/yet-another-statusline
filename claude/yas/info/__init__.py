@@ -21,6 +21,7 @@ from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
 from yas.tokens import compute_session_cost
 from yas.info.transcript import TranscriptUsage
+from yas.info.clear import read_clear_epoch
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,14 @@ class SessionView:
             return None
         elapsed_pct = max(0, min(100, 100 - round(remaining * 100 / cache_ttl)))
         return (remaining, elapsed_pct)
+
+    @cached_property
+    def clear_epoch(self) -> float | None:
+        """Epoch of the most-recent /clear marker in this transcript, or None.
+
+        Holds no ANSI or render geometry; cached for the view's lifetime.
+        """
+        return read_clear_epoch(self.session.transcript_path)
 
     @cached_property
     def elapsed(self) -> str:

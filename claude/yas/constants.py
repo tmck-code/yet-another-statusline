@@ -122,6 +122,7 @@ GLYPH_HOURGLASS    = ''  # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE          = ''  # nf-fa-pie_chart     (subagent session share)
 GLYPH_CONFIG_WARN  = '⚠'  # U+26A0 WARNING SIGN (config-error row marker)
 GLYPH_CACHE        = '\uf49b'  # nf-oct-cache  (cache countdown)
+GLYPH_CLEAR        = '\U000f0450'  # nf-md-refresh  (since-last-/clear timer)
 GLYPH_WF_HEADER    = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE (workflow run header)
 GLYPH_WF_SUMMARY   = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
 GLYPH_WF_CURRENT   = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
@@ -144,6 +145,10 @@ WORKFLOW_RUN_CAP          = 2
 # the layout builders keep the most recent (latest-started) rows and drop the
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
 SUBAGENT_DISPLAY_CAP      = 6
+
+# Maximum lines to scan from the head of a transcript when searching for a
+# /clear marker. Keeps the lookup O(1) even on large transcripts.
+CLEAR_SCAN_MAX_LINES      = 30
 
 # Workflow run-header phase-trail layout. WF_NAME_MIN is the minimum run-name
 # width preserved before the inline phase trail truncates with `…`; WF_PHASE_GAP

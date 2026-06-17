@@ -57,6 +57,10 @@ _Avoid_: "model icon" or "brain glyph" (both old terms — **Model Glyph** is ca
 The elapsed wall-clock time for the current session, shown in the path/model row as a fixed 8-column right-justified field. Format: `MM:SS` when under one hour (no leading `0:`; e.g. `   13:27`), rolling to `H:MM:SS` or `HH:MM:SS` at or above one hour. The 8-column reservation keeps the surrounding separators stable as the timer ticks.
 _Avoid_: "session elapsed" (that term refers to the `SessionView.elapsed` field; the **Session Timer** is the formatted string rendered in the row).
 
+**Clear Timer**:
+The elapsed wall-clock time since the most recent `/clear` in the current transcript, shown leftmost in the wide elapsed cell when a `/clear` marker is present. Detection is a bounded head-scan (first 30 lines, `CLEAR_SCAN_MAX_LINES`) of the current transcript looking for the `<command-name>/clear</command-name>` user marker; a `/clear` always forks a new transcript so at most one marker exists per file. The clear timer is computed as `now − clear_epoch` (clamped at 0 for clock skew) and formatted with the same `_fmt_elapsed_clock` convention as the **Session Timer**. It is led by `GLYPH_CLEAR` (nf-md-refresh `\U000f0450`) and rendered in an accent colour (`CLR_CYAN`) to distinguish it from the grey **Session Timer** that follows. The two timers share the single existing elapsed-cell vsep/elbow — no additional border divider is introduced. Degrades: both timers → clear-only (session timer shed) → cell shed entirely, under the same path-protection guard as before.
+_Avoid_: "since-clear timer" (verbose) or "clear elapsed" (confusing with **Session Timer**). The **Clear Timer** is the canonical term.
+
 **Anchor**:
 The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
 
