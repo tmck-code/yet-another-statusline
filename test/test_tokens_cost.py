@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 import yas.renderer as renderer
-from yas.constants import ICON_TOK_RATE
+from yas.constants import ICON_COST, ICON_TOK_RATE
 from yas.render.text import _visible_width
 from helper import strip_ansi
 
@@ -13,14 +13,14 @@ Renderer = renderer.Renderer
 BOX_WIDTH = 160
 
 
-def _call(show_day_stats: bool = True, **over: Any) -> Any:
+def _call(show_day_stats: bool = True, justify: bool = False, **over: Any) -> Any:
     r = Renderer()
     kw = dict(
         sess_in=1, sess_cache=0, sess_out=2,
         day_in=3, day_cache=0, day_out=4,
         sess_cost=0.01, day_cost=0.02,
         tok_rate=0, session_id='', box_width=BOX_WIDTH,
-        show_day_stats=show_day_stats,
+        show_day_stats=show_day_stats, justify=justify,
     )
     kw.update(over)
     return r.tokens_cost(**kw)
@@ -207,7 +207,7 @@ def test_tokens_cost_sparkline_omitted_below_10_chars() -> None:
     from yas.constants import ICON_TOK_RATE as _ICON
     from yas.render.text import fmt_tok
     rate_label_w = _visible_width(
-        f'{r.TOK_ICON}{_ICON} {r.TOK}{fmt_tok(0)}{r.R}{r.LABEL} t/m{r.R}'
+        f'{r.TOK_ICON}{_ICON}  {r.TOK}{fmt_tok(0)}{r.R}{r.LABEL} t/m{r.R}'
     )
 
     def leader_region_w(box: int) -> int:
@@ -223,6 +223,81 @@ def test_tokens_cost_sparkline_omitted_below_10_chars() -> None:
     assert leader_region_w(BOX_WIDTH) > rate_label_w
     # The rate label / icon stays present in both regimes.
     assert ICON_TOK_RATE in strip_ansi(_call(box_width=60)[0][0])
+
+
+# Justify breathing room (day stats on). Slack that would all feed the sparkline
+# is first spent as padding *inside* the sections, each capped at 4 spaces.
+
+# Content with realistic magnitudes so the gaps/pads are visible in the strip.
+_JUSTIFY = dict(
+    sess_in=17_900, sess_cache=34_600, sess_out=258,
+    day_in=872_000, day_cache=33_000_000, day_out=306_100,
+    sess_cost=0.39, day_cost=85.48, tok_rate=18_100,
+)
+
+
+def test_tokens_cost_justify_off_unchanged() -> None:
+    # justify defaults to off; passing justify=False explicitly must be
+    # byte-for-byte identical to the default call.
+    a_lines, a_cols, a_mark, a_min = _call(**_JUSTIFY)
+    b_lines, b_cols, b_mark, b_min = _call(justify=False, **_JUSTIFY)
+    assert (a_lines, a_cols, a_mark, a_min) == (b_lines, b_cols, b_mark, b_min)
+
+
+def test_tokens_cost_justify_widens_gaps_and_pads_to_cap() -> None:
+    # At a wide box with plenty of slack, justify fills every slot to the 4-space
+    # cap: the two tokens inter-group gaps become 4, and the cost LHS/RHS and the
+    # t/m leader LHS each get 4 spaces.
+    on,  _c_on,  _m_on,  _s_on  = _call(box_width=160, justify=True,  **_JUSTIFY)
+    off, _c_off, _m_off, _s_off = _call(box_width=160, justify=False, **_JUSTIFY)
+    s_on  = strip_ansi(on[0])
+    s_off = strip_ansi(off[0])
+
+    # Inter-group gaps widen from 1 to the 4-space cap.
+    assert '/872.0K    (34.6K/33.0M)    ↑ 258/306.1K' in s_on
+    assert '/872.0K (34.6K/33.0M) ↑ 258/306.1K' in s_off
+
+    # Cost section gains 4 spaces of LHS padding. The vsep renders as '  │ '
+    # (2-col lead, divider, 1 trailing space), so the LHS cap shows as the 1
+    # vsep-trail space + 4 pad = 5 spaces between the divider and the cost icon.
+    i = s_on.index(ICON_COST)             # ICON_COST starts the cost cell
+    assert s_on[i - 6:i] == '│' + ' ' * 5  # divider + 1 vsep trail + 4-space LHS cap
+    assert '$85.48    ' in s_on           # 4-space RHS cap trails the day cost
+    # t/m leader gains 4 spaces of LHS padding (again behind the 1 vsep-trail space).
+    j = s_on.index(ICON_TOK_RATE)         # ICON_TOK_RATE leads the rate label
+    assert s_on[j - 6:j] == '│' + ' ' * 5  # divider + 1 vsep trail + 4-space leader cap
+
+
+def test_tokens_cost_justify_dividers_match_rendered_bars() -> None:
+    # The padding shifts col1/col2; both must still land exactly on the rendered
+    # │ so the ┬/┴ elbows above/below stay attached.
+    lines, (col1, col2), _mark, _min = _call(box_width=160, justify=True, **_JUSTIFY)
+    stripped = strip_ansi(lines[0])
+    assert stripped[col1 - 3] == '│'
+    assert stripped[col2 - 3] == '│'
+
+
+def test_tokens_cost_justify_min_width_unchanged() -> None:
+    # The optional padding must not inflate min_width: the reported floor is
+    # identical with justify on and off, and at that floor the row fits exactly.
+    for box in range(78, 92):
+        _l_on,  _c_on,  _m_on,  min_on  = _call(box_width=box, justify=True,  **_NARROW)
+        _l_off, _c_off, _m_off, min_off = _call(box_width=box, justify=False, **_NARROW)
+        assert min_on == min_off
+    # At the tight floor the gaps collapse to 1 (no slack), so the justify-on row
+    # equals the justify-off row byte-for-byte.
+    floor = _call(box_width=160, justify=False, **_NARROW)[3]
+    on  = _call(box_width=floor, justify=True,  **_NARROW)
+    off = _call(box_width=floor, justify=False, **_NARROW)
+    assert on == off
+
+
+def test_tokens_cost_justify_off_for_session_only() -> None:
+    # Justify only applies to the show_day_stats branch; with day stats off the
+    # row is byte-for-byte identical regardless of the justify flag.
+    on  = _call(show_day_stats=False, justify=True,  **_JUSTIFY)
+    off = _call(show_day_stats=False, justify=False, **_JUSTIFY)
+    assert on == off
 
 
 def test_tokens_cost_min_width_is_consistent_with_fit() -> None:

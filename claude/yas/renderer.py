@@ -1047,12 +1047,25 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int, int]:
+    # Per-slot caps (in spaces) for the justify breathing room. Each slot fills
+    # from its 1-space minimum toward the cap as slack allows; leftover slack
+    # after every cap is met still feeds the rate/sparkline leader (as before).
+    JUSTIFY_PAD_CAP = 4
+
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True, justify: bool = False) -> tuple[list[str], tuple[int, int], int, int]:
         """One content line: tokens │ cost │ rate-and-sparkline.
 
         With ``show_day_stats`` (default), session and day figures merge per
         field as ``session/day`` with a paired cache parenthetical. When off,
         the row is session-only and keeps the original per-field justification.
+
+        When ``justify`` is on (and day stats are shown), horizontal slack that
+        would otherwise all flow to the sparkline leader is first spent as
+        breathing room *inside* the sections — widening the two inter-group gaps
+        in the tokens column and padding the cost/leader edges, each capped at
+        ``JUSTIFY_PAD_CAP`` spaces. ``min_width`` is unchanged: the optional
+        padding only consumes genuine slack, so at the tight floor the gaps
+        collapse to 1 and the row fits exactly as with ``justify`` off.
         The tokens and cost columns are sized to the *measured* content (floored
         at a realistic-widest budget), so the two ``│`` dividers always land on
         the rendered content's divider column — they never detach from the
@@ -1067,20 +1080,35 @@ class Renderer:
         in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
         out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
 
+        # Inter-group gaps in the tokens column and the cost/leader edge pads.
+        # They start at their minimums (gaps 1 space, edge pads 0) so the
+        # measured widths and ``min_width`` below are the tight floor; ``justify``
+        # widens them from genuine slack only (see the pad block after min_width).
+        gap1 = gap2 = ' '   # ↓in/day | (cache) | ↑out/day inter-group gaps
+        cost_lpad = cost_rpad = ''
+        leader_lpad = ''
+
         if show_day_stats:
             # Merged session/day per field; variable width, no fixed rjust (D2).
             cache = (f'{self.TOK_DIM}({fmt_tok(sess_cache)}{self.R}'
                      f'{self.TOK_DAY_DIM}/{fmt_tok(day_cache)}{self.R}'
                      f'{self.TOK_DIM}){self.R}')
-            tokens_col = (
-                f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
-                f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R} '
-                f'{cache}'
-                f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
-                f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
-            )
-            cost_col = (f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
-                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
+
+            def build_tokens() -> str:
+                return (
+                    f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
+                    f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R}{gap1}'
+                    f'{cache}'
+                    f'{self.LABEL}{gap2}{self.BOLDY}{out_icon}{self.R}'
+                    f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
+                )
+
+            def build_cost() -> str:
+                return (f'{cost_lpad}{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
+                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}{cost_rpad}')
+
+            tokens_col = build_tokens()
+            cost_col   = build_cost()
         else:
             # Session-only: original per-field justification (D2).
             sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -1110,12 +1138,10 @@ class Renderer:
         # back to a compact form rather than overflow the box.
         tokens_w = _visible_width(tokens_col)
         cost_w   = _visible_width(cost_col)
-        TOKENS_BUDGET = tokens_w
-        COST_BUDGET   = cost_w
         # The rate/spark leader can never compress below its bare ``<rate> t/m``
         # label; measure it here so the budget split and min_width are exact (when
         # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
-        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE}  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
         leader_min   = max(label_w + 1, rate_label_w)
 
@@ -1127,6 +1153,50 @@ class Renderer:
         # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
         # width. The builder only emits this row when ``box_width >= min_width``.
         min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
+
+        # Justify breathing room: spend genuine slack as padding *inside* the
+        # sections before it flows to the sparkline. ``free`` is the room beyond
+        # the tight minimum (min-gap content + min leader); it is exactly the
+        # slack that today all lands in the leader. We never touch ``min_width``,
+        # so at the floor ``free`` is 0, the gaps stay at 1, and the row is
+        # byte-for-byte the justify-off layout. Slots fill toward their caps via
+        # an even round-robin; whatever is consumed shrinks the leader by the
+        # same amount, and the remainder still feeds the sparkline.
+        cap = self.JUSTIFY_PAD_CAP
+        if justify and show_day_stats:
+            free = max(0, inner - tokens_w - cost_w - leader_min)
+            # (slot extra above its 1-space/0-space minimum, per-slot cap).
+            #  gap1, gap2 sit at 1 already → extra cap is cap-1; the edge pads
+            #  sit at 0 → extra cap is the full cap.
+            slots = [cap - 1, cap - 1, cap, cap, cap]  # gap1, gap2, cost_l, cost_r, leader_l
+            give  = [0, 0, 0, 0, 0]
+            budget = min(free, sum(slots))
+            while budget > 0 and any(give[i] < slots[i] for i in range(len(slots))):
+                for i in range(len(slots)):
+                    if budget <= 0:
+                        break
+                    if give[i] < slots[i]:
+                        give[i] += 1
+                        budget  -= 1
+            gap1 = ' ' * (1 + give[0])
+            gap2 = ' ' * (1 + give[1])
+            cost_lpad = ' ' * give[2]
+            cost_rpad = ' ' * give[3]
+            leader_lpad = ' ' * give[4]
+            # Rebuild the padded strings and grow the measured widths by the
+            # injected pad so the budget split and col1/col2 follow the new
+            # divider positions exactly (the leader pad is accounted separately
+            # below). min_width above stays on the unpadded floor.
+            tokens_col = build_tokens()
+            cost_col   = build_cost()
+            tokens_w  += give[0] + give[1]
+            cost_w    += give[2] + give[3]
+
+        # Budgets track the (possibly padded) measured widths, so the column
+        # sizing and col1/col2 always land on the rendered │.
+        TOKENS_BUDGET = tokens_w
+        COST_BUDGET   = cost_w
+        leader_lpad_w = len(leader_lpad)
 
         avail = inner - leader_min                 # room left after the leader minimum
         if TOKENS_BUDGET + COST_BUDGET <= avail:
@@ -1155,10 +1225,13 @@ class Renderer:
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
 
-        bar_w = leader_w - rate_label_w
+        # The justify leader pad sits between the vsep_leader │ and the rate
+        # label; it eats from the leader budget so the sparkline shrinks by the
+        # same amount it grew the breathing room.
+        bar_w = leader_w - rate_label_w - leader_lpad_w
 
         if bar_w < 10:
-            leader = rate_label
+            leader = f'{leader_lpad}{rate_label}'
         else:
             if session_id:
                 # 1 second per char (D4): span the most recent bar_w seconds, one
@@ -1170,7 +1243,7 @@ class Renderer:
                 spark = self.sparkline_1row(spark_history, live=True)
             else:
                 spark = ' ' * bar_w
-            leader = f'{rate_label}{spark}'
+            leader = f'{leader_lpad}{rate_label}{spark}'
 
         return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0, min_width
 

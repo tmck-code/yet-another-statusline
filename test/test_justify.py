@@ -89,7 +89,11 @@ def test_justify_slack_zero_matches_unjustified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When fit_path fills the entire target width (slack=0), justify=True output
-    is byte-for-byte identical to justify=False."""
+    is byte-for-byte identical to justify=False for the path/model row.
+
+    The tokens │ cost │ rate row carries its *own* justify slack pool (the row's
+    internal breathing room — see test_tokens_cost), independent of the path
+    row's slack, so it is excluded from this path-row equivalence check."""
     _silence_dynamic(monkeypatch)
     # Patch fit_path to consume all available width so total_slack == 0.
     monkeypatch.setattr(
@@ -99,8 +103,14 @@ def test_justify_slack_zero_matches_unjustified(
     session = _session()
     view_on  = SessionView(session, Config(justify=True))
     view_off = SessionView(session, Config(justify=False))
-    lines_on  = _rendered_lines(view_on,  160)
-    lines_off = _rendered_lines(view_off, 160)
+
+    # The tokens │ cost │ rate row is the final block (its content row plus the
+    # separator above and bottom border below). Its dividers — and therefore the
+    # ┬/┴ elbows on those two border rows — shift with its own justify slack, so
+    # exclude the trailing block and compare the path/model and context rows,
+    # which is where the path-row slack=0 equivalence actually holds.
+    lines_on  = _rendered_lines(view_on,  160)[:-3]
+    lines_off = _rendered_lines(view_off, 160)[:-3]
     assert lines_on == lines_off
 
 

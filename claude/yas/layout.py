@@ -399,6 +399,7 @@ def build_wide(
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
         sess_cost, day_cost, tok_rate,
         session.session_id, width, fill, view.cfg.show_day_stats,
+        view.cfg.justify,
     )
     # The three-segment tokens │ cost │ rate row is fixed-content-width: at the
     # bottom of the wide band (box ~80-84) it cannot hold both columns plus the
