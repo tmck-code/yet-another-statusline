@@ -190,3 +190,25 @@ def test_justify_path_extra_split_around_git_block(
     assert first_pipe != -1
     path_section = raw_on[:first_pipe + 1]
     assert _visible_width(path_section) == first_pipe + 1
+
+
+# Inter-stat breathing room inside the 5h/7d helper sections
+
+def test_justify_widens_helper_inter_stat_gap(
+    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+) -> None:
+    """With justify=True the 5h section's inter-stat separator widens beyond the
+    single space the unjustified render uses (the example session's 5h limit is
+    in its ``pct ∞`` form, so the pct↔∞ separator is the one that grows)."""
+    _silence_dynamic(monkeypatch)
+    width = 160
+
+    def _gap(lines: list[str]) -> int:
+        raw = strip_ansi(lines[1])
+        i = raw.index('61.0%') + len('61.0%')
+        return len(raw[i:]) - len(raw[i:].lstrip(' '))
+
+    gap_off = _gap(_rendered_lines(_view(Config(justify=False)), width))
+    gap_on  = _gap(_rendered_lines(_view(Config(justify=True)),  width))
+    assert gap_off == 1
+    assert 1 < gap_on <= 3

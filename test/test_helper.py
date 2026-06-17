@@ -235,3 +235,66 @@ def test_burndown_trend_one_dp() -> None:
     r = Renderer()
     out = strip_ansi(r.burndown_trend(53.0, int(_NOW + 150 * 60), FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=_NOW))
     assert '+3.0%' in out
+
+
+# ---------------------------------------------------------------------------
+# Inter-stat gap widening (justify breathing room)
+# ---------------------------------------------------------------------------
+
+def test_helper_gap_widens_inter_stat_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timezone
+    fixed_now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return fixed_now.astimezone(tz) if tz else fixed_now
+
+    monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
+    monkeypatch.setattr(renderer.time, 'time', lambda: fixed_now.timestamp())
+    # 1h to reset → 4h into the 5h window → over-burn trend present.
+    future_ts = int(fixed_now.timestamp()) + 3600
+    r = Renderer()
+    bucket = RateBucket(used_percentage=60.0, resets_at=future_ts)
+
+    g1 = strip_ansi(r.helper(bucket, gap=1))
+    g3 = strip_ansi(r.helper(bucket, gap=3))
+    # countdown↔pct separator widens from 1 to 3 spaces.
+    assert '(-1:00) 60.0%' in g1
+    assert '(-1:00)   60.0%' in g3
+    # pct↔trend separator widens too (the trend glyph's own trailing space stays).
+    assert '60.0%   ' in g3
+
+
+def test_helper_gap_widens_infinity_separator() -> None:
+    r = Renderer()
+    out = strip_ansi(r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=3))
+    assert '10.0%   ∞' in out
+
+
+def test_helper_gap_defaults_to_one() -> None:
+    r = Renderer()
+    assert r.helper(RateBucket(used_percentage=10.0, resets_at=0)) == \
+        r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=1)
+
+
+def test_rate_helpers_gap_widens_seven_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timezone
+    fixed_now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return fixed_now.astimezone(tz) if tz else fixed_now
+
+    monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
+    monkeypatch.setattr(renderer.time, 'time', lambda: fixed_now.timestamp())
+    # 7d resets in 1 day → well past warmup → trend present on the 7d section.
+    seven_reset = int(fixed_now.timestamp()) + 86400
+    rate = RateLimits(seven_day=RateBucket(used_percentage=80.0, resets_at=seven_reset))
+    r = Renderer()
+
+    _h5, h7_g1 = r._rate_helpers(rate, gap_7d=1)
+    _h5, h7_g3 = r._rate_helpers(rate, gap_7d=3)
+    assert '80.0% ' in strip_ansi(h7_g1)
+    assert '80.0%   ' in strip_ansi(h7_g3)

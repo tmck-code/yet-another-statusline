@@ -523,9 +523,31 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
+    def _rate_helpers(self, rate_limits: RateLimits, gap_5h: int = 1, gap_7d: int = 1) -> tuple[str, str]:
+        """Build the 5h and (optional) 7d limit sub-sections.
+
+        ``gap_5h`` / ``gap_7d`` set the inter-stat separator width within each
+        section (default 1). The justified top row widens them toward 3 to spend
+        section slack as breathing room rather than only outer padding.
+        """
+        c_helper  = rainbow_at(rainbow_step(), 9)
+        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour, gap_5h)}{self.R}'
+        helper_7d = ''
+        seven_day = rate_limits.seven_day
+        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
+            seven_clr     = self.fill_colour(float(seven_day.used_percentage or 0))
+            seven_pct_str = f'{float(seven_day.used_percentage or 0):.1f}'
+            seven_trend   = self.burndown_trend(
+                float(seven_day.used_percentage or 0),
+                seven_day.resets_at,
+                SEVEN_DAY_MINUTES,
+                SEVEN_DAY_WARMUP_MINUTES,
+            )
+            seven_trend_part = f'{" " * gap_7d}{seven_trend}' if seven_trend else ''
+            helper_7d = f'{c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
+        return helper_5h, helper_7d
+
     def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, str, int]:
-        step       = rainbow_step()
-        c_helper   = rainbow_at(step, 9)
         model_clr  = self.model_colour(model_name)
         pct        = self._model_bg_pct(effort_level)
         lead_glyph = GLYPH_BURN_FAST if fast_mode else GLYPH_MODEL_LIGHT
@@ -556,20 +578,7 @@ class Renderer:
 
         right_w = _visible_width(right_text)
 
-        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
-        helper_7d = ''
-        seven_day = rate_limits.seven_day
-        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
-            seven_clr     = self.fill_colour(float(seven_day.used_percentage or 0))
-            seven_pct_str = f'{float(seven_day.used_percentage or 0):.1f}'
-            seven_trend   = self.burndown_trend(
-                float(seven_day.used_percentage or 0),
-                seven_day.resets_at,
-                SEVEN_DAY_MINUTES,
-                SEVEN_DAY_WARMUP_MINUTES,
-            )
-            seven_trend_part = f' {seven_trend}' if seven_trend else ''
-            helper_7d = f'{c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
+        helper_5h, helper_7d = self._rate_helpers(rate_limits)
 
         return helper_5h, helper_7d, right_text, right_w
 
@@ -1492,20 +1501,24 @@ class Renderer:
         sign  = '-' if delta < 0 else '+'
         return f'{colour}{glyph} {sign}{abs_delta:.1f}%{self.R}'
 
-    def helper(self, five_hour: RateBucket) -> str:
+    def helper(self, five_hour: RateBucket, gap: int = 1) -> str:
+        # ``gap`` is the inter-stat separator width (countdown↔pct, pct↔trend).
+        # It widens to give the justified top row breathing room; the glyph→stat
+        # spacing lives in the caller and is unaffected.
+        sp      = ' ' * gap
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
         pct_str = f'{float(five_hour.used_percentage or 0):.1f}'
         try:
             if not five_hour.resets_at:
                 if not five_hour.used_percentage:
                     return '∞'
-                return f'{pct_clr}{pct_str}%{self.R} {self.COMMIT}∞'
+                return f'{pct_clr}{pct_str}%{self.R}{sp}{self.COMMIT}∞'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
                     return '∞'
-                return f'{pct_clr}{pct_str}%{self.R} {self.COMMIT}∞'
+                return f'{pct_clr}{pct_str}%{self.R}{sp}{self.COMMIT}∞'
             total_s   = int(delta.total_seconds())
             h, rem    = divmod(total_s, 3600)
             m         = rem // 60
@@ -1516,7 +1529,7 @@ class Renderer:
                 FIVE_HOUR_MINUTES,
                 FIVE_HOUR_WARMUP_MINUTES,
             )
-            trend_part = f' {trend}' if trend else ''
-            return f'{self.COMMIT}{countdown}{self.R} {pct_clr}{pct_str}%{self.R}{trend_part}'
+            trend_part = f'{sp}{trend}' if trend else ''
+            return f'{self.COMMIT}{countdown}{self.R}{sp}{pct_clr}{pct_str}%{self.R}{trend_part}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'

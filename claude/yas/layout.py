@@ -487,17 +487,32 @@ def build_wide(
         if _has_elapsed:
             elapsed_extra = _extras[_idx]
             _idx += 1
+        # Spend each helper section's slack first as inter-stat breathing room
+        # (separators widen from 1 toward a 3-char cap, symmetric within the
+        # section), then centre whatever remains as outer padding. The section's
+        # total width is unchanged — inner growth is matched by outer shrink — so
+        # the divider columns below are unaffected. The 5h section has two
+        # separators (countdown↔pct, pct↔trend); 7d has one (pct↔trend).
         h5_extra = _extras[_idx]
         _idx += 1
-        h5_left  = h5_extra // 2
-        h5_right = h5_extra - h5_left
+        gap_5h   = 1 + min(2, h5_extra // 2)   # ≤3; both 5h separators at this width
+        h5_inner = 2 * (gap_5h - 1)
+        h5_outer = h5_extra - h5_inner
+        h5_left  = h5_outer // 2
+        h5_right = h5_outer - h5_left
+        gap_7d   = 1
         if has_7d:
             h7_extra = _extras[_idx]
             _idx += 1
+            gap_7d   = 1 + min(2, h7_extra)    # ≤3; the single 7d separator
+            h7_inner = gap_7d - 1
+            h7_outer = h7_extra - h7_inner
             # RHS has 2 more built-in spaces than LHS (sep_rate trailing=1 vs
             # explicit-space+cache_vsep-lead=3), so bias the split left by 1.
-            h7_left  = (h7_extra + 2) // 2
-            h7_right = h7_extra - h7_left
+            h7_left  = (h7_outer + 2) // 2
+            h7_right = h7_outer - h7_left
+        if gap_5h != 1 or gap_7d != 1:
+            helper_5h, helper_7d = r._rate_helpers(session.rate_limits, gap_5h, gap_7d)
         if _has_cache:
             cache_extra = _extras[_idx]
             _idx += 1
