@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, TypeVar
 from yas.constants import (
     CLAUDE_DIR,
     DEFAULT_JUSTIFY,
+    DEFAULT_LABELS,
     DEFAULT_MAX_WIDTH,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
@@ -207,6 +208,7 @@ class Config:
     max_width: int = DEFAULT_MAX_WIDTH
     full_width: bool = False
     justify: bool = DEFAULT_JUSTIFY
+    labels: bool = DEFAULT_LABELS
     soft_limit: int = DEFAULT_SOFT_LIMIT
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
@@ -285,6 +287,10 @@ class Config:
             'justify',
             _env_sources(env, 'YAS_JUSTIFY') + toml_src(layout, 'justify'),
             _parse_bool, DEFAULT_JUSTIFY, errors, debug)
+        labels = _resolve(
+            'labels',
+            _env_sources(env, 'YAS_LABELS') + toml_src(layout, 'labels'),
+            _parse_bool, DEFAULT_LABELS, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
@@ -292,6 +298,7 @@ class Config:
             max_width=max_width,
             full_width=full_width,
             justify=justify,
+            labels=labels,
             soft_limit=soft_limit,
             token_window=token_window,
             theme=theme,

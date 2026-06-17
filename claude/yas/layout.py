@@ -11,6 +11,7 @@ from yas.constants import (
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
     GLYPH_CONFIG_WARN,
+    GLYPH_HOURGLASS,
     GLYPH_RENAMED,
     GLYPH_WF_DIVIDER,
     RESET,
@@ -24,7 +25,7 @@ from yas.info import SessionView, _fmt_elapsed_clock
 from yas.info.subagents import read_last_prompt_ts
 from yas.render.pill import Pill
 from yas.renderer import Renderer
-from yas.render.text import _visible_width
+from yas.render.text import _visible_width, _token_offsets
 from yas.tokens import TickRecord
 
 # Characters that can start a dirty-status block in the plain-text path string.
@@ -64,6 +65,7 @@ class RowSpec:
     pill: Pill | None = None
     pill_edge: str = 'bottom'
     right_pill: str = ''
+    labels: list[tuple[str, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -624,20 +626,107 @@ def build_wide(
     path_row_downs = tuple(path_row_cols)
     path_row_ups   = path_row_downs
 
+    # Section labels (cfg.labels): hand-tuned superscript captions overlaid onto
+    # the top border above the path/model row. Each (text, start_col) anchor is
+    # derived from the divider/width vars already computed above; the border
+    # primitive truncates/drops them at any elbow, corner, session id, or pill so
+    # a wrong column is cosmetic-only. Empty (and byte-identical to today) when
+    # the knob is off.
+    # Each anchor is measured from the *rendered* content below it (ANSI stripped,
+    # value token offsets), so a label's first glyph sits over the value it names
+    # regardless of that value's width. Labels are appended left-to-right; the
+    # border primitive truncates/drops them at any elbow, corner, session id, or
+    # pill so a wrong column is cosmetic-only.
+    top_labels: list[tuple[str, int]] = []
+    if view.cfg.labels:
+        # `changes`: over the git dirty block. It is always ' ' + a dirty glyph
+        # after the ∈ branch separator; the leading-space requirement keeps a '-'
+        # inside a branch name from matching.
+        _pp = _ANSI_RE.sub('', line_path)
+        _ps = _pp.find(_BRANCH_SEP)
+        if _ps != -1:
+            for _ci in range(_ps + 1, len(_pp) - 1):
+                if _pp[_ci] == ' ' and _pp[_ci + 1] in _DIRTY_CHARS:
+                    top_labels.append(('changes', 3 + _ci + 1))
+                    break
+        # Elapsed cell: measured from the rendered timers. With a clear timer the
+        # cell is [glyph, clear, session] (the clear-only degradation tier drops
+        # the trailing session token); with no clear timer it is just the session
+        # clock. `clear` is emitted ONLY when the clear timer is displayed — never
+        # over a value that isn't there.
+        if elapsed_section_w:
+            _pe   = _ANSI_RE.sub('', elapsed_content)
+            _eo   = _token_offsets(_pe)
+            _ebse = path_div_col + 2
+            if clear_str:
+                if len(_eo) >= 2:
+                    top_labels.append(('clear', _ebse + _eo[1]))
+                if len(_eo) >= 3:
+                    top_labels.append(('session', _ebse + _eo[2]))
+            elif _eo:
+                top_labels.append(('session', _ebse + _eo[0]))
+        # 5h helper cell: `5h` over the glyph, then one label per rendered
+        # sub-value. padded_5h tokens are [glyph, …]: the full countdown form is
+        # [glyph, (-h:mm), used%, burn-glyph, burn%] (distinguished by the
+        # countdown's leading '('); the compact form is [glyph, used%, ∞] and
+        # carries only `used`.
+        _p5     = _ANSI_RE.sub('', padded_5h)
+        _h5     = _token_offsets(_p5)
+        _h5base = helper_anchor + 2
+        if _h5:
+            top_labels.append(('5h', _h5base + _h5[0]))
+            if len(_h5) >= 2 and _p5[_h5[1]] == '(':
+                top_labels.append(('remain', _h5base + _h5[1]))
+                if len(_h5) >= 3:
+                    top_labels.append(('used', _h5base + _h5[2]))
+                if len(_h5) >= 4:
+                    top_labels.append(('burn rate', _h5base + _h5[3]))
+            elif len(_h5) >= 2 and _p5[_h5[1]] != '∞':
+                top_labels.append(('used', _h5base + _h5[1]))
+        # 7d cell, when present: `7d` over the glyph, `used` over the pct, and
+        # `burn rate` over the burn glyph. tokens: [glyph, used%, burn-glyph, burn%].
+        if has_7d and sep_rate_col is not None:
+            _p7     = _ANSI_RE.sub('', padded_7d)
+            _h7     = _token_offsets(_p7)
+            _h7base = sep_rate_col + 2
+            if _h7:
+                top_labels.append(('7d', _h7base + _h7[0]))
+                if len(_h7) >= 2:
+                    top_labels.append(('used', _h7base + _h7[1]))
+                if len(_h7) >= 3:
+                    top_labels.append(('burn rate', _h7base + _h7[2]))
+        # Cache countdown cell begins just after the cache │.
+        if cache_section_w and cache_div_col is not None:
+            top_labels.append(('cache', cache_div_col + 2))
+
     if pill_pct:
         rows += [
-            RowSpec('top_border', downs=path_row_downs, pill=pill),
+            RowSpec('top_border', downs=path_row_downs, pill=pill, labels=top_labels),
             RowSpec('content', content=f'{middle}{" " * last_extra}', right_pill=right_text),
         ]
     else:
         pad = max(1, (width - 3) - (path_w + vsep_w + elapsed_section_w + helper_w + cache_section_w + (1 if cache_section_w else 0) + right_w))
         content_full = f'{middle}{" " * pad}{right_text}'
         rows += [
-            RowSpec('top_border', downs=path_row_downs),
+            RowSpec('top_border', downs=path_row_downs, labels=top_labels),
             RowSpec('content', content=content_full),
         ]
 
-    rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill))
+    # Context separator labels: `tokens` over the absolute count, `limit` over
+    # the (% of window) parenthetical, `until dumb` over the soft-limit %. Only
+    # the full context_line (tokens_fits) renders those three values; the compact
+    # fallback shows a bare % and carries no labels.
+    ctx_labels: list[tuple[str, int]] = []
+    if view.cfg.labels and tokens_fits:
+        _cp = _ANSI_RE.sub('', line_context)
+        _co = _token_offsets(_cp)
+        _hg = next((k for k, o in enumerate(_co) if _cp[o] == GLYPH_HOURGLASS), None)
+        if _hg is not None:
+            for _name, _k in zip(('tokens', 'limit', 'until dumb'),
+                                 range(_hg + 1, _hg + 4)):
+                if _k < len(_co):
+                    ctx_labels.append((_name, 3 + _co[_k]))
+    rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill, labels=ctx_labels))
     rows.append(RowSpec('content', content=line_context))
 
     # Two elbows: one per vsep │ in the single tokens line. The old 60s tick
@@ -646,7 +735,33 @@ def build_wide(
     # where it cannot fit without overflow; then there are no vseps to thread, so
     # the seam carries no `ups`.
     if tokens_fits:
-        rows.append(RowSpec('separator_dim', downs=vsep_cols))
+        # Tokens/cost separator labels: input/cache/output measured over the
+        # three token columns left of the first vsep │ (input at the ↓ icon,
+        # cache at the '(' parenthetical, output at the ↑ icon after the ')'),
+        # cost between the two vseps, and "tokens over time" over the rate
+        # sparkline after the second. The `sess/day` suffix names the
+        # session/day pair shown only when day stats are on.
+        tok_labels: list[tuple[str, int]] = []
+        if view.cfg.labels:
+            _tp      = _ANSI_RE.sub('', line_tokens[0])
+            _cache_i = _tp.find('(')
+            _close_i = _tp.find(')', _cache_i + 1) if _cache_i != -1 else -1
+            _out_i   = -1
+            if _close_i != -1:
+                _j = _close_i + 1
+                while _j < len(_tp) and _tp[_j] == ' ':
+                    _j += 1
+                if _j < len(_tp):
+                    _out_i = _j
+            _suf = ' sess/day' if view.cfg.show_day_stats else ''
+            tok_labels.append((f'input{_suf}', 3))
+            if _cache_i != -1:
+                tok_labels.append((f'cache{_suf}', 3 + _cache_i))
+            if _out_i != -1:
+                tok_labels.append((f'output{_suf}', 3 + _out_i))
+            tok_labels.append((f'cost{_suf}', vsep_cols[0] + 2))
+            tok_labels.append(('tokens over time', vsep_cols[1] + 2))
+        rows.append(RowSpec('separator_dim', downs=vsep_cols, labels=tok_labels))
         for lt in line_tokens:
             rows.append(RowSpec('content', content=lt))
 
@@ -665,7 +780,11 @@ def build_wide(
         return normal
 
     if plugins_line:
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
+        # Single "skills + plugins" caption anchored at content start (col 3).
+        plugins_labels: list[tuple[str, int]] = (
+            [('skills + plugins', 3)] if view.cfg.labels else []
+        )
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=plugins_labels))
         rows.append(RowSpec('content', content=plugins_line))
         pending_ups = ()
 
@@ -697,7 +816,11 @@ def build_wide(
                 )
             div_color = r.grad_at(divider_col - 1, width, fill=fill)
             divider   = f'{div_color}│{RESET}'
-            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, downs=(divider_col,)))
+            # `plan` over the checklist column, `subagents` over the cohort column.
+            sbs_labels: list[tuple[str, int]] = (
+                [('plan', 3), ('subagents', divider_col + 2)] if view.cfg.labels else []
+            )
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, downs=(divider_col,), labels=sbs_labels))
             for line in zip_columns(left_lines, right_lines, left_w, right_w, divider):
                 rows.append(RowSpec('content', content=line))
             pending_ups = ()
@@ -705,13 +828,15 @@ def build_wide(
 
     if not side_by_side:
         if tasks.is_visible():
-            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
+            plan_labels: list[tuple[str, int]] = [('plan', 3)] if view.cfg.labels else []
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=plan_labels))
             for line in r.task_row(tasks, width - 4):
                 rows.append(RowSpec('content', content=line))
             pending_ups = ()
 
         if visible_subs:
-            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
+            sub_labels: list[tuple[str, int]] = [('subagents', 3)] if view.cfg.labels else []
+            rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=sub_labels))
             for sub in visible_subs:
                 for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
                                            stats_col=100 if width >= 125 else None).split('\n'):
@@ -728,13 +853,15 @@ def build_wide(
         # but it floats free of the frame — no ┬/┴ elbows thread it into the
         # separator above the header or the border below the summary. The dashed
         # bar reads as an internal hint rather than splitting the box in two.
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups))
+        wf_labels: list[tuple[str, int]] = [('workflow', 3)] if view.cfg.labels else []
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups + tail_ups, labels=wf_labels))
         rows.extend(wf_rows)
         pending_ups = ()
         tail_ups    = ()
 
     if openspec_bars:
-        rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups))
+        spec_labels: list[tuple[str, int]] = [('specs', 3)] if view.cfg.labels else []
+        rows.append(RowSpec(sep_kind('separator'), ups=pending_ups + tail_ups, labels=spec_labels))
         for bar in openspec_bars:
             rows.append(RowSpec('content', content=bar))
         rows.append(RowSpec('bottom_border'))
@@ -750,17 +877,17 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
     lines: list[str] = []
     for row in spec.rows:
         if row.kind == 'top_border':
-            lines.append(r.border_top(spec.width, spec.session_id, downs=row.downs, fill=spec.fill, pill=row.pill))
+            lines.append(r.border_top(spec.width, spec.session_id, downs=row.downs, fill=spec.fill, pill=row.pill, labels=tuple(row.labels)))
         elif row.kind == 'bottom_border':
             lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill))
         elif row.kind == 'separator':
-            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill))
+            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill, labels=tuple(row.labels)))
         elif row.kind == 'separator_seam':
             # Static->dynamic split: a full-brightness solid rule (vs the dotted-dim
             # separators between dynamic sections). Renders via the solid separator.
-            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill))
+            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill, labels=tuple(row.labels)))
         elif row.kind == 'separator_dim':
-            lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge))
+            lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge, labels=tuple(row.labels)))
         elif row.kind == 'content':
             lines.append(r.border_line(row.content, spec.width, fill=spec.fill, bg_lead=row.bg_lead, bg_trail=row.bg_trail, pill_flush=row.pill_flush, right_pill=row.right_pill))
     return lines

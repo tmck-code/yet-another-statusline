@@ -301,17 +301,17 @@ class Renderer:
         return self.gradient.spark_color(t, dim)
 
     # --- Border delegations (backward compat) ---
-    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
-        return self.border.border_top(width, session_id, downs, fill, pill)
+    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_top(width, session_id, downs, fill, pill, labels)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         return self.border.border_bottom(width, ups, fill)
 
-    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
-        return self.border.border_separator(width, ups, downs, fill)
+    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0, labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_separator(width, ups, downs, fill, labels)
 
-    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
-        return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge)
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom', labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge, labels)
 
     def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
         return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)

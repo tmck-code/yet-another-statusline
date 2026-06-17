@@ -217,3 +217,4 @@ Wire `statusLine.command` in `~/.claude/settings.json` to point at the checkout:
 
 
 This prompts before setting `core.hooksPath`. CI runs the same checks on every push, so the hook is fast local feedback rather than the gate.
+

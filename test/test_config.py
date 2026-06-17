@@ -61,6 +61,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.bg_shift == 'warm'
     assert cfg.show_day_stats is True
     assert cfg.justify is False
+    assert cfg.labels is False
     assert cfg.errors == ()
 
 
@@ -459,3 +460,29 @@ def test_env_justify_overrides_toml(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\njustify = true\n')
     cfg = config.Config.load(env={'YAS_JUSTIFY': '0'}, config_dir=tmp_path)
     assert cfg.justify is False
+
+
+# labels knob (section 1)
+
+def test_labels_default_is_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.labels is False
+
+
+@requires_tomllib
+def test_toml_layout_labels_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nlabels = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.labels is True
+
+
+@requires_tomllib
+def test_env_labels_overrides_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nlabels = true\n')
+    cfg = config.Config.load(env={'YAS_LABELS': '0'}, config_dir=tmp_path)
+    assert cfg.labels is False
+
+
+def test_env_labels_invalid_falls_back_to_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_LABELS': 'maybe'}, config_dir=tmp_path)
+    assert cfg.labels is False

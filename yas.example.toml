@@ -17,6 +17,10 @@
 # [layout]
 # max_width = 140      # int > 0; max box width in columns (ignored when full_width = true)
 # full_width = false   # bool; when true the box fills the terminal and ignores max_width
+# labels = false       # bool; wide layout only — paint small superscript section
+#                      #   labels into the border/separator rows above each value
+#                      #   (clear/session, 5h/remain/used, input/cache/output, …).
+#                      #   env: YAS_LABELS
 
 # [tokens]
 # soft_limit = 150000   # int > 0; tokens; context-fill bar / % threshold. Raise for 1M-context models.
