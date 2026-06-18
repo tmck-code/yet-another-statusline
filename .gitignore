@@ -15,3 +15,9 @@ demo/
 # JetBrains IDEs
 .idea/
 
+
+# JSON import benchmark venv (ops/bench_json_import.py)
+ops/.bench-venv/
+
+# parallel research scratch (threads)
+ops/research/

@@ -52,17 +52,76 @@ fi
 
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-# Python 3.10+ detection ------------------------
+# Python 3.15 provisioning + detection ----------
 # — reused by preflight and do_wire
 
+# Where a plugin-local, uv-managed CPython lives (provisioned by provision_python).
+yas_python_dir() {
+    printf '%s/.python\n' "$1"  # $1 = PLUGIN_ROOT
+}
+
+# provision_python PLUGIN_ROOT
+# Install (idempotently) a private CPython 3.15 into $PLUGIN_ROOT/.python via uv
+# and echo the concrete interpreter binary path. 3.15 is ~6-8 ms faster to start
+# than 3.13; 3.14 is *slower* than 3.13, so we pin 3.15 explicitly here.
+#
+# This keeps the speed win without mutating the user's system Python or PATH:
+# the statusline command points straight at this binary (never `uv run`, whose
+# per-invocation overhead — the statusline is spawned on every prompt — would
+# erase the win).
+#
+# Returns non-zero if uv is absent or the install/resolve fails (caller falls
+# back to find_python).
+provision_python() {
+    local plugin_root="$1"
+    command -v uv > /dev/null 2>&1 || return 1
+
+    local pydir
+    pydir=$(yas_python_dir "$plugin_root")
+
+    if [ "$DRY_RUN" = "1" ]; then
+        printf "  Would provision private CPython 3.15 → %s (via uv)\n" "$pydir" 1>&2
+        # Don't download in dry-run; report a synthetic path so wiring can preview.
+        printf '%s/<cpython-3.15>/bin/python3.15\n' "$pydir"
+        return 0
+    fi
+
+    # Install is idempotent: uv reuses an existing 3.15 in the install dir and,
+    # across plugin reinstalls, hydrates from uv's shared download cache (fast).
+    UV_PYTHON_INSTALL_DIR="$pydir" uv python install 3.15 > /dev/null 2>&1 || return 1
+
+    # Resolve the concrete binary. Primary: ask uv, scoped to our managed dir.
+    local bin
+    bin=$(UV_PYTHON_INSTALL_DIR="$pydir" uv python find 3.15 --managed-python 2>/dev/null)
+    if [ -z "$bin" ] || [ ! -x "$bin" ]; then
+        # Fallback: glob the install dir for the newest 3.15 interpreter.
+        bin=$(ls -d "$pydir"/cpython-3.15*/bin/python3.15 2>/dev/null | sort -Vr | head -1)
+    fi
+    [ -n "$bin" ] && [ -x "$bin" ] || return 1
+    printf '%s\n' "$bin"
+}
+
+# find_python — pick a usable system interpreter (>=3.10), avoiding 3.14.
+# 3.14 starts up *slower* than 3.13, so when several qualify we prefer any
+# non-3.14 (3.13/3.15-class) over a 3.14. Used as the fallback when uv-based
+# provisioning is unavailable.
 find_python() {
-    for candidate in python python3; do
+    local fallback=""
+    for candidate in python python3 python3.15 python3.13 python3.12 python3.11 python3.10; do
         local bin
         bin=$(command -v "$candidate" 2>/dev/null) || continue
         local version
         version=$("$bin" --version 2>&1) || continue
-        echo "$version" | grep -qE "Python 3\.(1[0-9]|[2-9][0-9])" && { echo "$bin"; return 0; }
+        # Require >=3.10.
+        echo "$version" | grep -qE "Python 3\.(1[0-9]|[2-9][0-9])" || continue
+        if echo "$version" | grep -qE "Python 3\.14(\.|$| )"; then
+            # 3.14 is slower — only use it if nothing better turns up.
+            [ -z "$fallback" ] && fallback="$bin"
+            continue
+        fi
+        echo "$bin"; return 0
     done
+    [ -n "$fallback" ] && { echo "$fallback"; return 0; }
     return 1
 }
 
@@ -210,10 +269,17 @@ do_wire() {
         rm -f "$f" && printf "  Removed legacy %s\n" "$(basename "$f")"
     done
 
-    # Python detection
+    # Python selection: prefer a private, plugin-local CPython 3.15 provisioned
+    # via uv (fastest startup, no system mutation). Fall back to a system
+    # interpreter (>=3.10, avoiding 3.14) when uv is unavailable.
     local PYTHON_BIN
-    PYTHON_BIN=$(find_python) || { printf "! Python 3.10+ not found — install Python 3.10+ and re-run\n"; exit 1; }
-    printf "  Python: %s\n" "$PYTHON_BIN"
+    if PYTHON_BIN=$(provision_python "$PLUGIN_ROOT"); then
+        printf "  Python: %s (private uv-managed 3.15)\n" "$PYTHON_BIN"
+    elif PYTHON_BIN=$(find_python); then
+        printf "  Python: %s (system fallback)\n" "$PYTHON_BIN"
+    else
+        printf "! Python 3.10+ not found — install Python 3.10+ (or uv) and re-run\n"; exit 1
+    fi
 
     # Exact-match skip
     local NEW_CMD OLD_CMD
@@ -316,6 +382,38 @@ do_uninstall() {
                 exit 1
             fi
             printf "  Removed statusLine from settings.json\n"
+        fi
+    fi
+
+    # Private uv-managed CPython cleanup (best-effort).
+    # Discover the plugin root the same ways do_wire does, then remove its
+    # .python dir if present.
+    local UN_ROOT=""
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$(yas_python_dir "$CLAUDE_PLUGIN_ROOT")" ]; then
+        UN_ROOT="$CLAUDE_PLUGIN_ROOT"
+    else
+        UN_ROOT=$(jq -r '
+            .plugins
+            | to_entries[]
+            | select(.key | ascii_downcase | contains("yas"))
+            | .value[]
+            | select(.installPath != null)
+            | .installPath
+        ' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
+            | while IFS= read -r d; do
+                [ -d "$(yas_python_dir "$d")" ] && echo "$d"
+              done \
+            | head -1)
+    fi
+    if [ -n "$UN_ROOT" ]; then
+        local PYDIR
+        PYDIR=$(yas_python_dir "$UN_ROOT")
+        if [ -d "$PYDIR" ]; then
+            if [ "$DRY_RUN" = "1" ]; then
+                printf "  Would remove private CPython dir %s\n" "$PYDIR"
+            else
+                rm -rf "$PYDIR" && printf "  Removed private CPython dir %s\n" "$PYDIR"
+            fi
         fi
     fi
 
