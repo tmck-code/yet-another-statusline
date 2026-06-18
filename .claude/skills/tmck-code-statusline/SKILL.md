@@ -80,7 +80,11 @@ Run all four before editing:
    " claude/yas/*.py claude/yas/info/*.py claude/yas/render/*.py
    ```
    Any hit on a line you plan to Edit triggers the **PUA refactor rule** below.
-3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count.
+3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count. **On Android (Termux)** `uv run`/`make test` is unavailable — activate the prebuilt venv and run pytest directly:
+   ```bash
+   . ~/.uvenv/bin/activate
+   pytest -n 4 test/
+   ```
 4. **Baseline demo**: `make demo` (or `make statusline/test`, both run `uv run python ops/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on `$COLUMNS`). For static snapshot images, `make demo/img` (writes scenario PNGs into `demo/`, honours `COLUMNS=`). For a single piped frame when you need stdout, render one directly: `COLUMNS=160 uv run python claude/statusline_command.py < ops/session-info-example.json` (no transcript-derived rows; enough for border math). For a precise, diff-able baseline instead of eyeballing colour, capture the snapshots as ANSI-stripped text via the **yas-demo-text** skill: `make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh && cp -r demo/text /tmp/yas-base`.
 
 ## PUA refactor rule (mandatory before editing)
@@ -184,7 +188,7 @@ Every `┬` in a top border must line up with a `│` in the row beneath it and 
 
 ## Post-edit checklist
 
-1. **`make test`** (`uv run pytest -q`) — must be green. The pass count should match the baseline plus any tests you added.
+1. **`make test`** (`uv run pytest -q`; **on Android (Termux)** use `. ~/.uvenv/bin/activate && pytest -n 4 test/`) — must be green. The pass count should match the baseline plus any tests you added.
 2. **`make demo`** — eyeball the animation:
    - Every `┬` in a top border lines up with a `│` in the row beneath it and a `┴` in the separator below.
    - Pill colours flow continuously across the top, sides, and bottom of the model row.
