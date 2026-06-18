@@ -20,8 +20,11 @@ the template structure — read it from the repo so the two never drift.
 
 3. **Draft Context and Changes.** From `git diff main...HEAD` plus the conversation:
    - **Context** — *why* the change is needed; the higher-level goal/problem. Link the related
-     issue/PRD (`.scratch/<feature>/...`) if one exists.
-   - **Changes** — *what* changed and *how* it works.
+     issue/PRD (`.scratch/<feature>/...`) if one exists. If this PR bumps the version (step 8),
+     reference the new version number here.
+   - **Changes** — *what* changed and *how* it works. Group related changes and give each group
+     its own `###` (H3) heading. Under each heading, break the distinct points out into bullet
+     points rather than one long run-on sentence — a wall of text is hard to read.
    Present these as a draft for the user to edit; don't fabricate motivation you can't infer.
 
 4. **Embed system info.** Run `make pr-info` and paste its output into the System info fenced
@@ -37,39 +40,35 @@ the template structure — read it from the repo so the two never drift.
    the user; only fall back if they decline. Paste the paste-ready table into the Benchmark
    block. Tick "N/A — no performance-relevant change" instead only for docs/config-only PRs.
 
-7. **Before/after renders.** `gh` can't attach images, so for any rendering change embed
-   ANSI-stripped text renders in place of screenshots, via the **yas-demo-text** skill. Render
-   in the **`github` glyph mode** (`YAS_GLYPH_MODE=github`) so the embedded snapshot is
-   paste-safe in GitHub markdown — it folds the box-drawing frame, block/sparkline ramp, and
-   Nerd Font PUA icons to width-1 EAW-narrow/ASCII stand-ins, so the render stays a clean
-   rectangle in the browser instead of drifting into ragged edges and PUA boxes. Capture the
-   branch ("after") and `main` ("before") snapshots as plain text, then paste each into a
-   fenced code block in the Changes section:
+7. **Before/after screenshots.** For any visible rendering/layout/glyph change, fill the
+   **Screenshots / recording** section by **delegating to the `pr-screenshotter` agent**. It
+   picks the demo scenarios the diff actually exercises (always kitchen-sink, plus width/justify/
+   labels/theme/scenario variants), renders before (`main`) and after (this branch) PNGs,
+   publishes them to `tmck-code/yas-pr-screenshots`, and returns a ready-to-paste markdown
+   before/after table. Drop that table **verbatim** into the Screenshots / recording section.
 
-   ```bash
-   # after — this branch, paste-safe github glyph mode
-   YAS_GLYPH_MODE=github make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh && cp -r demo/text /tmp/yas-after
-   # before — main, rendered in a throwaway worktree
-   git worktree add -q /tmp/yas-base main
-   ( cd /tmp/yas-base && YAS_GLYPH_MODE=github make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh )
-   diff -u /tmp/yas-base/demo/text/kitchen-sink.txt /tmp/yas-after/demo/text/kitchen-sink.txt
-   git worktree remove /tmp/yas-base
-   ```
+   - Don't render or push images yourself — that's the agent's whole job; you just place the
+     table it returns.
+   - If the change isn't visible (logic/docs/config-only), skip this and tick the section's
+     "N/A — no visible change" escape honestly.
+   - The agent commits + pushes to the screenshots repo's `main`; flag that to the user when you
+     present the body, since it's an outward-facing side effect of this PR flow.
 
-   With `github` mode the box-drawing layout stays aligned and box-free in the browser, so
-   reviewers see the change inline with no web-UI image drag. Scope to one snapshot with
-   `DEMO_ONLY=<scenario>`. Dragging real Nerd-Font screenshots into the web UI is still fine if
-   the exact icon glyphs matter; github-mode text is the default.
+8. **Bump the version (only if the statusline's behaviour changed).** If the diff changes the
+   statusline tool or its behaviour — anything a user would notice (rendering, layout, glyphs,
+   config knobs, new stats, output format) — bump the version before creating the PR. Work out
+   the next version from the current one (`uv version --short`) per semver, then run
+   `VERSION=0.X.Y make version/bump`. This is an outward-facing action — it commits **and pushes**
+   the bump (`plugin.json`, `pyproject.toml`, `uv.lock`) — so confirm the new number with the user
+   before running it. Then reference the new version in the Context section.
 
-   **Caveat:** `YAS_GLYPH_MODE=github` only renders correctly on a tree that has the `github`
-   mode. On a `main` (or base) that predates it, the unknown value falls back to `nerdfont`, so
-   the "before" snapshot will still show PUA boxes — which is itself a useful before/after for
-   the PR that introduces the mode. Once `github` is on the base branch, both sides render in it
-   and the diff is purely the content change.
+   - Skip the bump for developer-only changes that users never see: tests, the Makefile, hooks,
+     CI, dev deps, docs, OpenSpec specs, etc. When in doubt about whether a change is user-facing,
+     ask rather than bumping blindly.
 
-8. **Confirm, then create the draft.** Show the fully assembled body. After the user confirms,
-   run `gh pr create --draft` with that body. Print the PR URL and tell the user to add
-   screenshots and click "Ready for review" when done.
+9. **Confirm, then create the draft.** Show the fully assembled body (Screenshots section already
+   populated with the agent's table). After the user confirms, run `gh pr create --draft` with
+   that body. Print the PR URL and tell the user to click "Ready for review" when done.
 
 ## Notes
 
