@@ -59,6 +59,8 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.token_window == 60.0
     assert cfg.theme == 'claude-dark'
     assert cfg.bg_shift == 'warm'
+    assert cfg.glyph_mode == 'nerdfont'
+    assert cfg.single_width is False
     assert cfg.show_day_stats is True
     assert cfg.justify is False
     assert cfg.labels is False
@@ -357,6 +359,156 @@ def test_malformed_model_entries_dropped_valid_kept(tmp_path: Path) -> None:
         assert f'tokens.model[{i}]' in cfg.errors
     assert 'tokens.model[4]' not in cfg.errors
     assert cfg.soft_limit_for('claude-opus-4-8[1m]', '') == 1_000_000
+
+
+# 4.4 glyph_mode resolution (CLI → env → toml → default nerdfont)
+
+def test_env_selects_glyph_mode(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'ascii'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'ascii'
+
+
+def test_env_selects_github_glyph_mode(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'github'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
+def test_env_github_glyph_mode_strips_and_lowercases(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': ' GitHub '}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
+@requires_tomllib
+def test_toml_selects_github_glyph_mode(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nmode = "github"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
+def test_glyph_mode_default_is_nerdfont(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+
+
+@requires_tomllib
+def test_cli_glyph_mode_beats_env_and_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nmode = "nerdfont"\n')
+    cfg = config.Config.load(
+        env={'YAS_GLYPH_MODE': 'ascii'},
+        config_dir=tmp_path,
+        argv=['--glyph-mode', 'unicode'],
+    )
+    assert cfg.glyph_mode == 'unicode'
+
+
+@requires_tomllib
+def test_toml_selects_glyph_mode(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nmode = "unicode"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'unicode'
+
+
+def test_env_glyph_mode_case_insensitive(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'ASCII'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'ascii'
+
+
+def test_invalid_env_glyph_mode_falls_back_and_records_debug(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'fancy'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert 'glyph_mode' not in cfg.errors      # env rejection is debug-only
+    assert any('glyph_mode' in line for line in cfg.debug_lines)
+
+
+def test_singlewidth_no_longer_a_valid_mode(tmp_path: Path) -> None:
+    # singlewidth was a mode; now it's a separate boolean. As a mode value it's
+    # rejected and falls back to the default.
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'singlewidth'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert any('glyph_mode' in line for line in cfg.debug_lines)
+
+
+@requires_tomllib
+def test_invalid_toml_glyph_mode_falls_back_and_records_error(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nmode = "fancy"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert 'glyph_mode' in cfg.errors
+
+
+# 4.4a single_width resolution (CLI → env → toml → default false), orthogonal to mode
+
+def test_single_width_default_is_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.single_width is False
+
+
+def test_env_single_width_truthy_values(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'True', 'TRUE'):
+        cfg = config.Config.load(env={'YAS_GLYPH_SINGLE_WIDTH': val}, config_dir=tmp_path)
+        assert cfg.single_width is True, f'expected True for {val!r}'
+
+
+def test_env_single_width_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'False', 'FALSE'):
+        cfg = config.Config.load(env={'YAS_GLYPH_SINGLE_WIDTH': val}, config_dir=tmp_path)
+        assert cfg.single_width is False, f'expected False for {val!r}'
+
+
+def test_cli_single_width_equals_form(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path, argv=['--glyph-single-width=true'])
+    assert cfg.single_width is True
+
+
+def test_cli_single_width_space_form(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path, argv=['--glyph-single-width', 'true'])
+    assert cfg.single_width is True
+
+
+@requires_tomllib
+def test_toml_single_width_in_glyphs_subtable(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nsingle_width = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.single_width is True
+
+
+@requires_tomllib
+def test_cli_single_width_beats_env_beats_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nsingle_width = false\n')
+    # env beats toml
+    cfg = config.Config.load(env={'YAS_GLYPH_SINGLE_WIDTH': 'true'}, config_dir=tmp_path)
+    assert cfg.single_width is True
+    # cli beats env
+    cfg = config.Config.load(
+        env={'YAS_GLYPH_SINGLE_WIDTH': 'true'},
+        config_dir=tmp_path,
+        argv=['--glyph-single-width=false'],
+    )
+    assert cfg.single_width is False
+
+
+@requires_tomllib
+def test_mode_and_single_width_combine_from_subtable(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text(
+        '[appearance.glyphs]\nmode = "unicode"\nsingle_width = true\n'
+    )
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'unicode'
+    assert cfg.single_width is True
+
+
+@requires_tomllib
+def test_glyph_keys_outside_subtable_ignored(tmp_path: Path) -> None:
+    # The knobs now live under [appearance.glyphs]; a bare [appearance].mode or
+    # .single_width is no longer read — defaults apply, no error recorded.
+    (tmp_path / 'yas.toml').write_text(
+        '[appearance]\nmode = "ascii"\nsingle_width = true\n'
+    )
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert cfg.single_width is False
+    assert 'glyph_mode' not in cfg.errors
+    assert 'single_width' not in cfg.errors
 
 
 # 4.7 Error row

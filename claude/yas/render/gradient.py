@@ -10,6 +10,7 @@ from yas.constants import (
     BarChars,
     LIVE_DIM,
     RESET,
+    SPARK_RAMP,
 )
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
 
 class GradientEngine:
     FADE        = 0.06
-    SPARK_CHARS = '▁▂▃▄▅▆▇█'
+    SPARK_CHARS = SPARK_RAMP
 
     def __init__(self, theme: 'Theme | None' = None) -> None:
         from yas.themes import CLAUDE_DARK

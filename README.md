@@ -66,6 +66,8 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `token_window` | `YAS_TOKEN_WINDOW` | `STATUSLINE_TOKEN_WINDOW` | `[tokens].token_window` | `60` |
 | `theme` | `YAS_THEME` (also `--theme` CLI) | `CLAUDE_STATUSLINE_THEME` | `[appearance].theme` | `claude-dark` |
 | `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
+| `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | — | `[appearance.glyphs].mode` | `nerdfont` |
+| `single_width` | `YAS_GLYPH_SINGLE_WIDTH` (also `--glyph-single-width` CLI) | — | `[appearance.glyphs].single_width` | `false` |
 
 - Valid `theme` values (14 built-in themes):
   - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
@@ -73,6 +75,8 @@ aliases when both are set — the aliases keep working but are deprecated.
 
   An unknown or unset `theme` falls back to `claude-dark`.
 - Valid `bg_shift` values: `warm` or `cool`.
+- Valid `glyph_mode` values: `nerdfont` (default; full fidelity, needs a Nerd Font), `ascii` (every non-ASCII glyph → width-1 ASCII; maximum compatibility), `unicode` (only Nerd Font PUA icons → non-PUA Unicode; keeps box/block/arrow glyphs), `github` (GitHub-paste-safe: folds every glyph a browser renders double-wide — the box-drawing frame, block/sparkline ramp, and EAW-ambiguous punctuation/icons — to a width-1, EAW-narrow/ASCII stand-in, so a render stays column-aligned when pasted into a GitHub markdown code block). All modes preserve column geometry. An unknown value falls back to `nerdfont`.
+- `single_width` is an orthogonal boolean that folds double-width dynamic content (wide emoji, CJK in branch names/paths) to width-1; it may be combined with any `glyph_mode`. The statusline's own glyphs are already width-1, so column geometry is preserved.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
@@ -95,6 +99,10 @@ token_window = 60
 [appearance]
 theme = "claude-dark"
 bg_shift = "warm"
+
+[appearance.glyphs]
+mode = "nerdfont"
+single_width = false
 ```
 
 > **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.

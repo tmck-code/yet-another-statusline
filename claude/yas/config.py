@@ -100,6 +100,13 @@ def _parse_bg_shift(raw: object, origin: str) -> str:
     raise ValueError(f'expected warm or cool, got {v!r}')
 
 
+def _parse_glyph_mode(raw: object, origin: str) -> str:
+    v = str(raw).strip().lower()
+    if v in ('nerdfont', 'ascii', 'unicode', 'github'):
+        return v
+    raise ValueError(f'expected one of nerdfont, ascii, unicode, github, got {v!r}')
+
+
 def _env_sources(env: dict[str, str], canonical: str, *aliases: str) -> list[tuple[str, object]]:
     out: list[tuple[str, object]] = []
     for name in (canonical, *aliases):
@@ -156,6 +163,14 @@ def _parse_argv(argv: Sequence[str]) -> dict[str, str]:
             out['theme'] = args.pop(0)
         elif a.startswith('--theme='):
             out['theme'] = a.split('=', 1)[1]
+        elif a == '--glyph-mode' and args:
+            out['glyph_mode'] = args.pop(0)
+        elif a.startswith('--glyph-mode='):
+            out['glyph_mode'] = a.split('=', 1)[1]
+        elif a == '--glyph-single-width' and args:
+            out['single_width'] = args.pop(0)
+        elif a.startswith('--glyph-single-width='):
+            out['single_width'] = a.split('=', 1)[1]
     return out
 
 
@@ -213,6 +228,8 @@ class Config:
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
     bg_shift: str = 'warm'
+    glyph_mode: str = 'nerdfont'
+    single_width: bool = False
     show_day_stats: bool = DEFAULT_SHOW_DAY_STATS
     soft_limit_models: tuple[tuple[str, int], ...] = ()
     errors: tuple[str, ...] = ()
@@ -241,7 +258,12 @@ class Config:
             v = toml_data.get(name)
             return v if isinstance(v, dict) else {}
 
+        def _table_in(table: dict[str, object], name: str) -> dict[str, object]:
+            v = table.get(name)
+            return v if isinstance(v, dict) else {}
+
         layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
+        glyphs = _table_in(appearance, 'glyphs')
         cli = _parse_argv(argv) if argv is not None else {}
 
         def toml_src(table: dict[str, object], key: str) -> list[tuple[str, object]]:
@@ -279,6 +301,18 @@ class Config:
             + _env_sources(env, 'YAS_BG_SHIFT')
             + toml_src(appearance, 'bg_shift'),
             _parse_bg_shift, 'warm', errors, debug)
+        glyph_mode = _resolve(
+            'glyph_mode',
+            cli_src('glyph_mode')
+            + _env_sources(env, 'YAS_GLYPH_MODE')
+            + toml_src(glyphs, 'mode'),
+            _parse_glyph_mode, 'nerdfont', errors, debug)
+        single_width = _resolve(
+            'single_width',
+            cli_src('single_width')
+            + _env_sources(env, 'YAS_GLYPH_SINGLE_WIDTH')
+            + toml_src(glyphs, 'single_width'),
+            _parse_bool, False, errors, debug)
         show_day_stats = _resolve(
             'show_day_stats',
             _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
@@ -303,6 +337,8 @@ class Config:
             token_window=token_window,
             theme=theme,
             bg_shift=bg_shift,
+            glyph_mode=glyph_mode,
+            single_width=single_width,
             show_day_stats=show_day_stats,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),

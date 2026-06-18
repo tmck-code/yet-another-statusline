@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
-from yas.constants import ITALIC, RESET
+from yas.constants import (
+    BOX_ARC_BL,
+    BOX_ARC_BR,
+    BOX_ARC_TL,
+    BOX_ARC_TR,
+    BOX_CROSS,
+    BOX_H,
+    BOX_H_DASH,
+    BOX_T_DOWN,
+    BOX_T_LEFT,
+    BOX_T_RIGHT,
+    BOX_T_UP,
+    BOX_V,
+    ELLIPSIS,
+    ITALIC,
+    RESET,
+)
 from yas.render.gradient import GradientEngine
 from yas.render.pill import Pill
 from yas.render.text import _visible_width, superscript
@@ -49,7 +65,7 @@ class BorderRenderer:
             pc = p.border_char(col, 'top')
             if pc:
                 return pc
-            return '┬' if col in downs_set else '─'
+            return BOX_T_DOWN if col in downs_set else BOX_H
         def _clr(col: int, pos: int) -> str:
             if p.active and p.start <= col <= p.end:
                 return p.border_fg(col)
@@ -69,20 +85,19 @@ class BorderRenderer:
             chars[0] = p.border_char(p.start, 'top')
         else:
             prefix[0] = self.gradient.grad_at(0, width, fill=fill)
-            chars[0] = '╭'
-
+            chars[0] = BOX_ARC_TL
         if session_id:
             avail = max(0, width - 4)
             if p.active and p.end == width and p.start > 5:
                 avail = max(0, min(avail, p.start - 5))
-            sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
+            sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + ELLIPSIS
             sid_w = _visible_width(sid)
             # cols 2 and 3 are fill-form '─'/'┬'/pill; the session id occupies
             # the next sid_w columns as a single coloured italic run.
             for col in (2, 3):
                 prefix[col - 1] = _clr(col, col - 1)
                 chars[col - 1] = _ch(col)
-                fills[col - 1] = (chars[col - 1] == '─')
+                fills[col - 1] = (chars[col - 1] == BOX_H)
             prefix[3] = self.SESSION + ITALIC
             chars[3] = sid
             suffix[3 + sid_w - 1] = '\033[23m'
@@ -92,20 +107,20 @@ class BorderRenderer:
                 col = offset + i + 1
                 prefix[col - 1] = _clr(col, offset + i)
                 chars[col - 1] = _ch(col)
-                fills[col - 1] = (chars[col - 1] == '─')
+                fills[col - 1] = (chars[col - 1] == BOX_H)
         else:
             for i in range(1, width - 1):
                 col = i + 1
                 prefix[col - 1] = _clr(col, i)
                 chars[col - 1] = _ch(col)
-                fills[col - 1] = (chars[col - 1] == '─')
+                fills[col - 1] = (chars[col - 1] == BOX_H)
 
         if p.active and p.start <= width <= p.end:
             prefix[width - 1] = p.border_fg(width)
             chars[width - 1] = p.border_char(width, 'top')
         else:
             prefix[width - 1] = self.gradient.grad_at(width - 1, width, fill=fill)
-            chars[width - 1] = '╮'
+            chars[width - 1] = BOX_ARC_TR
 
         _overlay_labels(chars, fills, labels)
 
@@ -117,11 +132,11 @@ class BorderRenderer:
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
-        parts = [self.gradient.grad_at(0, width, fill=fill), '╰']
+        parts = [self.gradient.grad_at(0, width, fill=fill), BOX_ARC_BL]
         for i in range(width - 2):
-            ch = '┴' if (i + 2) in ups_set else '─'
+            ch = BOX_T_UP if (i + 2) in ups_set else BOX_H
             parts += [self.gradient.grad_at(i + 1, width, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╯', self.R]
+        parts += [self.gradient.grad_at(width - 1, width, fill=fill), BOX_ARC_BR, self.R]
         return ''.join(parts)
 
     def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0, labels: tuple[tuple[str, int], ...] = ()) -> str:
@@ -131,22 +146,22 @@ class BorderRenderer:
         fills: list[bool] = [False] * width
         prefix: list[str] = [''] * width
         prefix[0] = self.gradient.grad_at(0, width, fill=fill)
-        chars[0] = '├'
+        chars[0] = BOX_T_RIGHT
         for i in range(width - 2):
             col = i + 2
             if col in downs_set and col in ups_set:
-                ch = '┼'
+                ch = BOX_CROSS
             elif col in downs_set:
-                ch = '┬'
+                ch = BOX_T_DOWN
             elif col in ups_set:
-                ch = '┴'
+                ch = BOX_T_UP
             else:
-                ch = '─'
+                ch = BOX_H
             prefix[col - 1] = self.gradient.grad_at(i + 1, width, fill=fill)
             chars[col - 1] = ch
-            fills[col - 1] = (ch == '─')
+            fills[col - 1] = (ch == BOX_H)
         prefix[width - 1] = self.gradient.grad_at(width - 1, width, fill=fill)
-        chars[width - 1] = '┤'
+        chars[width - 1] = BOX_T_LEFT
         _overlay_labels(chars, fills, labels)
         parts: list[str] = []
         for i in range(width):
@@ -177,7 +192,7 @@ class BorderRenderer:
             chars[0] = p.border_char(p.start, edge)
         else:
             prefix[0] = self.gradient.grad_at(0, width, self._dim_for_col(1, elbow_cols), fill=fill)
-            chars[0] = '├'
+            chars[0] = BOX_T_RIGHT
         for i in range(width - 2):
             col = i + 2
             pc = p.border_char(col, edge) if p.active else ''
@@ -186,24 +201,24 @@ class BorderRenderer:
                 chars[col - 1] = pc
             else:
                 if col in downs_set and col in ups_set:
-                    ch = '┼'
+                    ch = BOX_CROSS
                 elif col in downs_set:
-                    ch = '┬'
+                    ch = BOX_T_DOWN
                 elif col in ups_set:
-                    ch = '┴'
+                    ch = BOX_T_UP
                 else:
-                    ch = '┄'
+                    ch = BOX_H_DASH
                 # Per-column dim factor stays baked into the colour prefix, so an
                 # overlaid label glyph inherits the same dim for free.
                 prefix[col - 1] = self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill)
                 chars[col - 1] = ch
-                fills[col - 1] = (ch == '┄')
+                fills[col - 1] = (ch == BOX_H_DASH)
         if p.active and p.start <= width <= p.end:
             prefix[width - 1] = p.border_fg(width)
             chars[width - 1] = p.border_char(width, edge)
         else:
             prefix[width - 1] = self.gradient.grad_at(width - 1, width, self._dim_for_col(width, elbow_cols), fill=fill)
-            chars[width - 1] = '┤'
+            chars[width - 1] = BOX_T_LEFT
         _overlay_labels(chars, fills, labels)
         parts: list[str] = []
         for i in range(width):
@@ -217,12 +232,12 @@ class BorderRenderer:
             pad     = max(0, width - 2 - _visible_width(content) - pill_w)
             left    = self.gradient.grad_at(0, width, fill=fill)
             lead    = f'{bg_lead} \033[49m' if bg_lead else ' '
-            return f'{left}│{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
+            return f'{left}{BOX_V}{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
         if pill_flush:
             pad = max(0, width - 1 - _visible_width(content))
             right = self.gradient.grad_at(width - 1, width, fill=fill)
             pad_str = ' ' * pad
-            return f'{content}{pad_str}{right}│{self.R}'
+            return f'{content}{pad_str}{right}{BOX_V}{self.R}'
         pad = max(0, width - 3 - _visible_width(content))
         left  = self.gradient.grad_at(0, width, fill=fill)
         right = self.gradient.grad_at(width - 1, width, fill=fill)
@@ -231,4 +246,4 @@ class BorderRenderer:
             pad_str = f'{" " * (pad - 1)}{bg_trail} \033[49m'
         else:
             pad_str = ' ' * pad
-        return f'{left}│{self.R}{lead}{content}{pad_str}{right}│{self.R}'
+        return f'{left}{BOX_V}{self.R}{lead}{content}{pad_str}{right}{BOX_V}{self.R}'

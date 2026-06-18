@@ -4,11 +4,17 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import unicodedata
 
 from yas.constants import (
     _ANSI_RE,
+    ASCII_TRANSLATE,
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
+    ELLIPSIS,
+    GITHUB_TRANSLATE,
+    MIDDLE_DOT,
+    UNICODE_TRANSLATE,
 )
 
 
@@ -72,9 +78,70 @@ def _visible_width(s: str) -> int:
     return sum(2 if _is_wide(ch) else 1 for ch in plain)
 
 
+def to_ascii(s: str) -> str:
+    """Replace every Nerd Font PUA glyph with its single-char ASCII fallback.
+
+    Width-preserving (1 PUA col -> 1 ASCII col), so applying it to a finished
+    render leaves every border/elbow column exactly where it was."""
+    return s.translate(ASCII_TRANSLATE)
+
+
+SINGLEWIDTH_PLACEHOLDER = MIDDLE_DOT  # width-1 stand-in for an unfoldable wide char
+
+
+def to_singlewidth(s: str) -> str:
+    """Fold every double-width char in ``s`` to a width-1 equivalent.
+
+    Walks char-by-char (ANSI escape bytes are ASCII, so ``_is_wide`` is False for
+    them and they pass through untouched). For each wide char, try an NFKC
+    single-char narrow form (e.g. Fullwidth Forms -> ASCII); if none exists, emit
+    SINGLEWIDTH_PLACEHOLDER. Already-width-1 chars (including the statusline's own
+    PUA glyphs) are left unchanged, so only genuinely wide dynamic content folds."""
+    out: list[str] = []
+    for ch in s:
+        if not _is_wide(ch):
+            out.append(ch)
+            continue
+        folded = unicodedata.normalize('NFKC', ch)
+        if len(folded) == 1 and not _is_wide(folded):
+            out.append(folded)
+        else:
+            out.append(SINGLEWIDTH_PLACEHOLDER)
+    return ''.join(out)
+
+
+def apply_glyph_mode(s: str, mode: str) -> str:
+    """Apply the selected glyph mode as a single final pass over a finished render.
+
+    nerdfont -> identity (no pass); ascii -> PUA+frame ASCII fallback table;
+    unicode -> PUA-only non-PUA Unicode table; github -> browser-wide+PUA fold to
+    EAW-narrow/ASCII (paste-safe). An unknown mode is treated as nerdfont
+    (identity) — defensive; config already validates the value upstream.
+    Single-width folding is orthogonal (see ``apply_glyphs``)."""
+    if mode == 'ascii':
+        return s.translate(ASCII_TRANSLATE).translate(_SUPERSCRIPT_TO_ASCII)
+    if mode == 'unicode':
+        return s.translate(UNICODE_TRANSLATE)
+    if mode == 'github':
+        return s.translate(GITHUB_TRANSLATE).translate(_SUPERSCRIPT_TO_ASCII)
+    return s
+
+
+def apply_glyphs(s: str, mode: str, single_width: bool) -> str:
+    """Combine the glyph ``mode`` with the orthogonal ``single_width`` fold.
+
+    Runs ``apply_glyph_mode`` first, then folds double-width chars to width-1
+    when ``single_width`` is set, so single-width folding can pair with any
+    mode (nerdfont, ascii, or unicode)."""
+    out = apply_glyph_mode(s, mode)
+    if single_width:
+        out = to_singlewidth(out)
+    return out
+
+
 def _middle_ellipsis(text: str, max_w: int) -> str:
     if max_w <= 1:
-        return '…'
+        return ELLIPSIS
     if _visible_width(text) <= max_w:
         return text
     left_vis  = (max_w - 1) // 2
@@ -109,7 +176,7 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
     suffix = _take(list(reversed(tokens)), right_vis)
     suffix.reverse()
 
-    result = ''.join(prefix) + '…' + ''.join(suffix)
+    result = ''.join(prefix) + ELLIPSIS + ''.join(suffix)
     if _visible_width(result) <= max_w:
         return result
     # Trim one visible char from prefix to fix wide-char overshoot.
@@ -117,7 +184,7 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
         if not _ANSI_RE.fullmatch(prefix[j]):
             prefix.pop(j)
             break
-    return ''.join(prefix) + '…' + ''.join(suffix)
+    return ''.join(prefix) + ELLIPSIS + ''.join(suffix)
 
 
 # ASCII -> Unicode superscript glyphs for section labels. Every glyph is a
@@ -145,6 +212,15 @@ def superscript(s: str) -> str:
     # through unchanged. Every mapped glyph is width-1, so the result keeps the
     # same visible column width as the input.
     return ''.join(_SUPERSCRIPT.get(ch, ch) for ch in s)
+
+
+# Inverse of _SUPERSCRIPT: fold the wide-layout section-label superscripts back to
+# plain ASCII for the paste-safe glyph modes. The superscript/modifier-letter block
+# is non-ASCII (so `ascii` mode would leak it) and partly EAW-ambiguous/browser-wide
+# (e.g. ⁿ U+207F, so `github` mode would render it double-width). Every value is a
+# distinct width-1 glyph, so this {codepoint: ascii} map is a clean width-preserving
+# str.translate table. `unicode` mode keeps the superscripts — they render fine there.
+_SUPERSCRIPT_TO_ASCII = {ord(v): k for k, v in _SUPERSCRIPT.items()}
 
 
 def _token_offsets(plain: str) -> list[int]:

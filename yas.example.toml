@@ -40,3 +40,18 @@
 # [appearance]
 # theme = "claude-dark"  # one of: claude-dark, claude-light, catppuccin-latte, catppuccin-mocha
 # bg_shift = "warm"      # warm or cool; direction of the model-row gradient shift
+
+# [appearance.glyphs]
+# mode picks the richest glyph representation your terminal can display. All
+# three modes preserve the box's column geometry. (env: YAS_GLYPH_MODE,
+# CLI: --glyph-mode)
+#   nerdfont — (default) display every glyph as-is. Full fidelity; needs a Nerd Font.
+#   ascii    — replace every non-ASCII glyph with a width-1 ASCII equivalent. Maximum compatibility.
+#   unicode  — replace only Nerd Font PUA icons with non-PUA Unicode; keep box/block/arrow glyphs. For good-Unicode-but-no-Nerd-Font terminals.
+# mode = "nerdfont"
+#
+# single_width folds double-width chars (wide emoji, CJK) in dynamic content to
+# width-1, for fonts that render some glyphs double-width. It is an orthogonal
+# boolean and combines with any mode above. (env: YAS_GLYPH_SINGLE_WIDTH,
+# CLI: --glyph-single-width)
+# single_width = false

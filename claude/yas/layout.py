@@ -8,8 +8,10 @@ from dataclasses import dataclass, field
 from yas.config import Config
 from yas.constants import (
     _ANSI_RE,
+    BOX_V,
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
+    ELLIPSIS,
     GLYPH_CONFIG_WARN,
     GLYPH_HOURGLASS,
     GLYPH_RENAMED,
@@ -90,7 +92,7 @@ def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) 
     text  = f'{GLYPH_CONFIG_WARN} yas.toml: {len(cfg.errors)} values ignored ({names})'
     avail = max(1, width - 4)  # inner content area between "│ " and " │"
     if _visible_width(text) > avail:
-        text = text[:avail - 1] + '…'
+        text = text[:avail - 1] + ELLIPSIS
     bottom = rows.pop()  # the bottom_border RowSpec
     rows.append(RowSpec('separator_dim', ups=bottom.ups))
     rows.append(RowSpec('content', content=f'{CLR_WARN}{text}{RESET}'))
@@ -845,7 +847,7 @@ def build_wide(
                     r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout).split('\n')
                 )
             div_color = r.grad_at(divider_col - 1, width, fill=fill)
-            divider   = f'{div_color}│{RESET}'
+            divider   = f'{div_color}{BOX_V}{RESET}'
             # `plan` over the checklist column, `subagents` over the cohort column.
             sbs_labels: list[tuple[str, int]] = (
                 [('plan', 3), ('subagents', divider_col + 2)] if view.cfg.labels else []
