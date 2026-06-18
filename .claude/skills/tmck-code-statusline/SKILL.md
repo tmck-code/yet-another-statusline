@@ -80,8 +80,12 @@ Run all four before editing:
    " claude/yas/*.py claude/yas/info/*.py claude/yas/render/*.py
    ```
    Any hit on a line you plan to Edit triggers the **PUA refactor rule** below.
-3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count.
-4. **Baseline demo**: `make demo` (or `make statusline/test`, both run `uv run python ops/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on `$COLUMNS`). For static snapshot images, `make demo/img` (writes scenario PNGs into `demo/`, honours `COLUMNS=`). For a single piped frame when you need stdout, render one directly: `COLUMNS=160 uv run python claude/statusline_command.py < ops/session-info-example.json` (no transcript-derived rows; enough for border math).
+3. **Baseline tests**: `make test` (or `uv run pytest -q`). Note pass count. **On Android (Termux)** `uv run`/`make test` is unavailable — activate the prebuilt venv and run pytest directly:
+   ```bash
+   . ~/.uvenv/bin/activate
+   pytest -n 4 test/
+   ```
+4. **Baseline demo**: `make demo` (or `make statusline/test`, both run `uv run python ops/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on `$COLUMNS`). For static snapshot images, `make demo/img` (writes scenario PNGs into `demo/`, honours `COLUMNS=`). For a single piped frame when you need stdout, render one directly: `COLUMNS=160 uv run python claude/statusline_command.py < ops/session-info-example.json` (no transcript-derived rows; enough for border math). For a precise, diff-able baseline instead of eyeballing colour, capture the snapshots as ANSI-stripped text via the **yas-demo-text** skill: `make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh && cp -r demo/text /tmp/yas-base`.
 
 ## PUA refactor rule (mandatory before editing)
 
@@ -184,11 +188,12 @@ Every `┬` in a top border must line up with a `│` in the row beneath it and 
 
 ## Post-edit checklist
 
-1. **`make test`** (`uv run pytest -q`) — must be green. The pass count should match the baseline plus any tests you added.
+1. **`make test`** (`uv run pytest -q`; **on Android (Termux)** use `. ~/.uvenv/bin/activate && pytest -n 4 test/`) — must be green. The pass count should match the baseline plus any tests you added.
 2. **`make demo`** — eyeball the animation:
    - Every `┬` in a top border lines up with a `│` in the row beneath it and a `┴` in the separator below.
    - Pill colours flow continuously across the top, sides, and bottom of the model row.
    - Resize the terminal narrower/wider during the run to verify the narrow ↔ medium ↔ wide thresholds.
+   - For an exact comparison, re-strip and diff against the baseline from the pre-edit step: `make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh && diff -ru /tmp/yas-base demo/text`. Every moved cell shows up as a line diff — this catches off-by-one column bugs the eye misses across the 60-frame animation.
 3. **Tests** — any behaviour change needs a test added or updated. Tests resolve the package via `pythonpath = ["claude"]` and import modules as `yas.<module>` / `yas.info.<module>` / `yas.render.<module>`; `conftest.py` exposes a `strip_ansi` fixture (from `test/helper.py`) and a `tmp_home` fixture that patches `CLAUDE_DIR` across `yas.app`/`yas.config`/`yas.constants`/`yas.session`/`yas.info.subagents`/`yas.tokens`. Width-sensitive assertions go through `_visible_width`. Put new tests in the file that matches the layer touched: `test_gradient_math.py`, `test_borders.py`, `test_model_section.py`, `test_context_line.py`, `test_openspec_bar.py`, `test_tokens_cost.py`, `test_config.py`, `test_layout_seam.py`, `test_subagent_rows.py`/`test_subagent_metrics.py`/`test_cohort_visibility.py` (subagents), `test_info.py` (denominator math, `_fmt_elapsed`, laziness), etc. Layout tests inject a `SessionView` directly — construct one with a known `SessionInfo` and `Config` rather than calling the builders with raw reader data.
 4. **`CONTEXT.md`** — if any displayed term changed (label, glyph meaning, what a number represents), update the glossary in the same change.
 
@@ -198,4 +203,4 @@ Every `┬` in a top border must line up with a `│` in the row beneath it and 
 
 ## Sibling skills
 
-`python-style` applies as usual when touching `.py` files. This skill adds the statusline-specific rules on top.
+`python-style` applies as usual when touching `.py` files. This skill adds the statusline-specific rules on top. After a render change, use **yas-demo-text** to turn `make demo/img` snapshots into ANSI-stripped plain text for a before/after `diff` (see the demo steps above) — the reliable way to confirm column math instead of eyeballing the coloured animation.

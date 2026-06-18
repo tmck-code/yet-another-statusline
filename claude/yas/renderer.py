@@ -14,8 +14,14 @@ from yas.render.borders import BorderRenderer
 from yas.constants import (
     BOLD,
     ITALIC,
+    MIDDLE_DOT,
     RESET,
+    ARROW_IN_ACTIVE,
+    ARROW_IN_IDLE,
+    ARROW_OUT_ACTIVE,
+    ARROW_OUT_IDLE,
     BarChars,
+    BOX_V,
     CLR_CYAN,
     CLR_CYAN_DAY,
     CLR_CYAN_DAY_DIM,
@@ -36,6 +42,7 @@ from yas.constants import (
     CLR_YELLOW,
     CLR_YELLOW_BRT,
     DEFAULT_SOFT_LIMIT,
+    ELLIPSIS,
     FIVE_HOUR_MINUTES,
     FIVE_HOUR_WARMUP_MINUTES,
     GLYPH_BURN_FAST,
@@ -45,6 +52,7 @@ from yas.constants import (
     GLYPH_CACHE,
     GLYPH_HELPER,
     GLYPH_HOURGLASS,
+    GLYPH_IN,
     GLYPH_MODEL,
     GLYPH_PLUGINS,
     GLYPH_RENAMED,
@@ -57,6 +65,8 @@ from yas.constants import (
     GLYPH_TASK_DONE,
     GLYPH_TASK_PENDING,
     GLYPH_THINKING,
+    GLYPH_UNLIMITED,
+    GLYPH_UNTRACKED,
     GLYPH_WF_CURRENT,
     GLYPH_WF_HEADER,
     GLYPH_WF_SUMMARY,
@@ -287,7 +297,7 @@ class Renderer:
     def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False, lead: int = 2) -> str:
         color    = self.gradient.grad_at(col - 1, width, fill=fill)
         trailing = ' ' if leader else '  '
-        return f'{" " * lead}{color}│{self.R}{trailing}'
+        return f'{" " * lead}{color}{BOX_V}{self.R}{trailing}'
 
     def sparkline_1row(self, history: list[int], live: bool = False) -> str:
         return self.gradient.sparkline_1row(history, live)
@@ -321,7 +331,7 @@ class Renderer:
         dirty = ''
         if show_dirty:
             if git.untracked > 0:
-                dirty += f'{self.DIRTY}•{git.untracked}{RESET}'
+                dirty += f'{self.DIRTY}{GLYPH_UNTRACKED}{git.untracked}{RESET}'
             if git.modified > 0:
                 dirty += f'{self.DIRTY}*{git.modified}{RESET}'
             if git.deleted > 0:
@@ -338,7 +348,7 @@ class Renderer:
 
         return (
             f'{self.ICON_PATH}{GLYPH_FOLDER}  {path_part}'
-            f'{self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f'{self.LABEL}{self.ARROW}{BOLD}{GLYPH_IN}{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{commit_part}{dirty}'
         )
@@ -354,7 +364,7 @@ class Renderer:
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
             f'{self.ICON_PATH}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}{GLYPH_IN}{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
         )
 
@@ -489,7 +499,7 @@ class Renderer:
 
         base_w      = _visible_width(_build('', rate_pct)[0])
         name_budget = max(3, max_width - base_w - 1)
-        return _build(model_name[:name_budget] + '…', rate_pct)
+        return _build(model_name[:name_budget] + ELLIPSIS, rate_pct)
 
     def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
         step      = rainbow_step()
@@ -586,7 +596,7 @@ class Renderer:
         if right_w > max_right_width and max_right_width > 0:
             _, base_w = _make_right('')
             budget    = max(3, max_right_width - base_w - 1)
-            right_text, right_w = _make_right(model_name[:budget] + '…')
+            right_text, right_w = _make_right(model_name[:budget] + ELLIPSIS)
         return rate_text, right_text, right_w
 
     def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
@@ -622,7 +632,7 @@ class Renderer:
             else:
                 raw = ''
             if _visible_width(raw) > cap:
-                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                raw = raw[:cap] + ELLIPSIS
             return f'{GLYPH_TASKS} {name}[{raw}]'
         if kind == 'thinking':
             return f'{GLYPH_THINKING} (thinking)'
@@ -631,7 +641,7 @@ class Renderer:
             if not raw:
                 return f'{GLYPH_REPLYING} (replying)'
             if _visible_width(raw) > cap:
-                raw = raw[:cap] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                raw = raw[:cap] + ELLIPSIS
             return f'{GLYPH_REPLYING} {raw}'
         return ''
 
@@ -683,18 +693,18 @@ class Renderer:
             def build_cluster(show_share: bool, show_tok: bool) -> str:
                 if is_done:
                     d   = self.CTX_DIM
-                    seg = f'{d}·{self.R} '
+                    seg = f'{d}{MIDDLE_DOT}{self.R} '
                     if show_share and share is not None:
                         seg += f'{d}{share_str}{self.R}  '
                     if show_tok:
-                        seg += f'{d}{tok_field}{self.R} {d}·{self.R} '
+                        seg += f'{d}{tok_field}{self.R} {d}{MIDDLE_DOT}{self.R} '
                     return seg + f'{d}{model_str}{self.R}'
                 share_clr = self.gradient.gradient_color(share) if share is not None else ''
-                seg = f'{self.LABEL}·{self.R} '
+                seg = f'{self.LABEL}{MIDDLE_DOT}{self.R} '
                 if show_share and share is not None:
                     seg += f'{share_clr}{share_str}{self.R}  '
                 if show_tok:
-                    seg += f'{ctx_clr}{tok_field}{self.R} {self.LABEL}·{self.R} '
+                    seg += f'{ctx_clr}{tok_field}{self.R} {self.LABEL}{MIDDLE_DOT}{self.R} '
                 return seg + f'{model_clr}{model_str}{self.R}'
 
             # Pick the richest cluster that fits alongside the front + a 1-col gap.
@@ -713,12 +723,12 @@ class Renderer:
             sep_desc_w = 0
             if desc_text and desc_max > 0:
                 if _visible_width(desc_text) > desc_max:
-                    desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                    desc_text = desc_text[:desc_max - 1] + ELLIPSIS
                 desc_w = _visible_width(desc_text)
                 if is_done:
-                    sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                    sep_desc = f' {self.CTX_DIM}{MIDDLE_DOT}{self.R} {self.CTX_DIM}{desc_text}{self.R}'
                 else:
-                    sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                    sep_desc = f' {self.LABEL}{MIDDLE_DOT}{self.R} {self.CTX}{desc_text}{self.R}'
                 sep_desc_w = 3 + desc_w
 
             pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
@@ -731,7 +741,7 @@ class Renderer:
             activity_cap = min(100, avail2)
             activity     = self.subagent_activity(sub.last_activity, cap=activity_cap)
             if _visible_width(activity) > avail2:
-                activity = activity[:max(0, avail2 - 1)] + '…'
+                activity = activity[:max(0, avail2 - 1)] + ELLIPSIS
             left2   = (
                 f'   {self.CTX_DIM}{GLYPH_CONTINUATION}{self.R}  '
                 f'{self.CTX_DIM}{activity}{self.R}'
@@ -857,7 +867,7 @@ class Renderer:
         """
         step  = rainbow_step()
         c_sum = rainbow_at(step, 7)
-        sep   = f' {self.LABEL}·{self.R} '
+        sep   = f' {self.LABEL}{MIDDLE_DOT}{self.R} '
         parts = [
             f'{self.CTX}{run.agent_count}{self.R} {self.LABEL}agents{self.R}',
             f'{self.CTX}{run.done_count}{self.R} {self.LABEL}done{self.R}',
@@ -990,7 +1000,7 @@ class Renderer:
                     if _visible_width(acc + ch) > avail - 1:
                         break
                     acc += ch
-                subj = acc + '…'
+                subj = acc + ELLIPSIS
                 subj_pad = max(0, avail - _visible_width(subj))
             else:
                 subj_pad = avail - sw
@@ -1030,8 +1040,8 @@ class Renderer:
         """
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
-        in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
-        out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
+        in_icon  = f'{ARROW_IN_ACTIVE} '  if in_active  else f'{ARROW_IN_IDLE} '   # both 2 cols
+        out_icon = f'{ARROW_OUT_ACTIVE} ' if out_active else f'{ARROW_OUT_IDLE} '  # both 2 cols
 
         if show_day_stats:
             # Merged session/day per field; variable width, no fixed rjust (D2).
@@ -1348,14 +1358,14 @@ class Renderer:
         try:
             if not five_hour.resets_at:
                 if not five_hour.used_percentage:
-                    return '∞'
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
+                    return GLYPH_UNLIMITED
+                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}{GLYPH_UNLIMITED}'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
-                    return '∞'
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
+                    return GLYPH_UNLIMITED
+                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}{GLYPH_UNLIMITED}'
             trend = self.burndown_trend(
                 float(five_hour.used_percentage or 0),
                 five_hour.resets_at,
