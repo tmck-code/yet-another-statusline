@@ -98,6 +98,13 @@ def _parse_bg_shift(raw: object, origin: str) -> str:
     raise ValueError(f'expected warm or cool, got {v!r}')
 
 
+def _parse_glyph_mode(raw: object, origin: str) -> str:
+    v = str(raw).strip().lower()
+    if v in ('nerdfont', 'ascii', 'unicode', 'singlewidth'):
+        return v
+    raise ValueError(f'expected one of nerdfont, ascii, unicode, singlewidth, got {v!r}')
+
+
 def _env_sources(env: dict[str, str], canonical: str, *aliases: str) -> list[tuple[str, object]]:
     out: list[tuple[str, object]] = []
     for name in (canonical, *aliases):
@@ -154,10 +161,10 @@ def _parse_argv(argv: Sequence[str]) -> dict[str, str]:
             out['theme'] = args.pop(0)
         elif a.startswith('--theme='):
             out['theme'] = a.split('=', 1)[1]
-        elif a == '--ascii-mode':
-            out['ascii_mode'] = 'true'
-        elif a.startswith('--ascii-mode='):
-            out['ascii_mode'] = a.split('=', 1)[1]
+        elif a == '--glyph-mode' and args:
+            out['glyph_mode'] = args.pop(0)
+        elif a.startswith('--glyph-mode='):
+            out['glyph_mode'] = a.split('=', 1)[1]
     return out
 
 
@@ -213,7 +220,7 @@ class Config:
     token_window: float = DEFAULT_TOKEN_WINDOW
     theme: str = DEFAULT_THEME
     bg_shift: str = 'warm'
-    ascii_mode: bool = False
+    glyph_mode: str = 'nerdfont'
     show_day_stats: bool = DEFAULT_SHOW_DAY_STATS
     soft_limit_models: tuple[tuple[str, int], ...] = ()
     errors: tuple[str, ...] = ()
@@ -280,12 +287,12 @@ class Config:
             + _env_sources(env, 'YAS_BG_SHIFT')
             + toml_src(appearance, 'bg_shift'),
             _parse_bg_shift, 'warm', errors, debug)
-        ascii_mode = _resolve(
-            'ascii_mode',
-            cli_src('ascii_mode')
-            + _env_sources(env, 'YAS_ASCII_MODE')
-            + toml_src(appearance, 'ascii_mode'),
-            _parse_bool, False, errors, debug)
+        glyph_mode = _resolve(
+            'glyph_mode',
+            cli_src('glyph_mode')
+            + _env_sources(env, 'YAS_GLYPH_MODE')
+            + toml_src(appearance, 'glyph_mode'),
+            _parse_glyph_mode, 'nerdfont', errors, debug)
         show_day_stats = _resolve(
             'show_day_stats',
             _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
@@ -300,7 +307,7 @@ class Config:
             token_window=token_window,
             theme=theme,
             bg_shift=bg_shift,
-            ascii_mode=ascii_mode,
+            glyph_mode=glyph_mode,
             show_day_stats=show_day_stats,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),

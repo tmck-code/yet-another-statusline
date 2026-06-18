@@ -182,11 +182,17 @@ Suppressed when: `resets_at == 0` (no window), window expired, or within warmup 
 ### Configuration
 
 **Config**:
-The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `ascii_mode`, `show_day_stats`, plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
+The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `show_day_stats`, plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
 _Avoid_: "settings" (overloaded with Claude Code's `settings.json`, which is unrelated — `Config` reads `yas.toml` and `YAS_*` env vars).
 
-**ASCII Mode**:
-The `ascii_mode` **Config** knob (`YAS_ASCII_MODE`, `[appearance].ascii_mode`, default off). When on, a single final-pass `str.translate` in `app.render` replaces every non-ASCII glyph (PUA icons, box-drawing, blocks, arrows, punctuation) with an ASCII equivalent, so the output is pure ASCII for terminals without a Nerd Font. Every fallback is exactly one ASCII char, so visible width — and therefore the hand-tuned border/elbow column math — is preserved. The full glyph→ASCII table is `ASCII_TRANSLATE` in `claude/yas/constants.py`.
+**Glyph Mode**:
+The `glyph_mode` **Config** knob (`--glyph-mode`, `YAS_GLYPH_MODE`, `[appearance].glyph_mode`, default `nerdfont`) selecting one of four mutually-exclusive glyph representations, applied as a single final pass in `app.render` (`apply_glyph_mode`). Every mode is width-preserving — each replacement is one visible column — so the hand-tuned border/elbow column math survives unchanged.
+- **`nerdfont`** (default): identity; display every character as-is. Full fidelity; requires a Nerd Font.
+- **`ascii`**: `str.translate(ASCII_TRANSLATE)` replaces every non-ASCII glyph (PUA icons, box-drawing, blocks, arrows, punctuation) with an ASCII equivalent, so the output is pure ASCII. Maximum compatibility. The full glyph→ASCII table is `ASCII_TRANSLATE` in `claude/yas/constants.py`.
+- **`unicode`**: `str.translate(UNICODE_TRANSLATE)` replaces **only** Nerd Font PUA icons with non-PUA, width-1 Unicode equivalents (`UNICODE_PUA` in `constants.py`), leaving box-drawing, block/sparkline, arrow, and punctuation glyphs intact. For terminals with good Unicode coverage but no Nerd Font.
+- **`singlewidth`**: `to_singlewidth` folds every genuinely double-width character (wide emoji, CJK) in the rendered output to a width-1 equivalent (NFKC narrow form, else `·`), so column math holds under fonts that render some glyphs double-width. Targets dynamic content (branch names, paths); the statusline's own glyphs are already width-1 and pass through untouched.
+
+The boolean `ascii_mode` / `YAS_ASCII_MODE` knob is **removed** (BREAKING) — migrate `YAS_ASCII_MODE=1` to `YAS_GLYPH_MODE=ascii`.
 
 **Precedence Chain**:
 The fixed order every knob resolves through, highest priority first: CLI flag → canonical `YAS_*` env var → legacy-alias env var → `yas.toml` value → built-in default. The first source that is *present and valid* wins; absent (an empty-string env var counts as absent) or invalid sources fall through to the next. The single documented exception is the **Per-Model Override**, which beats the global `soft_limit` from any source — specificity beats source precedence.

@@ -357,6 +357,56 @@ def test_malformed_model_entries_dropped_valid_kept(tmp_path: Path) -> None:
     assert cfg.soft_limit_for('claude-opus-4-8[1m]', '') == 1_000_000
 
 
+# 4.4 glyph_mode resolution (CLI → env → toml → default nerdfont)
+
+def test_env_selects_glyph_mode(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'ascii'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'ascii'
+
+
+def test_glyph_mode_default_is_nerdfont(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+
+
+@requires_tomllib
+def test_cli_glyph_mode_beats_env_and_toml(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance]\nglyph_mode = "nerdfont"\n')
+    cfg = config.Config.load(
+        env={'YAS_GLYPH_MODE': 'ascii'},
+        config_dir=tmp_path,
+        argv=['--glyph-mode', 'unicode'],
+    )
+    assert cfg.glyph_mode == 'unicode'
+
+
+@requires_tomllib
+def test_toml_selects_glyph_mode(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance]\nglyph_mode = "singlewidth"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'singlewidth'
+
+
+def test_env_glyph_mode_case_insensitive(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'ASCII'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'ascii'
+
+
+def test_invalid_env_glyph_mode_falls_back_and_records_debug(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'fancy'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert 'glyph_mode' not in cfg.errors      # env rejection is debug-only
+    assert any('glyph_mode' in line for line in cfg.debug_lines)
+
+
+@requires_tomllib
+def test_invalid_toml_glyph_mode_falls_back_and_records_error(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance]\nglyph_mode = "fancy"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'nerdfont'
+    assert 'glyph_mode' in cfg.errors
+
+
 # 4.7 Error row
 
 def test_append_error_row_noop_on_clean_config() -> None:

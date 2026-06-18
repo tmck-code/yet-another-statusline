@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import unicodedata
 
 from yas.constants import (
     _ANSI_RE,
@@ -11,6 +12,8 @@ from yas.constants import (
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
     ELLIPSIS,
+    MIDDLE_DOT,
+    UNICODE_TRANSLATE,
 )
 
 
@@ -80,6 +83,46 @@ def to_ascii(s: str) -> str:
     Width-preserving (1 PUA col -> 1 ASCII col), so applying it to a finished
     render leaves every border/elbow column exactly where it was."""
     return s.translate(ASCII_TRANSLATE)
+
+
+SINGLEWIDTH_PLACEHOLDER = MIDDLE_DOT  # width-1 stand-in for an unfoldable wide char
+
+
+def to_singlewidth(s: str) -> str:
+    """Fold every double-width char in ``s`` to a width-1 equivalent.
+
+    Walks char-by-char (ANSI escape bytes are ASCII, so ``_is_wide`` is False for
+    them and they pass through untouched). For each wide char, try an NFKC
+    single-char narrow form (e.g. Fullwidth Forms -> ASCII); if none exists, emit
+    SINGLEWIDTH_PLACEHOLDER. Already-width-1 chars (including the statusline's own
+    PUA glyphs) are left unchanged, so only genuinely wide dynamic content folds."""
+    out: list[str] = []
+    for ch in s:
+        if not _is_wide(ch):
+            out.append(ch)
+            continue
+        folded = unicodedata.normalize('NFKC', ch)
+        if len(folded) == 1 and not _is_wide(folded):
+            out.append(folded)
+        else:
+            out.append(SINGLEWIDTH_PLACEHOLDER)
+    return ''.join(out)
+
+
+def apply_glyph_mode(s: str, mode: str) -> str:
+    """Apply the selected glyph mode as a single final pass over a finished render.
+
+    nerdfont -> identity (no pass); ascii -> PUA+frame ASCII fallback table;
+    unicode -> PUA-only non-PUA Unicode table; singlewidth -> wide-char fold.
+    An unknown mode is treated as nerdfont (identity) — defensive; config already
+    validates the value upstream."""
+    if mode == 'ascii':
+        return s.translate(ASCII_TRANSLATE)
+    if mode == 'unicode':
+        return s.translate(UNICODE_TRANSLATE)
+    if mode == 'singlewidth':
+        return to_singlewidth(s)
+    return s
 
 
 def _middle_ellipsis(text: str, max_w: int) -> str:

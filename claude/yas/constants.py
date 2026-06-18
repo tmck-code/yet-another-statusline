@@ -262,6 +262,41 @@ _RAMP_FALLBACK = {0x2581:'_', 0x2582:'.', 0x2583:':', 0x2584:'-',
 # no entry. Ramp entries win for the shared block codepoints (see above).
 ASCII_TRANSLATE = {ord(g): a for g, a in ASCII_GLYPHS.items()} | _RAMP_FALLBACK
 
+# Unicode (no-Nerd-Font) fallbacks. `unicode` glyph_mode replaces ONLY the Nerd
+# Font Private Use Area icon glyphs with non-PUA, width-1 BMP equivalents, while
+# leaving box-drawing, block/sparkline, arrow, and punctuation glyphs (which are
+# standard Unicode) intact. Keys are the 21 PUA ICON_*/GLYPH_* constants plus
+# BarChars.MID; every value is a single non-PUA char (escaped so the bytes
+# survive diff/chat round-trips). Geometric-Shapes/Arrows are preferred over
+# emoji-presentation symbols, which many terminals render double-width.
+UNICODE_PUA: dict[str, str] = {
+    ICON_COST:          '$',  # $  currency-usd
+    ICON_TOK_RATE:      '◷',  # gauge
+    GLYPH_MODEL:        '▦',  # monitor-dashboard
+    GLYPH_THINKING:     '◍',  # brain
+    GLYPH_BURN_FAST:    '↯',  # zap
+    GLYPH_BURN_SLOW:    '∿',  # flame
+    GLYPH_FOLDER:       '▭',  # folder
+    GLYPH_SUBAGENT:     '☰',  # tasks
+    GLYPH_TASKS:        '▤',  # clipboard-check
+    GLYPH_TASK_PENDING: '○',  # circle
+    GLYPH_TASK_ACTIVE:  '▸',  # arrow-right
+    GLYPH_TASK_DONE:    '◉',  # check-circle-fill
+    GLYPH_SKILLS:       '◆',  # skills
+    GLYPH_PLUGINS:      '⌁',  # plug
+    GLYPH_HELPER:       '★',  # star-circle
+    GLYPH_TRASH:        '⌫',  # trash-can
+    GLYPH_RENAMED:      '⇄',  # file-move
+    GLYPH_REPLYING:     '»',  # message
+    GLYPH_HOURGLASS:    '⧖',  # hourglass
+    GLYPH_PIE:          '◕',  # pie-chart
+    GLYPH_CACHE:        '↻',  # cache
+    BarChars.MID:       '▪',  # progress sep
+}
+
+# Pre-built {codepoint: char} map for str.translate (used by `unicode` glyph_mode).
+UNICODE_TRANSLATE = {ord(g): u for g, u in UNICODE_PUA.items()}
+
 # Workflow cohort thresholds. A run is kept visible while any agent transcript
 # was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
 # cohort's windows so a run rides through between-phase lulls). At most
