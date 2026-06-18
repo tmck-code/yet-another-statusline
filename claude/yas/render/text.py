@@ -7,8 +7,10 @@ import subprocess
 
 from yas.constants import (
     _ANSI_RE,
+    ASCII_TRANSLATE,
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
+    ELLIPSIS,
 )
 
 
@@ -72,9 +74,17 @@ def _visible_width(s: str) -> int:
     return sum(2 if _is_wide(ch) else 1 for ch in plain)
 
 
+def to_ascii(s: str) -> str:
+    """Replace every Nerd Font PUA glyph with its single-char ASCII fallback.
+
+    Width-preserving (1 PUA col -> 1 ASCII col), so applying it to a finished
+    render leaves every border/elbow column exactly where it was."""
+    return s.translate(ASCII_TRANSLATE)
+
+
 def _middle_ellipsis(text: str, max_w: int) -> str:
     if max_w <= 1:
-        return '…'
+        return ELLIPSIS
     if _visible_width(text) <= max_w:
         return text
     left_vis  = (max_w - 1) // 2
@@ -109,7 +119,7 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
     suffix = _take(list(reversed(tokens)), right_vis)
     suffix.reverse()
 
-    result = ''.join(prefix) + '…' + ''.join(suffix)
+    result = ''.join(prefix) + ELLIPSIS + ''.join(suffix)
     if _visible_width(result) <= max_w:
         return result
     # Trim one visible char from prefix to fix wide-char overshoot.
@@ -117,7 +127,7 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
         if not _ANSI_RE.fullmatch(prefix[j]):
             prefix.pop(j)
             break
-    return ''.join(prefix) + '…' + ''.join(suffix)
+    return ''.join(prefix) + ELLIPSIS + ''.join(suffix)
 
 
 def fmt_tok(n: int) -> str:

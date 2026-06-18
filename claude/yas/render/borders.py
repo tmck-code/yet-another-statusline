@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
-from yas.constants import ITALIC, RESET
+from yas.constants import (
+    BOX_ARC_BL,
+    BOX_ARC_BR,
+    BOX_ARC_TL,
+    BOX_ARC_TR,
+    BOX_CROSS,
+    BOX_H,
+    BOX_H_DASH,
+    BOX_T_DOWN,
+    BOX_T_LEFT,
+    BOX_T_RIGHT,
+    BOX_T_UP,
+    BOX_V,
+    ELLIPSIS,
+    ITALIC,
+    RESET,
+)
 from yas.render.gradient import GradientEngine
 from yas.render.pill import Pill
 from yas.render.text import _visible_width
@@ -22,7 +38,7 @@ class BorderRenderer:
             pc = p.border_char(col, 'top')
             if pc:
                 return pc
-            return '┬' if col in downs_set else '─'
+            return BOX_T_DOWN if col in downs_set else BOX_H
         def _clr(col: int, pos: int) -> str:
             if p.active and p.start <= col <= p.end:
                 return p.border_fg(col)
@@ -30,12 +46,12 @@ class BorderRenderer:
         if p.active and p.start <= 1:
             parts = [p.border_fg(p.start), p.border_char(p.start, 'top')]
         else:
-            parts = [self.gradient.grad_at(0, width, fill=fill), '╭']
+            parts = [self.gradient.grad_at(0, width, fill=fill), BOX_ARC_TL]
         if session_id:
             avail = max(0, width - 4)
             if p.active and p.end == width and p.start > 5:
                 avail = max(0, min(avail, p.start - 5))
-            sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
+            sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + ELLIPSIS
             sid_w = _visible_width(sid)
             parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, ITALIC, sid, '\033[23m']
             offset = 3 + sid_w
@@ -50,34 +66,34 @@ class BorderRenderer:
         if p.active and p.start <= width <= p.end:
             parts += [p.border_fg(width), p.border_char(width, 'top'), self.R]
         else:
-            parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╮', self.R]
+            parts += [self.gradient.grad_at(width - 1, width, fill=fill), BOX_ARC_TR, self.R]
         return ''.join(parts)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
-        parts = [self.gradient.grad_at(0, width, fill=fill), '╰']
+        parts = [self.gradient.grad_at(0, width, fill=fill), BOX_ARC_BL]
         for i in range(width - 2):
-            ch = '┴' if (i + 2) in ups_set else '─'
+            ch = BOX_T_UP if (i + 2) in ups_set else BOX_H
             parts += [self.gradient.grad_at(i + 1, width, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╯', self.R]
+        parts += [self.gradient.grad_at(width - 1, width, fill=fill), BOX_ARC_BR, self.R]
         return ''.join(parts)
 
     def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
         ups_set = set(ups)
         downs_set = set(downs)
-        parts = [self.gradient.grad_at(0, width, fill=fill), '├']
+        parts = [self.gradient.grad_at(0, width, fill=fill), BOX_T_RIGHT]
         for i in range(width - 2):
             col = i + 2
             if col in downs_set and col in ups_set:
-                ch = '┼'
+                ch = BOX_CROSS
             elif col in downs_set:
-                ch = '┬'
+                ch = BOX_T_DOWN
             elif col in ups_set:
-                ch = '┴'
+                ch = BOX_T_UP
             else:
-                ch = '─'
+                ch = BOX_H
             parts += [self.gradient.grad_at(i + 1, width, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), '┤', self.R]
+        parts += [self.gradient.grad_at(width - 1, width, fill=fill), BOX_T_LEFT, self.R]
         return ''.join(parts)
 
     DIM_MIN  = 0.6
@@ -98,7 +114,7 @@ class BorderRenderer:
         if p.active and p.start <= 1:
             parts = [p.border_fg(p.start), p.border_char(p.start, edge)]
         else:
-            parts = [self.gradient.grad_at(0, width, self._dim_for_col(1, elbow_cols), fill=fill), '├']
+            parts = [self.gradient.grad_at(0, width, self._dim_for_col(1, elbow_cols), fill=fill), BOX_T_RIGHT]
         for i in range(width - 2):
             col = i + 2
             pc = p.border_char(col, edge) if p.active else ''
@@ -106,18 +122,18 @@ class BorderRenderer:
                 parts += [p.border_fg(col), pc]
             else:
                 if col in downs_set and col in ups_set:
-                    ch = '┼'
+                    ch = BOX_CROSS
                 elif col in downs_set:
-                    ch = '┬'
+                    ch = BOX_T_DOWN
                 elif col in ups_set:
-                    ch = '┴'
+                    ch = BOX_T_UP
                 else:
-                    ch = '┄'
+                    ch = BOX_H_DASH
                 parts += [self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill), ch]
         if p.active and p.start <= width <= p.end:
             parts += [p.border_fg(width), p.border_char(width, edge), self.R]
         else:
-            parts += [self.gradient.grad_at(width - 1, width, self._dim_for_col(width, elbow_cols), fill=fill), '┤', self.R]
+            parts += [self.gradient.grad_at(width - 1, width, self._dim_for_col(width, elbow_cols), fill=fill), BOX_T_LEFT, self.R]
         return ''.join(parts)
 
     def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
@@ -126,12 +142,12 @@ class BorderRenderer:
             pad     = max(0, width - 2 - _visible_width(content) - pill_w)
             left    = self.gradient.grad_at(0, width, fill=fill)
             lead    = f'{bg_lead} \033[49m' if bg_lead else ' '
-            return f'{left}│{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
+            return f'{left}{BOX_V}{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
         if pill_flush:
             pad = max(0, width - 1 - _visible_width(content))
             right = self.gradient.grad_at(width - 1, width, fill=fill)
             pad_str = ' ' * pad
-            return f'{content}{pad_str}{right}│{self.R}'
+            return f'{content}{pad_str}{right}{BOX_V}{self.R}'
         pad = max(0, width - 3 - _visible_width(content))
         left  = self.gradient.grad_at(0, width, fill=fill)
         right = self.gradient.grad_at(width - 1, width, fill=fill)
@@ -140,4 +156,4 @@ class BorderRenderer:
             pad_str = f'{" " * (pad - 1)}{bg_trail} \033[49m'
         else:
             pad_str = ' ' * pad
-        return f'{left}│{self.R}{lead}{content}{pad_str}{right}│{self.R}'
+        return f'{left}{BOX_V}{self.R}{lead}{content}{pad_str}{right}{BOX_V}{self.R}'

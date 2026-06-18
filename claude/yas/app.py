@@ -10,7 +10,7 @@ from yas.info import SessionView
 from yas.layout import build_narrow, build_medium, build_wide, render_layout
 from yas.renderer import Renderer
 from yas.session import SessionInfo, _as_str
-from yas.render.text import terminal_width
+from yas.render.text import terminal_width, to_ascii
 from yas.themes import CLAUDE_DARK, THEMES, Theme
 from yas.tokens import TickRecord, TokenLog, TokenRate, compute_day_cost
 from yas.info.transcript import TranscriptUsage
@@ -35,12 +35,14 @@ def resolve_theme(cli_name: str | None) -> Theme:
     return THEMES.get(Config.load().theme, CLAUDE_DARK)
 
 
-def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
+def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm', theme: Theme | None = None, ascii_mode: bool | None = None) -> str:
     if width < MIN_WIDTH:
         return ''
     session    = SessionInfo.from_dict(session_info)
     r          = Renderer(bg_shift=bg_shift, theme=theme)
     cfg        = Config.load()
+    if ascii_mode is None:
+        ascii_mode = cfg.ascii_mode
     soft_limit = cfg.soft_limit_for(session.model.id, session.model.display_name)
     view       = SessionView(session, cfg)
     if width < NARROW_WIDTH:
@@ -50,7 +52,8 @@ def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm
     else:
         tick = record_tick(session, view.transcript_usage)
         spec = build_wide(view, tick, width, r, soft_limit)
-    return '\n'.join(render_layout(spec, r))
+    out = '\n'.join(render_layout(spec, r))
+    return to_ascii(out) if ascii_mode else out
 
 
 def main() -> None:
@@ -92,4 +95,4 @@ def main() -> None:
     else:
         width = max(MIN_WIDTH, min(cfg.max_width, raw_tw - 6))
 
-    sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
+    sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme, ascii_mode=cfg.ascii_mode))

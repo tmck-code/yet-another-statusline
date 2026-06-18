@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 
 from yas.config import Config
 from yas.constants import (
+    BOX_V,
     CLR_WARN,
     DEFAULT_SOFT_LIMIT,
+    ELLIPSIS,
     GLYPH_CONFIG_WARN,
     GLYPH_WF_DIVIDER,
     RESET,
@@ -62,7 +64,7 @@ def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) 
     text  = f'{GLYPH_CONFIG_WARN} yas.toml: {len(cfg.errors)} values ignored ({names})'
     avail = max(1, width - 4)  # inner content area between "│ " and " │"
     if _visible_width(text) > avail:
-        text = text[:avail - 1] + '…'
+        text = text[:avail - 1] + ELLIPSIS
     bottom = rows.pop()  # the bottom_border RowSpec
     rows.append(RowSpec('separator_dim', ups=bottom.ups))
     rows.append(RowSpec('content', content=f'{CLR_WARN}{text}{RESET}'))
@@ -533,7 +535,7 @@ def build_wide(
                     r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout).split('\n')
                 )
             div_color = r.grad_at(divider_col - 1, width, fill=fill)
-            divider   = f'{div_color}│{RESET}'
+            divider   = f'{div_color}{BOX_V}{RESET}'
             rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, downs=(divider_col,)))
             for line in zip_columns(left_lines, right_lines, left_w, right_w, divider):
                 rows.append(RowSpec('content', content=line))
