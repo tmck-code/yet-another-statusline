@@ -421,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "yet-another-statusline"
-version = "0.2.18"
+version = "0.3.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
