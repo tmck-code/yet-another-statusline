@@ -68,6 +68,9 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
 | `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | — | `[appearance.glyphs].mode` | `nerdfont` |
 | `single_width` | `YAS_GLYPH_SINGLE_WIDTH` (also `--glyph-single-width` CLI) | — | `[appearance.glyphs].single_width` | `false` |
+| `context_state` | `YAS_CONTEXT_STATE` | — | `[context].state` | `false` |
+| `context_labels` | `YAS_CONTEXT_LABELS` | — | `[context].labels` | `Smart,Coasting,Foggy,Cooked,Dumb` |
+| `context_thresholds` | `YAS_CONTEXT_THRESHOLDS` | — | `[context].thresholds` | `25,50,70,90` |
 
 - Valid `theme` values (14 built-in themes):
   - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
@@ -80,6 +83,28 @@ aliases when both are set — the aliases keep working but are deprecated.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
+
+### Context state word
+
+`context_state` adds a morphing word to the context line that names how full the
+context window is — `Smart → Coasting → Foggy → Cooked → Dumb` — so you can read
+the state at a glance instead of doing percentage math. It is **off by default**;
+enable it with `YAS_CONTEXT_STATE=1` or `[context].state = true`.
+
+The word is tinted with the same threshold colour as the context bar and sits
+just before it; in a narrow box it sheds first (the bar and percentage stay).
+
+- `context_labels` — exactly 5 comma-separated words (`Smart,Coasting,Foggy,Cooked,Dumb` by default).
+- `context_thresholds` — exactly 4 strictly-ascending integers in `1..99` (`25,50,70,90` by default), the start percentage of bands 2–5.
+
+The percentage driving the word is YAS's **soft-limit fill ratio** (the same
+basis as the context bar), so the word and the bar always agree — the word turns
+`Dumb` exactly as the bar fills toward the compaction `soft_limit`.
+
+> Credit: the state-word idea and its default labels/thresholds are ported from
+> [**Dumbometer**](https://github.com/MaximoCorrea1/dumbometer) by Maximo Correa
+> Rosas (MIT). See [`NOTICE`](NOTICE). Dumbometer maps the word to the *full
+> context window*; YAS maps it to the soft-limit fill ratio for bar consistency.
 
 ### `yas.toml`
 
@@ -103,6 +128,11 @@ bg_shift = "warm"
 [appearance.glyphs]
 mode = "nerdfont"
 single_width = false
+
+[context]
+state = false
+labels = ["Smart", "Coasting", "Foggy", "Cooked", "Dumb"]
+thresholds = [25, 50, 70, 90]
 ```
 
 > **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.

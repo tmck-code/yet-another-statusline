@@ -16,6 +16,11 @@ DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
+# Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so
+# the context line's byte output is unchanged unless explicitly enabled.
+DEFAULT_CONTEXT_STATE      = False
+DEFAULT_CONTEXT_LABELS:     tuple[str, ...] = ('Smart', 'Coasting', 'Foggy', 'Cooked', 'Dumb')
+DEFAULT_CONTEXT_THRESHOLDS: tuple[int, ...] = (25, 50, 70, 90)
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 # Box width at/above which the wide layout's workflow cohort pairs agents into

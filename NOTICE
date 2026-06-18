@@ -1,0 +1,41 @@
+yet-another-statusline (YAS!)
+Copyright (c) 2026, Tom McKeesick
+Licensed under the BSD 3-Clause License (see LICENSE).
+
+------------------------------------------------------------------------
+Third-party attributions
+------------------------------------------------------------------------
+
+This product includes logic ported from Dumbometer.
+
+  Dumbometer
+  https://github.com/MaximoCorrea1/dumbometer
+  Copyright (c) Maximo Correa Rosas
+  Licensed under the MIT License.
+
+The "context state word" feature (claude/yas/context_state.py) — the idea of a
+morphing Smart -> Coasting -> Foggy -> Cooked -> Dumb label driven by context
+fullness, together with the default labels and 25/50/70/90 thresholds — is
+ported from Dumbometer's level model (src/config.js) and label-selection logic
+(src/state.js). YAS adapts it to map the word off its soft-limit fill ratio
+rather than the full context-window percentage.
+
+MIT License (Dumbometer):
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.

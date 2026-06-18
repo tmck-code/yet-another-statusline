@@ -92,6 +92,7 @@ from yas.render.gradient import (
     rainbow_step,
     _scale,
 )
+from yas.context_state import context_state
 from yas.info.git import GitInfo
 from yas.render.metrics import burndown_delta, subagent_share
 from yas.render.pill import Pill
@@ -1358,12 +1359,45 @@ class Renderer:
             parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
         return ''.join(parts)
 
+    # Minimum bar cells that must survive after the optional context-state word
+    # is added; below this the word sheds so the bar stays legible.
+    _CTX_WORD_MIN_BAR = 8
+
+    def _ctx_state_word(
+        self,
+        pct_soft: float,
+        available: int,
+        prefix_w: int,
+        badge_w: int,
+        color: str,
+        state_labels: Sequence[str] | None,
+        state_thresholds: Sequence[int],
+    ) -> tuple[str, int]:
+        """Build the optional context-state word segment (ported from Dumbometer).
+
+        Returns ``(segment, visible_width)``. The label (Smart..Dumb) is padded
+        to the widest configured label for a jitter-free left edge, tinted with
+        the bar's threshold ``color``, and followed by one space. Returns
+        ``('', 0)`` when disabled or when rendering it would leave fewer than
+        ``_CTX_WORD_MIN_BAR`` cells for the bar (shed-first behaviour).
+        """
+        if not state_labels:
+            return '', 0
+        label = context_state(pct_soft, state_labels, state_thresholds)
+        label = label.ljust(max(len(s) for s in state_labels))
+        word_w = len(label) + 1  # trailing space
+        if available - prefix_w - word_w - 3 - badge_w < self._CTX_WORD_MIN_BAR:
+            return '', 0
+        return f'{color}{label}{self.R} ', word_w
+
     def context_line(
         self,
         ctx: ContextWindow,
         available: int = 76,
         soft_limit: int = DEFAULT_SOFT_LIMIT,
         exceeds_200k: bool = False,
+        state_labels: Sequence[str] | None = None,
+        state_thresholds: Sequence[int] = (),
     ) -> str:
         fill_ratio, pct_soft = _ctx_fill_ratio(ctx, soft_limit)
         total_tokens         = _ctx_used_tokens(ctx)
@@ -1383,11 +1417,13 @@ class Renderer:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {a}{f"({pct_model:.0f}%)":>5}{self.R}'
             prefix = f'{a}{fmt_tok(total_tokens):>6}{self.R}{secondary} {a}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
-            bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
+            prefix_w = _visible_width(prefix)
+            word_seg, word_w = self._ctx_state_word(pct_soft, available, prefix_w, badge_w, a, state_labels, state_thresholds)
+            bar_w  = max(0, max(4, available - prefix_w - word_w - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
             bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f'{badge}{a}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
+            return f'{badge}{a}{GLYPH_HOURGLASS}{self.R} {prefix}{word_seg}{bar}'
 
         bar_clr = self.risk_zone_color(total_tokens)
         # Fixed-width right-justified fields (rjust applied to the plain text
@@ -1399,11 +1435,13 @@ class Renderer:
             pct_model = total_tokens / ctx.context_window_size * 100
             secondary = f' {self.DIM_GREEN}{f"({pct_model:.0f}%)":>5}{self.R}'
         prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens):>6}{self.R}{secondary} {bar_clr}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
-        bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
+        prefix_w = _visible_width(prefix)
+        word_seg, word_w = self._ctx_state_word(pct_soft, available, prefix_w, badge_w, bar_clr, state_labels, state_thresholds)
+        bar_w  = max(0, max(4, available - prefix_w - word_w - 3) - badge_w)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
         bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
-        return f'{badge}{bar_clr}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
+        return f'{badge}{bar_clr}{GLYPH_HOURGLASS}{self.R} {prefix}{word_seg}{bar}'
 
     def context_line_compact(
         self,

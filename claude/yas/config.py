@@ -24,6 +24,9 @@ from typing import TYPE_CHECKING, TypeVar
 
 from yas.constants import (
     CLAUDE_DIR,
+    DEFAULT_CONTEXT_LABELS,
+    DEFAULT_CONTEXT_STATE,
+    DEFAULT_CONTEXT_THRESHOLDS,
     DEFAULT_JUSTIFY,
     DEFAULT_LABELS,
     DEFAULT_MAX_WIDTH,
@@ -218,6 +221,48 @@ def _parse_models(raw: object, errors: list[str], debug: list[str]) -> list[tupl
     return out
 
 
+def _as_seq(raw: object) -> list[object]:
+    """Normalise a list knob to a list of items.
+
+    A TOML array arrives as a ``list``; an env/CLI value arrives as a
+    comma-separated ``str``. Anything else is rejected by the caller.
+    """
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(',')]
+    raise ValueError('expected a list or comma-separated string')
+
+
+def _parse_context_labels(raw: object, origin: str) -> tuple[str, ...]:
+    """Exactly 5 non-empty label words (Smart..Dumb by default)."""
+    items = [str(s).strip() for s in _as_seq(raw)]
+    if len(items) != 5 or not all(items):
+        raise ValueError('expected exactly 5 non-empty labels')
+    return tuple(items)
+
+
+def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
+    """Exactly 4 strictly-ascending ints in 1..99 (band starts for levels 2-5).
+
+    Mirrors Dumbometer's DUMBOMETER_THRESHOLDS validation.
+    """
+    seq = _as_seq(raw)
+    if any(isinstance(x, bool) for x in seq):
+        raise ValueError('expected integers')
+    try:
+        nums = [int(str(x).strip()) for x in seq]
+    except (TypeError, ValueError):
+        raise ValueError('expected integers')
+    if (
+        len(nums) != 4
+        or not all(1 <= n <= 99 for n in nums)
+        or not (nums[0] < nums[1] < nums[2] < nums[3])
+    ):
+        raise ValueError('expected 4 strictly ascending ints in 1..99')
+    return tuple(nums)
+
+
 @dataclass(frozen=True)
 class Config:
     max_width: int = DEFAULT_MAX_WIDTH
@@ -231,6 +276,9 @@ class Config:
     glyph_mode: str = 'nerdfont'
     single_width: bool = False
     show_day_stats: bool = DEFAULT_SHOW_DAY_STATS
+    context_state: bool = DEFAULT_CONTEXT_STATE
+    context_labels: tuple[str, ...] = DEFAULT_CONTEXT_LABELS
+    context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS
     soft_limit_models: tuple[tuple[str, int], ...] = ()
     errors: tuple[str, ...] = ()
     debug_lines: tuple[str, ...] = ()
@@ -263,6 +311,7 @@ class Config:
             return v if isinstance(v, dict) else {}
 
         layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
+        context = _table('context')
         glyphs = _table_in(appearance, 'glyphs')
         cli = _parse_argv(argv) if argv is not None else {}
 
@@ -325,6 +374,18 @@ class Config:
             'labels',
             _env_sources(env, 'YAS_LABELS') + toml_src(layout, 'labels'),
             _parse_bool, DEFAULT_LABELS, errors, debug)
+        context_state = _resolve(
+            'context_state',
+            _env_sources(env, 'YAS_CONTEXT_STATE') + toml_src(context, 'state'),
+            _parse_bool, DEFAULT_CONTEXT_STATE, errors, debug)
+        context_labels = _resolve(
+            'context_labels',
+            _env_sources(env, 'YAS_CONTEXT_LABELS') + toml_src(context, 'labels'),
+            _parse_context_labels, DEFAULT_CONTEXT_LABELS, errors, debug)
+        context_thresholds = _resolve(
+            'context_thresholds',
+            _env_sources(env, 'YAS_CONTEXT_THRESHOLDS') + toml_src(context, 'thresholds'),
+            _parse_context_thresholds, DEFAULT_CONTEXT_THRESHOLDS, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
@@ -340,6 +401,9 @@ class Config:
             glyph_mode=glyph_mode,
             single_width=single_width,
             show_day_stats=show_day_stats,
+            context_state=context_state,
+            context_labels=context_labels,
+            context_thresholds=context_thresholds,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

@@ -420,8 +420,9 @@ def build_wide(
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
 
+    state_labels = view.cfg.context_labels if view.cfg.context_state else None
     line_context = (
-        r.context_line(ctx, width - 3, soft_limit)
+        r.context_line(ctx, width - 3, soft_limit, state_labels=state_labels, state_thresholds=view.cfg.context_thresholds)
         if tokens_fits else
         r.context_line_compact(ctx, width - 3, soft_limit)
     )
