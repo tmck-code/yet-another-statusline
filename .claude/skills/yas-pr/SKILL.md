@@ -37,9 +37,25 @@ the template structure — read it from the repo so the two never drift.
    the user; only fall back if they decline. Paste the paste-ready table into the Benchmark
    block. Tick "N/A — no performance-relevant change" instead only for docs/config-only PRs.
 
-7. **Screenshots.** You cannot attach images via `gh`. Remind the user that for any rendering
-   change they should drag before/after images into the draft's web UI before marking it ready.
-   For rendering changes, `make demo/img` can produce snapshots to use.
+7. **Before/after renders.** `gh` can't attach images, so for any rendering change embed
+   ANSI-stripped text renders in place of screenshots, via the **yas-demo-text** skill. Capture
+   the branch ("after") and `main` ("before") snapshots as plain text, then paste each into a
+   fenced code block in the Changes section:
+
+   ```bash
+   # after — this branch
+   make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh && cp -r demo/text /tmp/yas-after
+   # before — main, rendered in a throwaway worktree
+   git worktree add -q /tmp/yas-base main
+   ( cd /tmp/yas-base && make demo/img && .claude/skills/yas-demo-text/scripts/demo-text.sh )
+   diff -u /tmp/yas-base/demo/text/kitchen-sink.txt /tmp/yas-after/demo/text/kitchen-sink.txt
+   git worktree remove /tmp/yas-base
+   ```
+
+   The box-drawing layout survives stripping, so reviewers see the change inline with no
+   web-UI image drag. Scope to one snapshot with `DEMO_ONLY=<scenario>`. Dragging real images
+   into the web UI is still fine if pixels matter (Nerd Font glyphs show as boxes on GitHub);
+   text is the default.
 
 8. **Confirm, then create the draft.** Show the fully assembled body. After the user confirms,
    run `gh pr create --draft` with that body. Print the PR URL and tell the user to add
