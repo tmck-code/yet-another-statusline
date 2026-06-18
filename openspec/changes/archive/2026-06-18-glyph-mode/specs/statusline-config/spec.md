@@ -2,7 +2,7 @@
 
 ### Requirement: Glyph mode knob
 
-The statusline SHALL expose a `glyph_mode` knob that selects the glyph rendering mode, resolved through the standard precedence chain: CLI `--glyph-mode <value>` → `YAS_GLYPH_MODE` env var → `[appearance].glyph_mode` in `yas.toml` → default. The accepted values SHALL be exactly `nerdfont`, `ascii`, `unicode`, and `singlewidth` (case-insensitive), and the default SHALL be `nerdfont`. Any other value SHALL be rejected and fall back to the default like every other knob. There SHALL be no per-mode environment variable beyond `YAS_GLYPH_MODE`.
+The statusline SHALL expose a `glyph_mode` knob that selects the glyph rendering mode, resolved through the standard precedence chain: CLI `--glyph-mode <value>` → `YAS_GLYPH_MODE` env var → `[appearance.glyphs].mode` in `yas.toml` → default. The accepted values SHALL be exactly `nerdfont`, `ascii`, and `unicode` (case-insensitive), and the default SHALL be `nerdfont`. Any other value SHALL be rejected and fall back to the default like every other knob. There SHALL be no per-mode environment variable beyond `YAS_GLYPH_MODE`.
 
 #### Scenario: Env var selects a mode
 
@@ -11,7 +11,7 @@ The statusline SHALL expose a `glyph_mode` knob that selects the glyph rendering
 
 #### Scenario: CLI flag overrides env and toml
 
-- **WHEN** `--glyph-mode unicode` is passed and `YAS_GLYPH_MODE=ascii` and `[appearance].glyph_mode = "nerdfont"` are also set
+- **WHEN** `--glyph-mode unicode` is passed and `YAS_GLYPH_MODE=ascii` and `[appearance.glyphs].mode = "nerdfont"` are also set
 - **THEN** the resolved `glyph_mode` is `unicode`
 
 #### Scenario: Default is nerdfont
@@ -23,6 +23,30 @@ The statusline SHALL expose a `glyph_mode` knob that selects the glyph rendering
 
 - **WHEN** `glyph_mode = "fancy"` is configured
 - **THEN** `glyph_mode` falls back to `nerdfont` and the rejection is recorded
+
+### Requirement: Single-width knob
+
+The statusline SHALL expose a `single_width` boolean knob, independent of `glyph_mode`, resolved through the standard precedence chain: CLI `--glyph-single-width <value>` → `YAS_GLYPH_SINGLE_WIDTH` env var → `[appearance.glyphs].single_width` in `yas.toml` → default. The value SHALL be a boolean (env form treats `0`, `false`, and `no` as false and any other non-empty value as true) and the default SHALL be `false`. An invalid value SHALL fall back to the default like every other knob. The knob SHALL be combinable with any `glyph_mode` value.
+
+#### Scenario: Env var enables the fold
+
+- **WHEN** `YAS_GLYPH_SINGLE_WIDTH=1` is set
+- **THEN** the resolved `single_width` is `true`
+
+#### Scenario: CLI flag overrides env and toml
+
+- **WHEN** `--glyph-single-width false` is passed and `YAS_GLYPH_SINGLE_WIDTH=1` and `[appearance.glyphs].single_width = true` are also set
+- **THEN** the resolved `single_width` is `false`
+
+#### Scenario: Default is false
+
+- **WHEN** no `single_width` is configured from any source
+- **THEN** the resolved `single_width` is `false`
+
+#### Scenario: Combines with a mode
+
+- **WHEN** `glyph_mode = "unicode"` and `single_width = true` are configured together
+- **THEN** both knobs resolve to their configured values independently
 
 ## MODIFIED Requirements
 
@@ -43,7 +67,7 @@ The statusline SHALL resolve every configurable knob through a single, fixed pre
 #### Scenario: Default when nothing is set
 
 - **WHEN** no `yas.toml` exists and no relevant env var is set
-- **THEN** every knob resolves to its built-in default (`max_width=140`, `full_width=false`, `soft_limit=150000`, `token_window=60`, `theme=dark`, `bg_shift=warm`, `show_day_stats=true`, `glyph_mode=nerdfont`)
+- **THEN** every knob resolves to its built-in default (`max_width=140`, `full_width=false`, `soft_limit=150000`, `token_window=60`, `theme=dark`, `bg_shift=warm`, `show_day_stats=true`, `glyph_mode=nerdfont`, `single_width=false`)
 
 #### Scenario: CLI flag overrides env and config
 
@@ -52,7 +76,7 @@ The statusline SHALL resolve every configurable knob through a single, fixed pre
 
 ### Requirement: Canonical env vars and deprecated aliases
 
-The statusline SHALL accept canonical `YAS_*` environment variables for all eight knobs (`YAS_MAX_WIDTH`, `YAS_FULL_WIDTH`, `YAS_SOFT_LIMIT`, `YAS_TOKEN_WINDOW`, `YAS_THEME`, `YAS_BG_SHIFT`, `YAS_SHOW_DAY_STATS`, `YAS_GLYPH_MODE`). It SHALL continue to honor the legacy aliases `STATUSLINE_TOKEN_WINDOW` (for `token_window`) and `CLAUDE_STATUSLINE_THEME` (for `theme`). When both a canonical var and its alias are set, the canonical value SHALL win.
+The statusline SHALL accept canonical `YAS_*` environment variables for all nine knobs (`YAS_MAX_WIDTH`, `YAS_FULL_WIDTH`, `YAS_SOFT_LIMIT`, `YAS_TOKEN_WINDOW`, `YAS_THEME`, `YAS_BG_SHIFT`, `YAS_SHOW_DAY_STATS`, `YAS_GLYPH_MODE`, `YAS_GLYPH_SINGLE_WIDTH`). It SHALL continue to honor the legacy aliases `STATUSLINE_TOKEN_WINDOW` (for `token_window`) and `CLAUDE_STATUSLINE_THEME` (for `theme`). When both a canonical var and its alias are set, the canonical value SHALL win.
 
 #### Scenario: Legacy alias still works
 
@@ -79,9 +103,14 @@ The statusline SHALL accept canonical `YAS_*` environment variables for all eigh
 - **WHEN** `YAS_GLYPH_MODE=unicode` is set
 - **THEN** the resolved `glyph_mode` is `unicode`
 
+#### Scenario: Glyph single-width env var resolves
+
+- **WHEN** `YAS_GLYPH_SINGLE_WIDTH=1` is set
+- **THEN** the resolved `single_width` is `true`
+
 ### Requirement: yas.toml location and sectioned schema
 
-The statusline SHALL read configuration from `yas.toml` located in `CLAUDE_CONFIG_DIR` (defaulting to `~/.claude/`). The file SHALL use a sectioned schema: `[layout]` for `max_width` and `full_width`, `[tokens]` for `soft_limit` (global default), `token_window`, and `show_day_stats`, an optional `[[tokens.model]]` array of `{ match, soft_limit }` tables for per-model `soft_limit` overrides, and `[appearance]` for `theme`, `bg_shift`, and `glyph_mode`. Absence of the file SHALL be equivalent to all-defaults and SHALL NOT be an error.
+The statusline SHALL read configuration from `yas.toml` located in `CLAUDE_CONFIG_DIR` (defaulting to `~/.claude/`). The file SHALL use a sectioned schema: `[layout]` for `max_width` and `full_width`, `[tokens]` for `soft_limit` (global default), `token_window`, and `show_day_stats`, an optional `[[tokens.model]]` array of `{ match, soft_limit }` tables for per-model `soft_limit` overrides, `[appearance]` for `theme` and `bg_shift`, and the `[appearance.glyphs]` subtable for `mode` and `single_width`. Absence of the file SHALL be equivalent to all-defaults and SHALL NOT be an error.
 
 #### Scenario: Knobs read from their sections
 
@@ -93,10 +122,15 @@ The statusline SHALL read configuration from `yas.toml` located in `CLAUDE_CONFI
 - **WHEN** `yas.toml` contains `[tokens]` `show_day_stats = false` and no `YAS_SHOW_DAY_STATS` env var is set
 - **THEN** the resolved `show_day_stats` is `false`
 
-#### Scenario: Glyph-mode read from appearance section
+#### Scenario: Glyph mode read from appearance.glyphs subtable
 
-- **WHEN** `yas.toml` contains `[appearance]` `glyph_mode = "ascii"` and no `YAS_GLYPH_MODE` env var is set
+- **WHEN** `yas.toml` contains `[appearance.glyphs]` `mode = "ascii"` and no `YAS_GLYPH_MODE` env var is set
 - **THEN** the resolved `glyph_mode` is `ascii`
+
+#### Scenario: Single-width read from appearance.glyphs subtable
+
+- **WHEN** `yas.toml` contains `[appearance.glyphs]` `single_width = true` and no `YAS_GLYPH_SINGLE_WIDTH` env var is set
+- **THEN** the resolved `single_width` is `true`
 
 #### Scenario: Missing file is not an error
 
@@ -110,7 +144,7 @@ The statusline SHALL read configuration from `yas.toml` located in `CLAUDE_CONFI
 
 ### Requirement: Fail-safe validation of config values
 
-The statusline SHALL never crash or render garbage because of bad configuration. A syntactically broken `yas.toml` SHALL cause the entire file to be ignored (env + defaults still apply). A value that is the wrong type or out of range for its knob SHALL cause only that single knob to fall back to its default while all other valid knobs are still applied. Validation rules: `max_width` is an integer > 0; `full_width` is a boolean (env form accepts any non-empty value as true); `soft_limit` is an integer > 0; `token_window` is a number > 0; `theme` must be a known theme name; `bg_shift` must be one of `warm` or `cool`; `show_day_stats` is a boolean (env form treats `0`, `false`, and `no` as false and any other non-empty value as true); `glyph_mode` must be one of `nerdfont`, `ascii`, `unicode`, or `singlewidth`.
+The statusline SHALL never crash or render garbage because of bad configuration. A syntactically broken `yas.toml` SHALL cause the entire file to be ignored (env + defaults still apply). A value that is the wrong type or out of range for its knob SHALL cause only that single knob to fall back to its default while all other valid knobs are still applied. Validation rules: `max_width` is an integer > 0; `full_width` is a boolean (env form accepts any non-empty value as true); `soft_limit` is an integer > 0; `token_window` is a number > 0; `theme` must be a known theme name; `bg_shift` must be one of `warm` or `cool`; `show_day_stats` is a boolean (env form treats `0`, `false`, and `no` as false and any other non-empty value as true); `glyph_mode` must be one of `nerdfont`, `ascii`, or `unicode`; `single_width` is a boolean (same env-form rules as `show_day_stats`).
 
 #### Scenario: Broken TOML ignores whole file
 

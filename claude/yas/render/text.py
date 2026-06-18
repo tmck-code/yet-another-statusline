@@ -113,16 +113,26 @@ def apply_glyph_mode(s: str, mode: str) -> str:
     """Apply the selected glyph mode as a single final pass over a finished render.
 
     nerdfont -> identity (no pass); ascii -> PUA+frame ASCII fallback table;
-    unicode -> PUA-only non-PUA Unicode table; singlewidth -> wide-char fold.
-    An unknown mode is treated as nerdfont (identity) — defensive; config already
-    validates the value upstream."""
+    unicode -> PUA-only non-PUA Unicode table. An unknown mode is treated as
+    nerdfont (identity) — defensive; config already validates the value
+    upstream. Single-width folding is orthogonal (see ``apply_glyphs``)."""
     if mode == 'ascii':
         return s.translate(ASCII_TRANSLATE)
     if mode == 'unicode':
         return s.translate(UNICODE_TRANSLATE)
-    if mode == 'singlewidth':
-        return to_singlewidth(s)
     return s
+
+
+def apply_glyphs(s: str, mode: str, single_width: bool) -> str:
+    """Combine the glyph ``mode`` with the orthogonal ``single_width`` fold.
+
+    Runs ``apply_glyph_mode`` first, then folds double-width chars to width-1
+    when ``single_width`` is set, so single-width folding can pair with any
+    mode (nerdfont, ascii, or unicode)."""
+    out = apply_glyph_mode(s, mode)
+    if single_width:
+        out = to_singlewidth(out)
+    return out
 
 
 def _middle_ellipsis(text: str, max_w: int) -> str:
