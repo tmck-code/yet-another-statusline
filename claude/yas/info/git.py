@@ -1,19 +1,39 @@
 from __future__ import annotations
-import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 from yas.constants import _sanitize
 
 
-@dataclass
 class GitInfo:
-    branch: str = ''
-    commit: str = ''
-    modified: int = 0
-    untracked: int = 0
-    deleted: int = 0
-    renamed: int = 0
+    __slots__ = ('branch', 'commit', 'modified', 'untracked', 'deleted', 'renamed')
+
+    def __init__(
+        self,
+        branch:    str = '',
+        commit:    str = '',
+        modified:  int = 0,
+        untracked: int = 0,
+        deleted:   int = 0,
+        renamed:   int = 0,
+    ) -> None:
+        self.branch    = branch
+        self.commit    = commit
+        self.modified  = modified
+        self.untracked = untracked
+        self.deleted   = deleted
+        self.renamed   = renamed
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, GitInfo):
+            return NotImplemented
+        return (self.branch, self.commit, self.modified, self.untracked, self.deleted, self.renamed) == \
+               (other.branch, other.commit, other.modified, other.untracked, other.deleted, other.renamed)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return (f'GitInfo(branch={self.branch!r}, commit={self.commit!r}, modified={self.modified}, '
+                f'untracked={self.untracked}, deleted={self.deleted}, renamed={self.renamed})')
 
     @classmethod
     def from_cwd(cls, cwd: str) -> GitInfo:
@@ -84,6 +104,7 @@ class GitInfo:
         if not repo:
             return modified, untracked, deleted, renamed
         try:
+            import subprocess
             r = subprocess.run(
                 # --no-optional-locks: skip the index refresh write, so a
                 # SIGKILL on timeout can't leave a stray .git/index.lock.

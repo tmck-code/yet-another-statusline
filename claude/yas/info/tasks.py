@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -17,23 +16,57 @@ def _parse_iso_to_epoch(ts: str) -> float:
         return 0.0
 
 
-@dataclass
 class Task:
-    id: int
-    subject: str
-    active_form: str
-    status: str  # 'pending' | 'in_progress' | 'completed'
-    started_at: float | None = None    # epoch secs of latest → in_progress (D1)
-    completed_at: float | None = None  # epoch secs of latest → completed (D1)
+    __slots__ = ('id', 'subject', 'active_form', 'status', 'started_at', 'completed_at')
+
+    def __init__(
+        self,
+        id:           int,
+        subject:      str,
+        active_form:  str,
+        status:       str,  # 'pending' | 'in_progress' | 'completed'
+        started_at:   float | None = None,    # epoch secs of latest → in_progress (D1)
+        completed_at: float | None = None,    # epoch secs of latest → completed (D1)
+    ) -> None:
+        self.id           = id
+        self.subject      = subject
+        self.active_form  = active_form
+        self.status       = status
+        self.started_at   = started_at
+        self.completed_at = completed_at
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Task):
+            return NotImplemented
+        return (self.id, self.subject, self.active_form, self.status, self.started_at, self.completed_at) == \
+               (other.id, other.subject, other.active_form, other.status, other.started_at, other.completed_at)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return (f'Task(id={self.id}, subject={self.subject!r}, active_form={self.active_form!r}, '
+                f'status={self.status!r}, started_at={self.started_at}, completed_at={self.completed_at})')
 
 
-@dataclass
 class TaskList:
-    tasks: list[Task] = field(default_factory=list)
-    last_event_ts: float = 0.0
+    __slots__ = ('tasks', 'last_event_ts')
 
     FRESHNESS_CAP = 120.0  # 2 min — see docs/adr/0004
     GRACE_SECONDS = 20.0   # matches RunningSubagents.STALE_SECONDS
+
+    def __init__(self, tasks: list[Task] | None = None, last_event_ts: float = 0.0) -> None:
+        self.tasks         = tasks if tasks is not None else []
+        self.last_event_ts = last_event_ts
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TaskList):
+            return NotImplemented
+        return self.tasks == other.tasks and self.last_event_ts == other.last_event_ts
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'TaskList(tasks={self.tasks!r}, last_event_ts={self.last_event_ts})'
 
     @classmethod
     def from_session(cls, transcript_path: str) -> TaskList:

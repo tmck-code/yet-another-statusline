@@ -8,8 +8,6 @@ and resolution happens in `statusline_command.py::main`. See
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 RGB = tuple[int, int, int]
 
 
@@ -21,65 +19,177 @@ def fg256(n: int) -> str:
     return f'\033[38;5;{n}m'
 
 
-@dataclass(frozen=True)
-class ModelColors:
+class _Frozen:
+    """Mixin emulating dataclass(frozen=True) immutability without dataclasses."""
+
+    __slots__ = ()
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f'cannot assign to field {name!r}')
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f'cannot delete field {name!r}')
+
+
+class ModelColors(_Frozen):
+    __slots__ = ('anchor', 'warm_shift', 'cool_shift', 'label')
+
     anchor:     RGB
     warm_shift: RGB
     cool_shift: RGB
     label:      str
 
+    def __init__(self, anchor: RGB, warm_shift: RGB, cool_shift: RGB, label: str) -> None:
+        object.__setattr__(self, 'anchor', anchor)
+        object.__setattr__(self, 'warm_shift', warm_shift)
+        object.__setattr__(self, 'cool_shift', cool_shift)
+        object.__setattr__(self, 'label', label)
 
-@dataclass(frozen=True)
-class Theme:
-    name: str
+    def __repr__(self) -> str:
+        return (f'ModelColors(anchor={self.anchor!r}, warm_shift={self.warm_shift!r}, '
+                f'cool_shift={self.cool_shift!r}, label={self.label!r})')
 
-    # Decorative slots (ANSI escapes)
-    border:       str
-    border_off:   str
-    pwd:          str
-    branch:       str
-    commit:       str
-    session:      str
-    skills:       str
-    time:         str
-    tok:          str
-    tok_dim:      str
-    tok_day:      str
-    tok_day_dim:  str
-    cost:         str
-    bar_fill:     str
-    bar_empty:    str
-    dim_green:    str
-    label:        str
-    ctx:          str
-    ctx_dim:      str
-    white_brt:    str
-    arrow:        str
-    dirty:        str
-    icon_path:    str
-    tok_icon:     str
-    model:        str
 
-    # Three-step ladder (fill_colour & day_cost_colour)
-    safe:         str
-    warn:         str
-    alert:        str
-    yellow:       str
-    tok_arrow:    str
+class Theme(_Frozen):
+    __slots__ = (
+        'name',
+        'border', 'border_off', 'pwd', 'branch', 'commit', 'session', 'skills',
+        'time', 'tok', 'tok_dim', 'tok_day', 'tok_day_dim', 'cost', 'bar_fill',
+        'bar_empty', 'dim_green', 'label', 'ctx', 'ctx_dim', 'white_brt', 'arrow',
+        'dirty', 'icon_path', 'tok_icon', 'model',
+        'safe', 'warn', 'alert', 'yellow', 'tok_arrow',
+        'models',
+        'pill_fg_dark', 'pill_fg_light',
+        'grad_stops', 'grey_rgb', 'spark_stops', 'spec_gradients', 'spec_empty_ansi',
+    )
 
-    # Per-model pill identity
-    models:       dict[str, ModelColors]
-
-    # Pill foreground — two-sided flip on per-cell luminance
-    pill_fg_dark:  RGB
-    pill_fg_light: RGB
-
-    # Gradients
+    name:            str
+    border:          str
+    border_off:      str
+    pwd:             str
+    branch:          str
+    commit:          str
+    session:         str
+    skills:          str
+    time:            str
+    tok:             str
+    tok_dim:         str
+    tok_day:         str
+    tok_day_dim:     str
+    cost:            str
+    bar_fill:        str
+    bar_empty:       str
+    dim_green:       str
+    label:           str
+    ctx:             str
+    ctx_dim:         str
+    white_brt:       str
+    arrow:           str
+    dirty:           str
+    icon_path:       str
+    tok_icon:        str
+    model:           str
+    safe:            str
+    warn:            str
+    alert:           str
+    yellow:          str
+    tok_arrow:       str
+    models:          dict[str, ModelColors]
+    pill_fg_dark:    RGB
+    pill_fg_light:   RGB
     grad_stops:      tuple[tuple[float, RGB], ...]
     grey_rgb:        RGB
     spark_stops:     tuple[tuple[float, RGB], ...]
     spec_gradients:  tuple[tuple[RGB, RGB, RGB], ...]
     spec_empty_ansi: str
+
+    def __init__(
+        self,
+        name: str,
+        # Decorative slots (ANSI escapes)
+        border:       str,
+        border_off:   str,
+        pwd:          str,
+        branch:       str,
+        commit:       str,
+        session:      str,
+        skills:       str,
+        time:         str,
+        tok:          str,
+        tok_dim:      str,
+        tok_day:      str,
+        tok_day_dim:  str,
+        cost:         str,
+        bar_fill:     str,
+        bar_empty:    str,
+        dim_green:    str,
+        label:        str,
+        ctx:          str,
+        ctx_dim:      str,
+        white_brt:    str,
+        arrow:        str,
+        dirty:        str,
+        icon_path:    str,
+        tok_icon:     str,
+        model:        str,
+        # Three-step ladder (fill_colour & day_cost_colour)
+        safe:         str,
+        warn:         str,
+        alert:        str,
+        yellow:       str,
+        tok_arrow:    str,
+        # Per-model pill identity
+        models:       dict[str, ModelColors],
+        # Pill foreground — two-sided flip on per-cell luminance
+        pill_fg_dark:  RGB,
+        pill_fg_light: RGB,
+        # Gradients
+        grad_stops:      tuple[tuple[float, RGB], ...],
+        grey_rgb:        RGB,
+        spark_stops:     tuple[tuple[float, RGB], ...],
+        spec_gradients:  tuple[tuple[RGB, RGB, RGB], ...],
+        spec_empty_ansi: str,
+    ) -> None:
+        s = object.__setattr__
+        s(self, 'name', name)
+        s(self, 'border', border)
+        s(self, 'border_off', border_off)
+        s(self, 'pwd', pwd)
+        s(self, 'branch', branch)
+        s(self, 'commit', commit)
+        s(self, 'session', session)
+        s(self, 'skills', skills)
+        s(self, 'time', time)
+        s(self, 'tok', tok)
+        s(self, 'tok_dim', tok_dim)
+        s(self, 'tok_day', tok_day)
+        s(self, 'tok_day_dim', tok_day_dim)
+        s(self, 'cost', cost)
+        s(self, 'bar_fill', bar_fill)
+        s(self, 'bar_empty', bar_empty)
+        s(self, 'dim_green', dim_green)
+        s(self, 'label', label)
+        s(self, 'ctx', ctx)
+        s(self, 'ctx_dim', ctx_dim)
+        s(self, 'white_brt', white_brt)
+        s(self, 'arrow', arrow)
+        s(self, 'dirty', dirty)
+        s(self, 'icon_path', icon_path)
+        s(self, 'tok_icon', tok_icon)
+        s(self, 'model', model)
+        s(self, 'safe', safe)
+        s(self, 'warn', warn)
+        s(self, 'alert', alert)
+        s(self, 'yellow', yellow)
+        s(self, 'tok_arrow', tok_arrow)
+        s(self, 'models', models)
+        s(self, 'pill_fg_dark', pill_fg_dark)
+        s(self, 'pill_fg_light', pill_fg_light)
+        s(self, 'grad_stops', grad_stops)
+        s(self, 'grey_rgb', grey_rgb)
+        s(self, 'spark_stops', spark_stops)
+        s(self, 'spec_gradients', spec_gradients)
+        s(self, 'spec_empty_ansi', spec_empty_ansi)
 
 
 CLAUDE_DARK = Theme(

@@ -11,7 +11,9 @@ leaks in.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,7 +34,8 @@ SESSION = (Path(__file__).parent.parent / 'ops'
 # silently skipped (env + defaults still apply — see the degrade test below),
 # so tests that assert toml-sourced values are applied can't run there.
 requires_tomllib = pytest.mark.skipif(
-    config.tomllib is None, reason='yas.toml parsing requires tomllib (Python 3.11+)',
+    importlib.util.find_spec('tomllib') is None,
+    reason='yas.toml parsing requires tomllib (Python 3.11+)',
 )
 
 
@@ -260,7 +263,9 @@ def test_unknown_keys_and_sections_ignored(tmp_path: Path) -> None:
 def test_python310_tomllib_none_skips_toml(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(config, 'tomllib', None)
+    # Simulate Python 3.10 (no stdlib tomllib): setting sys.modules['tomllib']
+    # to None makes the deferred `import tomllib` in _load_toml raise ImportError.
+    monkeypatch.setitem(sys.modules, 'tomllib', None)
     (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
     cfg = config.Config.load(env={'YAS_SOFT_LIMIT': '1000000'}, config_dir=tmp_path)
     assert cfg.max_width == 140              # toml skipped → default
@@ -638,3 +643,136 @@ def test_env_labels_overrides_toml(tmp_path: Path) -> None:
 def test_env_labels_invalid_falls_back_to_false(tmp_path: Path) -> None:
     cfg = config.Config.load(env={'YAS_LABELS': 'maybe'}, config_dir=tmp_path)
     assert cfg.labels is False
+
+
+# ── yas.toml.cache (marshal binary cache of the parsed dict) ──────────────────
+#
+# The cache lets a warm, unchanged yas.toml skip both `import tomllib` and the
+# read+parse. It is a pure optimization: any miss/staleness/corruption must fall
+# back silently to the live parse with the exact same (data, error) contract.
+
+import marshal  # noqa: E402
+
+
+def _no_tomllib_guard(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+    """Make `import tomllib` blow up, so a cache hit can be proven by NOT raising.
+
+    Returns a callable that re-imports tomllib to assert it's genuinely blocked.
+    """
+    real_import = __builtins__['__import__'] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == 'tomllib':
+            raise AssertionError('tomllib was imported on a warm cache hit')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr('builtins.__import__', fake_import)
+
+    def assert_blocked() -> None:
+        with pytest.raises(AssertionError):
+            __import__('tomllib')
+
+    return assert_blocked
+
+
+@requires_tomllib
+def test_cache_written_on_first_parse(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
+    assert not (tmp_path / 'yas.toml.cache').exists()
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 200
+    assert (tmp_path / 'yas.toml.cache').exists()
+
+
+@requires_tomllib
+def test_warm_cache_hit_skips_tomllib(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
+    # First load populates the cache (tomllib allowed here).
+    config.Config.load(env={}, config_dir=tmp_path)
+    # Now ban tomllib: a correct warm hit must not import it.
+    assert_blocked = _no_tomllib_guard(monkeypatch)
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 200  # value came from the cache, not a reparse
+    assert_blocked()
+
+
+@requires_tomllib
+def test_cache_invalidated_on_mtime_change(tmp_path: Path) -> None:
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    config.Config.load(env={}, config_dir=tmp_path)  # warm the cache
+    # Rewrite with new content; bump mtime far enough that ns granularity differs.
+    toml.write_text('[layout]\nmax_width = 250\n')
+    import os
+    st = toml.stat()
+    os.utime(toml, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 250  # stale cache ignored, live reparse
+
+
+@requires_tomllib
+def test_cache_invalidated_on_backwards_mtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    config.Config.load(env={}, config_dir=tmp_path)  # warm
+    # Simulate a restore/checkout: same size, mtime moves BACKWARDS.
+    toml.write_text('[layout]\nmax_width = 250\n')  # same byte length
+    import os
+    st = toml.stat()
+    os.utime(toml, ns=(st.st_atime_ns, st.st_mtime_ns - 5_000_000_000))
+    # A naive "older-than" check would wrongly trust the cache; ANY inequality
+    # must reparse, so tomllib MUST be imported here.
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 250
+
+
+@requires_tomllib
+def test_corrupt_cache_falls_back_to_live_parse(tmp_path: Path) -> None:
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    (tmp_path / 'yas.toml.cache').write_bytes(b'\x00not-valid-marshal\xff')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 200  # corruption swallowed, parsed live
+    assert not cfg.errors  # corruption is NOT surfaced as a parse error
+    # The bad cache should have been overwritten with a valid one.
+    assert marshal.loads((tmp_path / 'yas.toml.cache').read_bytes())[0] == config.CACHE_VERSION
+
+
+@requires_tomllib
+def test_stale_version_cache_reparsed(tmp_path: Path) -> None:
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    st = toml.stat()
+    bad = marshal.dumps((config.CACHE_VERSION + 99, st.st_mtime_ns, st.st_size,
+                         {'layout': {'max_width': 999}}))
+    (tmp_path / 'yas.toml.cache').write_bytes(bad)
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.max_width == 200  # version mismatch → reparse from source
+
+
+@requires_tomllib
+def test_parse_error_writes_no_cache(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('this is = = not toml\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert any('parse error' in e for e in cfg.errors)
+    assert not (tmp_path / 'yas.toml.cache').exists()  # no cache for a bad parse
+
+
+def test_missing_toml_writes_no_cache(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.errors == ()
+    assert not (tmp_path / 'yas.toml.cache').exists()
+
+
+@requires_tomllib
+def test_readonly_dir_cache_write_swallowed(tmp_path: Path) -> None:
+    import os
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    os.chmod(tmp_path, 0o500)  # read+exec, no write
+    try:
+        cfg = config.Config.load(env={}, config_dir=tmp_path)
+        assert cfg.max_width == 200  # parse still works; write failure swallowed
+        assert cfg.errors == ()
+    finally:
+        os.chmod(tmp_path, 0o700)

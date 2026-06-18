@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 
-@dataclass
 class OpenSpec:
-    changes: list[tuple[str, int, int]] = field(default_factory=list)
+    __slots__ = ('changes',)
+
+    def __init__(self, changes: list[tuple[str, int, int]] | None = None) -> None:
+        self.changes = changes if changes is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OpenSpec):
+            return NotImplemented
+        return self.changes == other.changes
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'OpenSpec(changes={self.changes!r})'
 
     @classmethod
     def from_cwd(cls, cwd: str) -> OpenSpec:

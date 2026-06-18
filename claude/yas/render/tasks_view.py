@@ -8,14 +8,12 @@ around their results. See `task-checklist-timers` design D3/D4/D6/D9.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from yas.info.tasks import Task, TaskList
 
 
-@dataclass
 class WindowSlice:
     """The slice of tasks to render plus the clipped-away counts.
 
@@ -26,9 +24,17 @@ class WindowSlice:
     `+N done` / `+N more` collapse lines. See `select_window`.
     """
 
-    items: list[Task] = field(default_factory=list)
-    done_hidden: int = 0
-    more_hidden: int = 0
+    __slots__ = ('items', 'done_hidden', 'more_hidden')
+
+    def __init__(
+        self,
+        items: 'list[Task] | None' = None,
+        done_hidden: int = 0,
+        more_hidden: int = 0,
+    ) -> None:
+        self.items       = items if items is not None else []
+        self.done_hidden = done_hidden
+        self.more_hidden = more_hidden
 
 
 def fmt_duration(secs: float) -> str:
