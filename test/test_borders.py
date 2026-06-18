@@ -156,13 +156,13 @@ def test_label_differs_only_at_overlaid_columns(r: borders.BorderRenderer, metho
     assert len(bare_cols) == len(lab_cols)
     sup = superscript(text)
     label_idx = set(range(start - 1, start - 1 + len(sup)))
-    for col, (b, l) in enumerate(zip(bare_cols, lab_cols)):
+    for col, (barec, labc) in enumerate(zip(bare_cols, lab_cols)):
         if col in label_idx:
             # colour prefix unchanged; glyph swapped to the superscript form
-            assert l[0] == b[0], col
-            assert l[1] == sup[col - (start - 1)], col
+            assert labc[0] == barec[0], col
+            assert labc[1] == sup[col - (start - 1)], col
         else:
-            assert l == b, col
+            assert labc == barec, col
 
 
 def test_label_truncates_before_elbow(r: borders.BorderRenderer) -> None:
