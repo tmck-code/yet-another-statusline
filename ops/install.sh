@@ -95,7 +95,8 @@ provision_python() {
     bin=$(UV_PYTHON_INSTALL_DIR="$pydir" uv python find 3.15 --managed-python 2>/dev/null)
     if [ -z "$bin" ] || [ ! -x "$bin" ]; then
         # Fallback: glob the install dir for the newest 3.15 interpreter.
-        bin=$(ls -d "$pydir"/cpython-3.15*/bin/python3.15 2>/dev/null | sort -Vr | head -1)
+        # find (not ls) so odd chars in the path are handled; sort -Vr → newest.
+        bin=$(find "$pydir" -maxdepth 3 -name python3.15 -path '*/cpython-3.15*/bin/*' 2>/dev/null | sort -Vr | head -1)
     fi
     [ -n "$bin" ] && [ -x "$bin" ] || return 1
     printf '%s\n' "$bin"
