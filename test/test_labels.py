@@ -5,8 +5,8 @@ from yas.render.text import _visible_width, superscript
 LABEL_VOCAB = [
     'cache', 'clear', 'session', 'remain', 'used', 'burn rate', '5h', '7d',
     'input', 'output', 'cost', 'tokens over time', 'skills + plugins',
-    'tokens', 'path', 'git',
-    'changes', 'limit', 'until dumb', 'input sess/day', 'cache sess/day',
+    'context', 'fill', 'dumb', 'path', 'git',
+    'changes', 'input sess/day', 'cache sess/day',
     'output sess/day', 'cost sess/day',
     'plan', 'subagents', 'specs', 'workflow',
 ]

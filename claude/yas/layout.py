@@ -641,13 +641,18 @@ def build_wide(
     if view.cfg.labels:
         # `changes`: over the git dirty block. It is always ' ' + a dirty glyph
         # after the ∈ branch separator; the leading-space requirement keeps a '-'
-        # inside a branch name from matching.
+        # inside a branch name from matching. The dirty block sits at the right
+        # end of the path content (justify pads before it, so it always abuts the
+        # path divider), leaving only a few fill columns to its right — too few
+        # for the 7-glyph word. So RIGHT-align the label to the dirty block's
+        # right edge (path content end, column `2 + path_w`); it extends left
+        # over the branch fill and shows in full.
         _pp = _ANSI_RE.sub('', line_path)
         _ps = _pp.find(_BRANCH_SEP)
         if _ps != -1:
             for _ci in range(_ps + 1, len(_pp) - 1):
                 if _pp[_ci] == ' ' and _pp[_ci + 1] in _DIRTY_CHARS:
-                    top_labels.append(('changes', 3 + _ci + 1))
+                    top_labels.append(('changes', max(3, 2 + path_w - len('changes') + 1)))
                     break
         # Elapsed cell: measured from the rendered timers. With a clear timer the
         # cell is [glyph, clear, session] (the clear-only degradation tier drops
@@ -712,20 +717,27 @@ def build_wide(
             RowSpec('content', content=content_full),
         ]
 
-    # Context separator labels: `tokens` over the absolute count, `limit` over
-    # the (% of window) parenthetical, `until dumb` over the soft-limit %. Only
-    # the full context_line (tokens_fits) renders those three values; the compact
-    # fallback shows a bare % and carries no labels.
+    # Context separator labels: `context` over the absolute count, `fill` over
+    # the (% of window) parenthetical, `dumb` over the soft-limit %. Only the
+    # full context_line (tokens_fits) renders those three values; the compact
+    # fallback shows a bare % and carries no labels. Each label is RIGHT-aligned
+    # to its value's right edge (a stable column, since the values are
+    # right-justified in fixed-width fields) so a label wider than its value —
+    # `context` over `30.0K` — extends left into the gap rather than spilling
+    # right into the next label.
     ctx_labels: list[tuple[str, int]] = []
     if view.cfg.labels and tokens_fits:
-        _cp = _ANSI_RE.sub('', line_context)
-        _co = _token_offsets(_cp)
-        _hg = next((k for k, o in enumerate(_co) if _cp[o] == GLYPH_HOURGLASS), None)
+        _ctx_plain = _ANSI_RE.sub('', line_context)
+        _ctx_off   = _token_offsets(_ctx_plain)
+        _hg = next((k for k, o in enumerate(_ctx_off) if _ctx_plain[o] == GLYPH_HOURGLASS), None)
         if _hg is not None:
-            for _name, _k in zip(('tokens', 'limit', 'until dumb'),
+            for _name, _k in zip(('context', 'fill', 'dumb'),
                                  range(_hg + 1, _hg + 4)):
-                if _k < len(_co):
-                    ctx_labels.append((_name, 3 + _co[_k]))
+                if _k < len(_ctx_off):
+                    _ctx_end = _ctx_off[_k]
+                    while _ctx_end + 1 < len(_ctx_plain) and _ctx_plain[_ctx_end + 1] != ' ':
+                        _ctx_end += 1
+                    ctx_labels.append((_name, max(3, 3 + _ctx_end - len(_name) + 1)))
     rows.append(RowSpec('separator_dim', ups=path_row_ups, pill=pill, labels=ctx_labels))
     rows.append(RowSpec('content', content=line_context))
 
@@ -756,10 +768,28 @@ def build_wide(
             _suf = ' sess/day' if view.cfg.show_day_stats else ''
             tok_labels.append((f'input{_suf}', 3))
             if _cache_i != -1:
-                tok_labels.append((f'cache{_suf}', 3 + _cache_i))
+                # Centre `cache` over the `(…)` parenthetical (anchor = section
+                # midpoint − half the label width). When the column has room the
+                # label sits centred over its value; but with the long ` sess/day`
+                # suffix the centred label reaches back into the `input` columns,
+                # so fall back to the original left-anchor at the '(' rather than
+                # cannibalising `input` — centring is best-effort, applied only
+                # when it fits.
+                _cache_lbl = f'cache{_suf}'
+                _cache_end = _close_i if _close_i != -1 else _cache_i
+                _cache_mid = 3 + (_cache_i + _cache_end) // 2
+                _cache_anchor = max(3, _cache_mid - len(_cache_lbl) // 2)
+                if _cache_anchor < 3 + len(f'input{_suf}'):
+                    _cache_anchor = 3 + _cache_i
+                tok_labels.append((_cache_lbl, _cache_anchor))
             if _out_i != -1:
                 tok_labels.append((f'output{_suf}', 3 + _out_i))
-            tok_labels.append((f'cost{_suf}', vsep_cols[0] + 2))
+            # Centre `cost` within its cell (between the two vseps) instead of
+            # left-anchoring at the cell's start. The cost cell is its own section
+            # (bounded by vseps), so this never conflicts with the token labels.
+            _cost_lbl = f'cost{_suf}'
+            _cost_mid = (vsep_cols[0] + vsep_cols[1]) // 2
+            tok_labels.append((_cost_lbl, max(vsep_cols[0] + 1, _cost_mid - len(_cost_lbl) // 2)))
             tok_labels.append(('tokens over time', vsep_cols[1] + 2))
         rows.append(RowSpec('separator_dim', downs=vsep_cols, labels=tok_labels))
         for lt in line_tokens:

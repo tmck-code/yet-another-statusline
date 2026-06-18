@@ -66,7 +66,7 @@ The elapsed/timers cell SHALL carry a `session` label over the session timer alw
 #### Scenario: Context separator labels its columns
 
 - **WHEN** `cfg.labels` is true and the context row is present
-- **THEN** the separator above it carries a `tokens` label over the token count (e.g. `70.0K`), a `limit` label over the context-window percent (e.g. `(7%)`), and an `until dumb` label over the compaction-risk percent (e.g. `47%`)
+- **THEN** the separator above it carries a `context` label over the token count (e.g. `70.0K`), a `fill` label over the context-window percent (e.g. `(7%)`), and a `dumb` label over the compaction-risk percent (e.g. `47%`)
 
 #### Scenario: Tokens/cost separator labels its columns
 

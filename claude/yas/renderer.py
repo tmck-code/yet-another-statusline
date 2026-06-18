@@ -1363,11 +1363,16 @@ class Renderer:
 
         if fill_ratio >= 1.0:
             a = BOLD + self.risk_zone_color(total_tokens)
+            # Right-justify the visible text into fixed-width fields (applied to
+            # the plain string before ANSI wrapping, since a colour-coded string
+            # cannot be rjust-ed) so the token/window/soft columns hold a stable
+            # right edge regardless of magnitude — `194.0K (97%) 100%` lines up
+            # under `30.0K (3%) 20%` from the normal branch below.
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
-                secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{a}{fmt_tok(total_tokens)}{self.R}{secondary} {a}{BOLD}{pct_soft:.0f}%{self.R} '
+                secondary = f' {a}{f"({pct_model:.0f}%)":>5}{self.R}'
+            prefix = f'{a}{fmt_tok(total_tokens):>6}{self.R}{secondary} {a}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
             bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -1375,11 +1380,15 @@ class Renderer:
             return f'{badge}{a}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
 
         bar_clr = self.risk_zone_color(total_tokens)
+        # Fixed-width right-justified fields (rjust applied to the plain text
+        # before ANSI wrapping) keep the token/window/soft columns aligned with
+        # the over-limit branch above, so short and long magnitudes share a
+        # stable right edge under the `context`/`fill`/`dumb` labels.
         secondary = ''
         if ctx.context_window_size > 0:
             pct_model = total_tokens / ctx.context_window_size * 100
-            secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
-        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
+            secondary = f' {self.DIM_GREEN}{f"({pct_model:.0f}%)":>5}{self.R}'
+        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens):>6}{self.R}{secondary} {bar_clr}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
         bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))

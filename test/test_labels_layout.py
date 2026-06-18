@@ -13,6 +13,7 @@ import yas.session as session_mod
 from yas.config import Config
 from yas.constants import ICON_LIMIT_5H, ICON_LIMIT_7D
 from yas.info import SessionView
+from yas.info.git import GitInfo
 from yas.info.tasks import Task, TaskList
 from yas.render.text import superscript
 from yas.tokens import TickRecord, TokenLog
@@ -139,7 +140,7 @@ def test_compact_5h_omits_remain_and_burn_rate():
 
 def test_context_separator_labels_present():
     blob = '\n'.join(strip_ansi(ln) for ln in _render_dict(_full_limits_dict()))
-    for word in ('tokens', 'limit', 'until dumb'):
+    for word in ('context', 'fill', 'dumb'):
         assert superscript(word) in blob, word
 
 
@@ -147,6 +148,67 @@ def test_tokens_separator_sessday_suffix():
     sep = _tokens_separator(_render_dict(_full_limits_dict()))
     assert superscript('input sess/day') in sep
     assert superscript('cost sess/day') in sep
+
+
+def _tok_sep_and_content(lines: list[str]) -> tuple[str, str]:
+    """The dim tokens separator and the tokens content row directly below it."""
+    for i, ln in enumerate(lines):
+        plain = strip_ansi(ln)
+        if 't/m' in plain:
+            return strip_ansi(lines[i - 1]), plain
+    return '', ''
+
+
+def _label_center(sep: str, word: str) -> float:
+    start = sep.index(superscript(word))
+    return start + (len(word) - 1) / 2
+
+
+def _short_labels_view() -> SessionView:
+    # day-stats off keeps the labels short enough to centre without contending
+    # with the neighbouring token labels.
+    return SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
+                       Config(labels=True, show_day_stats=False))
+
+
+def test_cost_label_centered_in_its_cell():
+    lines = _render_view(_short_labels_view())
+    sep, cont = _tok_sep_and_content(lines)
+    bars = [i for i, ch in enumerate(cont) if ch == '│']   # border + 2 vseps
+    cell_center = (bars[1] + bars[2]) / 2                   # cost cell between vseps
+    assert abs(_label_center(sep, 'cost') - cell_center) <= 1
+
+
+def test_cache_label_centered_over_parenthetical():
+    lines = _render_view(_short_labels_view())
+    sep, cont = _tok_sep_and_content(lines)
+    open_i, close_i = cont.index('('), cont.index(')')
+    assert abs(_label_center(sep, 'cache') - (open_i + close_i) / 2) <= 1
+
+
+def test_cache_centering_never_mangles_input():
+    # With the long ` sess/day` labels the centred `cache` would reach back into
+    # `input`; it must fall back to left-anchoring so `input` is never truncated
+    # (the regression guard against `input` collapsing to a stub like "i").
+    sep = _tokens_separator(_render_dict(_full_limits_dict()))
+    assert superscript('input sess/day') in sep
+
+
+def test_changes_label_full_and_right_aligned():
+    view = _view(_full_limits_dict())
+    view.__dict__['git'] = GitInfo(
+        branch='minor-polishing', commit='48994b8',
+        untracked=2, modified=3, deleted=0, renamed=0,
+    )
+    lines = _render_view(view)
+    top, path = strip_ansi(lines[0]), strip_ansi(lines[1])
+    assert superscript('changes') in top                       # full word, not "chan"
+    lab_l = top.index(superscript('changes'))
+    lab_r = lab_l + len('changes')                             # one past last col
+    dot   = path.index('•')                                    # dirty block start
+    bar   = path.index('│', 1)                                 # path divider
+    assert lab_l < dot                                         # extends left over branch
+    assert bar - 4 <= lab_r <= bar                             # right edge hugs the dirty block
 
 
 # --- clear-label omission and section captions --------------------------------
