@@ -218,6 +218,59 @@ The statusline SHALL expose resolved configuration through one frozen `Config` o
 - **WHEN** a user attempts to set a narrow/medium/min width via env or `yas.toml`
 - **THEN** the layout breakpoints are unchanged (the setting has no effect)
 
+### Requirement: justify layout knob
+
+The statusline SHALL support a `justify` boolean knob that controls whether the wide layout distributes horizontal slack evenly across top-row sections. The knob SHALL resolve through the standard precedence chain: `YAS_JUSTIFY` environment variable → `[layout].justify` in `yas.toml` → built-in default of `false`. The env var SHALL accept the same boolean forms as other boolean knobs (`1`/`0`/`true`/`false`). An invalid value SHALL cause the knob to fall back to `false` and be recorded in debug output; a `yas.toml`-sourced rejection SHALL also be surfaced in the visible config-error row. The constant `DEFAULT_JUSTIFY = False` SHALL be defined in `constants.py` and imported by `config.py`.
+
+#### Scenario: Default is false
+
+- **WHEN** no `YAS_JUSTIFY` env var is set and no `[layout].justify` key exists in `yas.toml`
+- **THEN** `cfg.justify` is `false` and the wide layout behaves as before
+
+#### Scenario: Env var enables justify
+
+- **WHEN** `YAS_JUSTIFY=1` is set in the environment
+- **THEN** `cfg.justify` is `true`
+
+#### Scenario: yas.toml enables justify
+
+- **WHEN** `yas.toml` contains `[layout]` with `justify = true` and no `YAS_JUSTIFY` env var is set
+- **THEN** `cfg.justify` is `true`
+
+#### Scenario: Env var overrides yas.toml
+
+- **WHEN** `YAS_JUSTIFY=0` is set in the environment and `[layout].justify = true` is in `yas.toml`
+- **THEN** `cfg.justify` is `false`
+
+#### Scenario: Invalid env value falls back to default
+
+- **WHEN** `YAS_JUSTIFY=banana` is set
+- **THEN** `cfg.justify` is `false` and the rejection is recorded in debug output
+
+### Requirement: Section-labels knob
+
+The statusline SHALL expose a boolean `labels` knob that toggles wide-layout section labels. It SHALL resolve through the standard precedence chain: canonical `YAS_LABELS` environment variable → `[layout].labels` in `yas.toml` → built-in default `false`. The resolved value SHALL be exposed as `cfg.labels` on the frozen `Config`. An absent or unparseable source SHALL fall through to the next, ending at the `false` default. The knob SHALL accept the same boolean spellings as other boolean knobs (`1`/`0`/`true`/`false`, case-insensitive, for env values; native booleans in `yas.toml`).
+
+#### Scenario: Default is false
+
+- **WHEN** no `yas.toml` sets `[layout].labels` and `YAS_LABELS` is unset
+- **THEN** the resolved `cfg.labels` is `false`
+
+#### Scenario: Config file enables labels
+
+- **WHEN** `[layout].labels = true` is set in `yas.toml` and `YAS_LABELS` is unset
+- **THEN** the resolved `cfg.labels` is `true`
+
+#### Scenario: Env overrides config file
+
+- **WHEN** `[layout].labels = true` is set in `yas.toml` and `YAS_LABELS=0` is set in the environment
+- **THEN** the resolved `cfg.labels` is `false`
+
+#### Scenario: Invalid value falls through to default
+
+- **WHEN** `YAS_LABELS=maybe` is set and nothing else configures the knob
+- **THEN** the resolved `cfg.labels` is `false`
+
 ### Requirement: Glyph mode knob
 
 The statusline SHALL expose a `glyph_mode` knob that selects the glyph rendering mode, resolved through the standard precedence chain: CLI `--glyph-mode <value>` → `YAS_GLYPH_MODE` env var → `[appearance.glyphs].mode` in `yas.toml` → default. The accepted values SHALL be exactly `nerdfont`, `ascii`, and `unicode` (case-insensitive), and the default SHALL be `nerdfont`. Any other value SHALL be rejected and fall back to the default like every other knob. There SHALL be no per-mode environment variable beyond `YAS_GLYPH_MODE`.

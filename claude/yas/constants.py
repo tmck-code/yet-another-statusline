@@ -14,6 +14,8 @@ DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
+DEFAULT_JUSTIFY        = False
+DEFAULT_LABELS         = False
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 # Box width at/above which the wide layout's workflow cohort pairs agents into
@@ -126,6 +128,11 @@ GLYPH_WF_HEADER     = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIAN
 GLYPH_WF_SUMMARY    = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
 GLYPH_WF_CURRENT    = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
 GLYPH_WF_DIVIDER    = '\u250a'  # \u250a U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL (two-column workflow divider)
+GLYPH_CLEAR         = '\U000f0450'  # nf-md-refresh             (since-last-/clear timer)
+ICON_LIMIT_5H       = '\U000f051b'  # nf-md-timer_outline       (5-hour rate-limit icon)
+ICON_LIMIT_7D       = '\U000f0a34'  # nf-md-calendar_week_begin (7-day rate-limit icon)
+GLYPH_MODEL_LIGHT   = '\U000f1a51'  # nf-md-lightbulb_on_40     (single model-pill glyph)
+SEP_RATE            = GLYPH_WF_DIVIDER  # \u250a rate-limit separator (same codepoint as the workflow divider)
 
 # Token-rate direction arrows (t/m row). Each is paired with a trailing space by
 # the caller to a fixed 2 visible columns: the heavy arrows show when that
@@ -202,6 +209,10 @@ ASCII_GLYPHS: dict[str, str] = {
     GLYPH_HOURGLASS:    'H',
     GLYPH_PIE:          '%',
     GLYPH_CACHE:        '~',
+    GLYPH_CLEAR:        'C',
+    ICON_LIMIT_5H:      'T',
+    ICON_LIMIT_7D:      'D',
+    GLYPH_MODEL_LIGHT:  '@',
     BarChars.MID:       '>',
     # Box / structure.
     BOX_H:              '-',
@@ -291,6 +302,10 @@ UNICODE_PUA: dict[str, str] = {
     GLYPH_HOURGLASS:    '⧖',  # hourglass
     GLYPH_PIE:          '◕',  # pie-chart
     GLYPH_CACHE:        '↻',  # cache
+    GLYPH_CLEAR:        '⟳',  # refresh (since-last-/clear)
+    ICON_LIMIT_5H:      '◴',  # 5h rate-limit timer
+    ICON_LIMIT_7D:      '◵',  # 7d rate-limit window
+    GLYPH_MODEL_LIGHT:  '⊡',  # single model-pill
     BarChars.MID:       '▪',  # progress sep
 }
 
@@ -347,6 +362,10 @@ WORKFLOW_RUN_CAP          = 2
 # the layout builders keep the most recent (latest-started) rows and drop the
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
 SUBAGENT_DISPLAY_CAP      = 6
+
+# Maximum lines to scan from the head of a transcript when searching for a
+# /clear marker. Keeps the lookup O(1) even on large transcripts.
+CLEAR_SCAN_MAX_LINES      = 30
 
 # Workflow run-header phase-trail layout. WF_NAME_MIN is the minimum run-name
 # width preserved before the inline phase trail truncates with `…`; WF_PHASE_GAP

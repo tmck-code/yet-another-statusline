@@ -22,10 +22,7 @@ from yas.constants import _sanitize
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 
-
-# ---------------------------------------------------------------------------
-# Primitive coercers
-# ---------------------------------------------------------------------------
+# helpers ---------------------------------------
 
 def _as_int(v: object, default: int = 0) -> int:
     if isinstance(v, int):
@@ -55,10 +52,7 @@ def _parse_iso_to_epoch(ts: str) -> float:
     except (ValueError, TypeError):
         return 0.0
 
-
-# ---------------------------------------------------------------------------
-# Data-classes / NamedTuples
-# ---------------------------------------------------------------------------
+# models ----------------------------------------
 
 class Model(NamedTuple):
     id: str = ''

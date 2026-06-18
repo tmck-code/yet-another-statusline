@@ -42,6 +42,18 @@ class TestModelName:
         info = session.SessionInfo(model=session.Model(id='', display_name=''))
         assert info.model_name == 'unknown'
 
+    def test_1m_context_suffix_replaced(self) -> None:
+        info = session.SessionInfo(model=session.Model(display_name='Claude 3.5 (1M context)'))
+        assert info.model_name == 'Claude 3.5 1M'
+
+    def test_double_space_collapsed(self) -> None:
+        info = session.SessionInfo(model=session.Model(display_name='Sonnet  4.6'))
+        assert info.model_name == 'Sonnet 4.6'
+
+    def test_leading_trailing_whitespace_stripped(self) -> None:
+        info = session.SessionInfo(model=session.Model(display_name='  Sonnet 4.6  '))
+        assert info.model_name == 'Sonnet 4.6'
+
 
 
 class TestModelThinking:
@@ -72,3 +84,27 @@ class TestModelThinking:
             effort=session.Effort(level=''),
         )
         assert info.model_thinking == ''
+
+    def test_fast_mode_with_thinking_appends_fast_suffix(self) -> None:
+        info = session.SessionInfo(
+            thinking=session.Thinking(enabled=True),
+            effort=session.Effort(level='high'),
+            fast_mode=True,
+        )
+        assert info.model_thinking == 'high/fast'
+
+    def test_fast_mode_alone_returns_fast(self) -> None:
+        info = session.SessionInfo(
+            thinking=session.Thinking(enabled=False),
+            effort=session.Effort(level=''),
+            fast_mode=True,
+        )
+        assert info.model_thinking == 'fast'
+
+    def test_fast_mode_with_thinking_disabled_returns_fast(self) -> None:
+        info = session.SessionInfo(
+            thinking=session.Thinking(enabled=False),
+            effort=session.Effort(level='high'),
+            fast_mode=True,
+        )
+        assert info.model_thinking == 'fast'

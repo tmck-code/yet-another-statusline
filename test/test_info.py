@@ -172,8 +172,8 @@ def test_elapsed_does_not_trigger_file_stat(monkeypatch):
     with patch('pathlib.Path.stat', side_effect=AssertionError('unexpected Path.stat call')):
         result = view.elapsed
 
-    # Result should be the formatted duration from the payload (807557ms → 0:13:27).
-    assert result == '0:13:27'
+    # Result should be the formatted duration from the payload (807557ms → 13:27).
+    assert result == '13:27'
 
 
 # ---------------------------------------------------------------------------
@@ -493,3 +493,232 @@ def test_cache_countdown_uses_frozen_now():
     # With frozen_now the math is deterministic: 300 - 90 = 210 remaining
     assert remaining   == 210.0
     assert elapsed_pct == 30
+
+
+# ---------------------------------------------------------------------------
+# Task 6.3 — _fmt_elapsed_clock MM:SS and H:MM:SS
+# ---------------------------------------------------------------------------
+
+from yas.info import _fmt_elapsed_clock  # noqa: E402
+
+
+def test_fmt_elapsed_clock_zero_returns_empty() -> None:
+    assert _fmt_elapsed_clock(0) == ''
+
+
+def test_fmt_elapsed_clock_negative_returns_empty() -> None:
+    assert _fmt_elapsed_clock(-1000) == ''
+
+
+def test_fmt_elapsed_clock_sub_hour_drops_hours_digit() -> None:
+    # 13 min 27 s = 807000 ms
+    assert _fmt_elapsed_clock(807_000) == '13:27'
+
+
+def test_fmt_elapsed_clock_sub_hour_leading_zeros() -> None:
+    # 5 min 3 s = 303000 ms
+    assert _fmt_elapsed_clock(303_000) == '05:03'
+
+
+def test_fmt_elapsed_clock_exactly_one_hour() -> None:
+    # 3600 s = 3600000 ms
+    assert _fmt_elapsed_clock(3_600_000) == '1:00:00'
+
+
+def test_fmt_elapsed_clock_over_one_hour() -> None:
+    # 1h 13m 27s = 4407000 ms
+    assert _fmt_elapsed_clock(4_407_000) == '1:13:27'
+
+
+def test_fmt_elapsed_clock_double_digit_hour() -> None:
+    # 10h 0m 0s
+    assert _fmt_elapsed_clock(36_000_000) == '10:00:00'
+
+
+# Task 6.3 — 8-column timer field in elapsed_section
+def test_elapsed_section_fixed_8_col_width() -> None:
+    import yas.renderer as renderer_mod
+    r = renderer_mod.Renderer()
+    _text, w = r.elapsed_section('13:27')
+    assert w == 8
+    _text2, w2 = r.elapsed_section('99:59:59')
+    assert w2 == 8
+
+
+def test_elapsed_section_right_justified() -> None:
+    import yas.renderer as renderer_mod
+    from helper import strip_ansi
+    r = renderer_mod.Renderer()
+    text, _ = r.elapsed_section('05:03')
+    stripped = strip_ansi(text)
+    assert stripped == '   05:03'  # right-justified to 8 cols (3 spaces + 5-char clock)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.1 — read_clear_epoch: reader and SessionView.clear_epoch wiring
+# ---------------------------------------------------------------------------
+
+def _write_str_transcript(path: Path, lines: list[str]) -> None:
+    path.write_text('\n'.join(lines) + '\n')
+
+
+def test_read_clear_epoch_returns_epoch_for_cleared_transcript(tmp_path) -> None:
+    """A transcript with a /clear marker returns its timestamp as a Unix epoch."""
+    from yas.info.clear import read_clear_epoch
+    from datetime import datetime, timezone
+
+    marker_ts = '2024-01-15T12:30:00Z'
+    expected  = datetime(2024, 1, 15, 12, 30, 0, tzinfo=timezone.utc).timestamp()
+    transcript = tmp_path / 'test.jsonl'
+    _write_str_transcript(transcript, [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]},"timestamp":"2024-01-15T12:00:00Z"}',
+        f'{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","content":"<command-name>/clear</command-name>"}}]}},"timestamp":"{marker_ts}"}}',
+    ])
+    result = read_clear_epoch(str(transcript))
+    assert result == expected
+
+
+def test_read_clear_epoch_returns_none_for_fresh_transcript(tmp_path) -> None:
+    """A transcript with no /clear marker returns None."""
+    from yas.info.clear import read_clear_epoch
+
+    transcript = tmp_path / 'test.jsonl'
+    _write_str_transcript(transcript, [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]},"timestamp":"2024-01-15T12:00:00Z"}',
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi!"}]},"timestamp":"2024-01-15T12:00:01Z"}',
+    ])
+    result = read_clear_epoch(str(transcript))
+    assert result is None
+
+
+def test_read_clear_epoch_bounded_does_not_scan_past_cap(tmp_path) -> None:
+    """The reader reads at most CLEAR_SCAN_MAX_LINES lines and returns None when the
+    marker only appears after the cap."""
+    from yas.info.clear import read_clear_epoch
+    from yas.constants import CLEAR_SCAN_MAX_LINES
+
+    transcript = tmp_path / 'test.jsonl'
+    # Fill the cap with non-marker lines, then put the marker past the cap.
+    filler = [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]},"timestamp":"2024-01-15T12:00:00Z"}'
+        for _ in range(CLEAR_SCAN_MAX_LINES)
+    ]
+    marker = (
+        '{"type":"user","message":{"role":"user","content":[{"type":"tool_result",'
+        '"content":"<command-name>/clear</command-name>"}]},"timestamp":"2024-01-15T13:00:00Z"}'
+    )
+    _write_str_transcript(transcript, filler + [marker])
+    result = read_clear_epoch(str(transcript))
+    assert result is None
+
+
+def test_read_clear_epoch_returns_none_on_missing_path() -> None:
+    """A non-existent transcript path returns None without raising."""
+    from yas.info.clear import read_clear_epoch
+    result = read_clear_epoch('/nonexistent/path/to/transcript.jsonl')
+    assert result is None
+
+
+def test_read_clear_epoch_returns_none_on_empty_path() -> None:
+    """An empty transcript_path string returns None without raising."""
+    from yas.info.clear import read_clear_epoch
+    result = read_clear_epoch('')
+    assert result is None
+
+
+def test_read_clear_epoch_returns_none_on_malformed_json(tmp_path) -> None:
+    """A line containing /clear markers but invalid JSON is skipped, yielding None."""
+    from yas.info.clear import read_clear_epoch
+    transcript = tmp_path / 'test.jsonl'
+    _write_str_transcript(transcript, ['not-json command-name /clear stuff'])
+    result = read_clear_epoch(str(transcript))
+    assert result is None
+
+
+def test_session_view_clear_epoch_wired_correctly(tmp_path) -> None:
+    """SessionView.clear_epoch delegates to read_clear_epoch via cached_property."""
+    from datetime import datetime, timezone
+
+    marker_ts = '2024-03-20T09:00:00Z'
+    expected  = datetime(2024, 3, 20, 9, 0, 0, tzinfo=timezone.utc).timestamp()
+    transcript = tmp_path / 'session.jsonl'
+    _write_str_transcript(transcript, [
+        f'{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","content":"<command-name>/clear</command-name>"}}]}},"timestamp":"{marker_ts}"}}',
+    ])
+
+    session = _session()
+    session = type(session)(
+        **{**session.__dict__, 'transcript_path': str(transcript)}
+    )
+    view = SessionView(session=session, cfg=_cfg())
+    result = view.clear_epoch
+    assert result == expected
+    # Confirm @cached_property: second access returns the same object.
+    assert view.clear_epoch is view.__dict__['clear_epoch']
+
+
+# ---------------------------------------------------------------------------
+# Task 6.2 — elapsed_section: two-timer composition
+# ---------------------------------------------------------------------------
+
+def test_elapsed_section_single_timer_when_no_clear() -> None:
+    """With no clear_str, elapsed_section output is byte-identical to the original."""
+    import yas.renderer as renderer_mod
+    r = renderer_mod.Renderer()
+
+    text_old, w_old = r.elapsed_section('13:27')
+    text_new, w_new = r.elapsed_section('13:27', '')  # explicit empty clear_str
+    assert text_old == text_new
+    assert w_old    == w_new
+
+
+def test_elapsed_section_with_clear_str_contains_glyph_and_accent() -> None:
+    """When clear_str is set, the output contains GLYPH_CLEAR and the clear timer."""
+    import yas.renderer as renderer_mod
+    from yas.constants import GLYPH_CLEAR, CLR_CYAN
+    from helper import strip_ansi
+    r = renderer_mod.Renderer()
+
+    text, _w = r.elapsed_section('13:27', '05:11')
+    stripped = strip_ansi(text)
+    assert GLYPH_CLEAR in text
+    assert CLR_CYAN in text
+    assert '05:11' in stripped
+    assert '13:27' in stripped
+
+
+def test_elapsed_section_clear_appears_before_session_timer() -> None:
+    """Clear timer must be leftmost in the rendered string."""
+    import yas.renderer as renderer_mod
+    from helper import strip_ansi
+    r = renderer_mod.Renderer()
+
+    text, _w = r.elapsed_section('13:27', '05:11')
+    stripped = strip_ansi(text)
+    assert stripped.index('05:11') < stripped.index('13:27')
+
+
+def test_elapsed_section_clear_only_omits_session_timer() -> None:
+    """elapsed='', clear_str set → session timer part is absent (clear-only tier)."""
+    import yas.renderer as renderer_mod
+    from yas.constants import GLYPH_CLEAR
+    from helper import strip_ansi
+    r = renderer_mod.Renderer()
+
+    text, _w = r.elapsed_section('', '18:33')
+    stripped = strip_ansi(text)
+    assert GLYPH_CLEAR in text
+    assert '18:33' in stripped
+    # No 8-space right-justified pad — no session timer rendered.
+    assert '        ' not in stripped  # no 8-space block
+
+
+def test_elapsed_section_clock_skew_clamped(tmp_path) -> None:
+    """clear_ms = max(0, now - clear_epoch) so clock skew (now < clear_epoch) yields 0."""
+    from yas.info import _fmt_elapsed_clock
+    clear_epoch = 1_700_000_100.0  # future: clear_epoch > now
+    now         = 1_700_000_000.0
+    clear_ms    = max(0, now - clear_epoch) * 1000
+    assert clear_ms == 0.0
+    assert _fmt_elapsed_clock(int(clear_ms)) == ''
+

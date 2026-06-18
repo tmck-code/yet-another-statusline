@@ -21,6 +21,7 @@ from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
 from yas.tokens import compute_session_cost
 from yas.info.transcript import TranscriptUsage
+from yas.info.clear import read_clear_epoch
 
 
 # ---------------------------------------------------------------------------
@@ -43,9 +44,10 @@ def _fmt_duration_ms(ms: int) -> str:
 
 
 def _fmt_elapsed_clock(ms: int) -> str:
-    """Format a duration in milliseconds as H:MM:SS clock time.
+    """Format a duration in milliseconds as a clock string.
 
-    Returns '' for zero or negative ms; otherwise H:MM:SS (e.g. '0:13:01').
+    Returns '' for zero or negative ms. Under an hour returns MM:SS (e.g.
+    '13:27'); one hour or more returns H:MM:SS or HH:MM:SS (e.g. '1:13:27').
     """
     if ms <= 0:
         return ''
@@ -53,6 +55,8 @@ def _fmt_elapsed_clock(ms: int) -> str:
     h   = s // 3600
     m   = (s % 3600) // 60
     sec = s % 60
+    if h == 0:
+        return f'{m:02d}:{sec:02d}'
     return f'{h}:{m:02d}:{sec:02d}'
 
 
@@ -153,6 +157,14 @@ class SessionView:
             return None
         elapsed_pct = max(0, min(100, 100 - round(remaining * 100 / cache_ttl)))
         return (remaining, elapsed_pct)
+
+    @cached_property
+    def clear_epoch(self) -> float | None:
+        """Epoch of the most-recent /clear marker in this transcript, or None.
+
+        Holds no ANSI or render geometry; cached for the view's lifetime.
+        """
+        return read_clear_epoch(self.session.transcript_path)
 
     @cached_property
     def elapsed(self) -> str:

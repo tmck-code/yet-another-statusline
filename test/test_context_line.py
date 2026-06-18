@@ -1,7 +1,7 @@
 import re
 
 import yas.renderer as renderer
-from yas.constants import CLR_ALERT, CLR_WARN
+from yas.constants import CLR_ALERT, CLR_WARN, GLYPH_HOURGLASS
 from yas.renderer import _ctx_fill_ratio, _ctx_used_tokens
 from yas.session import ContextWindow
 from yas.render.text import _visible_width
@@ -39,6 +39,28 @@ def test_context_line_over_soft_limit() -> None:
     out = r.context_line(ctx, available)
     assert CLR_ALERT in out
     assert _visible_width(out) <= available
+
+
+def test_context_line_fields_right_justified_and_aligned() -> None:
+    # Token count, the context-window `(N%)`, and the soft-limit `N%` sit in
+    # fixed-width right-justified fields (6 / 5 / 4) so their columns hold a
+    # stable right edge across magnitudes — small values pad left, the widest
+    # values sit flush. This keeps the `context`/`fill`/`dumb` labels anchored.
+    # Covers both the normal branch (small) and the fill_ratio>=1.0 branch (large).
+    r = Renderer()
+    small = ContextWindow(total_input_tokens=30_000, context_window_size=1_000_000)
+    large = ContextWindow(total_input_tokens=194_000, context_window_size=200_000)
+
+    def fields(ctx: ContextWindow, soft_limit: int) -> tuple[str, str, str]:
+        plain = _strip(r.context_line(ctx, available=76, soft_limit=soft_limit))
+        h = plain.index(GLYPH_HOURGLASS)
+        return plain[h + 2:h + 8], plain[h + 9:h + 14], plain[h + 15:h + 19]
+
+    s_tok, s_lim, s_soft = fields(small, 150_000)   # normal branch (20%)
+    l_tok, l_lim, l_soft = fields(large, 194_000)   # over-limit branch (100%)
+
+    assert (s_tok, s_lim, s_soft) == (' 30.0K', ' (3%)', ' 20%')
+    assert (l_tok, l_lim, l_soft) == ('194.0K', '(97%)', '100%')
 
 
 def test_context_line_compact_respects_available() -> None:

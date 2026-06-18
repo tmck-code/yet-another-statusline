@@ -6,6 +6,9 @@ __pycache__
 .claude/state/
 .claude/commands/
 .claude/skills/openspec*
+.claude/skills/speckit*
+.specify/
+
 # demo files
 demo/
 

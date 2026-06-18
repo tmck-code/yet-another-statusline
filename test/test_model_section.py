@@ -12,7 +12,7 @@ from yas.constants import (
     PILL_BR,
 )
 from yas.info.git import GitInfo
-from yas.session import Effort, Model, RateBucket, RateLimits, SessionInfo, Thinking
+from yas.session import CurrentUsage, Effort, Model, RateBucket, RateLimits, SessionInfo, Thinking
 from yas.render.text import _visible_width
 from helper import strip_ansi
 
@@ -23,20 +23,20 @@ _NOW = 1_000_000_000.0
 
 def test_model_right_section_no_seven_day_suffix() -> None:
     r = Renderer()
-    helper, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
-    assert '%' not in strip_ansi(helper)
+    h5h, _h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    assert '%' not in strip_ansi(h5h)
 
 
 def test_model_right_section_seven_day_appears_when_used() -> None:
     r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-    helper, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
-    assert '12.5%' in strip_ansi(helper)
+    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    assert '12.5%' in strip_ansi(h7d)
 
 
 def test_model_right_section_pill_inactive_plain_text() -> None:
     r = Renderer()
-    _helper, right, w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    _h5h, _h7d, right, w = r.model_right_section('Sonnet 4.6', '', RateLimits())
     stripped = strip_ansi(right)
     assert 'Sonnet 4.6' in stripped
     assert PILL_LEFT not in stripped
@@ -46,7 +46,7 @@ def test_model_right_section_pill_inactive_plain_text() -> None:
 
 def test_model_right_section_pill_active_wraps_with_caps() -> None:
     r = Renderer()
-    _helper, right, w = r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
+    _h5h, _h7d, right, w = r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
     stripped = strip_ansi(right)
     assert stripped.startswith(PILL_LEFT)
     assert stripped.endswith(PILL_RIGHT)
@@ -76,14 +76,14 @@ class TestSingleRowGuarantee:
 
     def _wide_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
         git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
-        helper, right, right_w = r.model_right_section(
+        h5h, h7d, right, right_w = r.model_right_section(
             'Sonnet 4.6', '', RateLimits()
         )
-        helper_w = _visible_width(helper)
+        helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
         target_w = (width - 4) - self._vsep_w - helper_w - right_w
         path = r.fit_path('~/deep/project/submodule/src', git, target_w,
                           compact_only=False)
-        return path, helper, right, right_w
+        return path, h5h, right, right_w
 
     def _medium_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
         git    = GitInfo(branch='feat/long', commit='abc1234', modified=3)
@@ -100,8 +100,8 @@ class TestSingleRowGuarantee:
         r = Renderer()
         for width in (MEDIUM_WIDTH, 100, MAX_WIDTH):
             git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
-            helper, _right, right_w = r.model_right_section('Sonnet 4.6', '', RateLimits())
-            helper_w = _visible_width(helper)
+            h5h, h7d, _right, right_w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+            helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
             target_w = (width - 4) - self._vsep_w - helper_w - right_w
             path = r.fit_path('~/deep/project/submodule/src', git, target_w)
             assert _visible_width(path) <= target_w, f'width={width}: path overflows target_w={target_w}'
@@ -207,8 +207,8 @@ class TestModelRightSectionWideBurndown:
     def test_wide_both_buckets_active_show_trends(self) -> None:
         # 5h: 150 min elapsed, 60% → over-burn; 7d: mid-window 5040 min elapsed, 60% → over-burn
         rate = self._make_rate(60.0, 150, 60.0, 5040)
-        helper, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
-        stripped = strip_ansi(helper)
+        h5h, h7d, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
+        stripped = strip_ansi(h5h + h7d)
         assert GLYPH_BURN_FAST in stripped  # at least one over-burn trend
 
     def test_wide_seven_day_idle_suppresses_block(self) -> None:
@@ -219,9 +219,8 @@ class TestModelRightSectionWideBurndown:
             five_hour=RateBucket(used_percentage=60.0, resets_at=int(now + 150 * 60)),
             seven_day=RateBucket(used_percentage=0, resets_at=0),
         )
-        helper, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
-        stripped = strip_ansi(helper)
-        assert '|' not in stripped  # entire 7d block suppressed
+        _h5h, h7d, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
+        assert h7d == ''  # entire 7d block suppressed
 
     def test_wide_five_hour_warmup_no_5h_trend(self) -> None:
         import time
@@ -231,16 +230,16 @@ class TestModelRightSectionWideBurndown:
             five_hour=RateBucket(used_percentage=60.0, resets_at=int(now + 298 * 60)),
             seven_day=RateBucket(used_percentage=0, resets_at=0),
         )
-        helper, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
-        stripped = strip_ansi(helper)
+        h5h, _h7d, _right, _w = self._r.model_right_section('Sonnet 4.6', '', rate)
+        stripped = strip_ansi(h5h)
         assert '60.0%' in stripped
         assert GLYPH_BURN_FAST not in stripped
         assert '▼' not in stripped
 
     def test_wide_helper_text_width_is_positive(self) -> None:
         rate = self._make_rate(60.0, 150, 60.0, 5040)
-        helper, _right, right_w = self._r.model_right_section('Sonnet 4.6', '', rate)
-        assert _visible_width(helper) > 0
+        h5h, h7d, _right, right_w = self._r.model_right_section('Sonnet 4.6', '', rate)
+        assert _visible_width(h5h) > 0
         assert right_w == _visible_width(_right)
 
 
@@ -290,3 +289,142 @@ class TestNarrowLayoutNoBurndown:
     def test_narrow_no_down_arrow(self) -> None:
         out, _w = self._r.model_section_compact('Sonnet 4.6', self._narrow_rate(), max_width=55)
         assert '▼' not in strip_ansi(out)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.1 — single lightbulb glyph, leading padding, parenthesised effort
+# ---------------------------------------------------------------------------
+
+from yas.constants import GLYPH_MODEL_LIGHT  # noqa: E402 (after class defs)
+
+class TestModelGlyph:
+    def test_model_right_section_uses_lightbulb_glyph(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+        stripped = strip_ansi(right)
+        assert GLYPH_MODEL_LIGHT in stripped
+
+    def test_model_right_section_fast_mode_swaps_to_burn_glyph(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits(), fast_mode=True)
+        stripped = strip_ansi(right)
+        assert GLYPH_BURN_FAST in stripped
+        assert GLYPH_MODEL_LIGHT not in stripped
+
+
+    def test_model_section_compact_uses_lightbulb_glyph(self) -> None:
+        r = Renderer()
+        out, _ = r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55)
+        stripped = strip_ansi(out)
+        assert GLYPH_MODEL_LIGHT in stripped
+
+
+    def test_model_right_section_compact_uses_lightbulb_glyph(self) -> None:
+        r = Renderer()
+        _rate, right, _w = r.model_right_section_compact('Sonnet 4.6', RateLimits(), max_right_width=40)
+        stripped = strip_ansi(right)
+        assert GLYPH_MODEL_LIGHT in stripped
+
+
+class TestModelEffort:
+
+    def test_model_right_section_pill_no_effort_no_parens(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Opus 4.7 1M', '', RateLimits(), effort_level='high')
+        stripped = strip_ansi(right)
+        assert '(' not in stripped
+        assert ')' not in stripped
+
+
+    def test_model_right_section_pill_with_effort_shows_parens(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Opus 4.7 1M', 'medium', RateLimits(), effort_level='high')
+        stripped = strip_ansi(right)
+        assert '(medium)' in stripped
+
+    def test_model_right_section_plain_text_no_effort_no_parens(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+        stripped = strip_ansi(right)
+        assert GLYPH_MODEL_LIGHT in stripped
+        assert '(' not in stripped
+
+
+    def test_model_right_section_plain_text_with_effort_shows_parens(self) -> None:
+        r = Renderer()
+        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', 'low', RateLimits())
+        stripped = strip_ansi(right)
+        assert '(low)' in stripped
+
+
+class TestParseModelName:
+    def test_model_from_dict_string_input(self) -> None:
+        result = Model.from_dict('claude-opus-4-8')
+        assert result == Model(id='claude-opus-4-8', display_name='')
+
+
+    def test_model_from_dict_dict_input(self) -> None:
+        result = Model.from_dict({'id': 'claude-opus-4-8', 'display_name': 'Opus 4.8'})
+        assert result == Model(id='claude-opus-4-8', display_name='Opus 4.8')
+
+
+    def test_model_from_dict_unknown_type_returns_default(self) -> None:
+        assert Model.from_dict(42) == Model()
+        assert Model.from_dict(None) == Model()
+
+
+    def test_effort_from_dict_parses_level(self) -> None:
+        result = Effort.from_dict({'level': 'high'})
+        assert result == Effort(level='high')
+
+
+    def test_effort_from_dict_non_string_level_falls_back_to_empty(self) -> None:
+        result = Effort.from_dict({'level': 99})
+        assert result == Effort(level='')
+
+    def test_name_parsing(self) -> None:
+        NAMES = (
+            ({'id': 'claude-sonnet-4-6',   'display_name': 'Sonnet 4.6'},            'Sonnet 4.6'),
+            ({'id': 'claude-opus-4-7[1m]', 'display_name': 'Opus 4.7 (1M context)'}, 'Opus 4.7 (1M context)'),
+            ({"id": "claude-opus-4-8[1m]", "display_name": "Opus 4.8 (1M context)"}, 'Opus 4.8 (1M context)'),
+        )
+        results = {d['id']: Model.from_dict(d).display_name for d, _ in NAMES}
+        expected = {d['id']: s for d,s in NAMES}
+
+        assert results == expected
+
+
+    def test_session_info_recursive_population(self) -> None:
+        payload = {
+            'session_id': 'abc123',
+            'model': {'id': 'claude-sonnet-4-6', 'display_name': 'Sonnet'},
+            'workspace': {'current_dir': '/tmp', 'project_dir': '/tmp', 'added_dirs': []},
+            'cost': {'total_cost_usd': 1.23, 'total_duration_ms': 500},
+            'context_window': {
+                'used_percentage': 42.0,
+                'current_usage': {
+                    'input_tokens': 100,
+                    'output_tokens': 50,
+                    'cache_creation_input_tokens': 10,
+                    'cache_read_input_tokens': 5,
+                },
+            },
+            'rate_limits': {
+                'five_hour': {'used_percentage': 33.0, 'resets_at': 1700000001},
+                'seven_day': {'used_percentage': 10.5, 'resets_at': 1700000002},
+            },
+        }
+
+        result = SessionInfo.from_dict(payload)
+
+        assert result.model == Model(id='claude-sonnet-4-6', display_name='Sonnet')
+        assert result.workspace.current_dir == '/tmp'
+        assert result.cost.total_cost_usd == 1.23
+        assert result.context_window.current_usage == CurrentUsage(
+            input_tokens=100,
+            output_tokens=50,
+            cache_creation_input_tokens=10,
+            cache_read_input_tokens=5,
+        )
+        assert result.rate_limits.five_hour == RateBucket(used_percentage=33.0, resets_at=1700000001)
+        assert result.rate_limits.seven_day == RateBucket(used_percentage=10.5, resets_at=1700000002)

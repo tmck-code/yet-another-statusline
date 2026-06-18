@@ -28,7 +28,7 @@ _Avoid_: "graph" (it is a one-row glyph strip, not a plotted axis), and the old 
 The `show_day_stats` **Config** knob (`YAS_SHOW_DAY_STATS`, `[tokens].show_day_stats`, default on). When off, the tokens row drops every `/day` figure and the day cost, rendering session-only; the three-column structure and the **Token-Rate Sparkline** are unchanged.
 
 **Cache Countdown**:
-The time remaining before this session's prompt cache expires, shown as `<cache-glyph> <m:ss>` (e.g. `3m07s`, `42s`) in its own vsep-delimited section on the path/model row, between the rate-limit helper and the model pill. The anchor is the `timestamp` of the most recent transcript line that touched the prompt cache (`cache_read_input_tokens > 0` or `cache_creation_input_tokens > 0`); `remaining = ttl − (now − anchor)`. The **Cache TTL** is 300 s by default, 3600 s when the anchor line wrote to the 1-hour ephemeral tier (`cache_creation.ephemeral_1h_input_tokens > 0`). Re-derived from the transcript every render against the frozen `now` — no per-session state file. The figure is coloured by `fill_colour(elapsed_pct)` where `elapsed_pct = 100 − round(remaining·100/ttl)`, so it runs green when fresh → red near expiry (the same safe/warn/alert ladder as the rate-limit percentages). The whole section — divider included — is hidden when there has never been a cache event, when `remaining ≤ 0` (expired), or when the row is too narrow to fit it (it sheds first, before the path truncates).
+The time remaining before this session's prompt cache expires, shown as `<cache-glyph> <MM:SS>` (e.g. `03:07`, `00:42`), rolling to `H:MM:SS` at or above 3600 s, in its own vsep-delimited section on the path/model row, between the rate-limit helper and the model pill. The anchor is the `timestamp` of the most recent transcript line that touched the prompt cache (`cache_read_input_tokens > 0` or `cache_creation_input_tokens > 0`); `remaining = ttl − (now − anchor)`. The **Cache TTL** is 300 s by default, 3600 s when the anchor line wrote to the 1-hour ephemeral tier (`cache_creation.ephemeral_1h_input_tokens > 0`). Re-derived from the transcript every render against the frozen `now` — no per-session state file. The figure is coloured by `fill_colour(elapsed_pct)` where `elapsed_pct = 100 − round(remaining·100/ttl)`, so it runs green when fresh → red near expiry (the same safe/warn/alert ladder as the rate-limit percentages). The whole section — divider included — is hidden when there has never been a cache event, when `remaining ≤ 0` (expired), or when the row is too narrow to fit it (it sheds first, before the path truncates).
 _Avoid_: "Cache Read" (that is the `cache_read_input_tokens` token figure in the tokens row — a token count, not a time), and "cache TTL" as the *displayed* term (the **Cache TTL** is the 300/3600 s lifetime constant; the **Cache Countdown** is the live remaining time derived from it).
 
 ### Context window
@@ -46,8 +46,20 @@ _Avoid_: "context full" — the bar fills against the 150K soft limit, so it can
 ### Thinking effort
 
 **Effort Level**:
-The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
+The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Rendered as parenthesised text `(value)` after the model name in the pill (e.g. `Sonnet 4.6 (high)`); omitted entirely when the value is empty. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
 _Avoid_: "thinking level" (overloaded — the *level* names a setting, the *effort* names the resource it spends).
+
+**Model Glyph**:
+The single lead icon in the model pill: `GLYPH_MODEL_LIGHT` (nf-md-lightbulb_on_40, 󱩑, `\U000f1a51`). Replaces the prior two-glyph pair (monitor + brain). In fast-mode the glyph swaps to `GLYPH_BURN_FAST`. One space of left padding follows the pill edge before the glyph.
+_Avoid_: "model icon" or "brain glyph" (both old terms — **Model Glyph** is canonical and always refers to the single lightbulb-on-40 icon).
+
+**Session Timer**:
+The elapsed wall-clock time for the current session, shown in the path/model row as a fixed 8-column right-justified field. Format: `MM:SS` when under one hour (no leading `0:`; e.g. `   13:27`), rolling to `H:MM:SS` or `HH:MM:SS` at or above one hour. The 8-column reservation keeps the surrounding separators stable as the timer ticks.
+_Avoid_: "session elapsed" (that term refers to the `SessionView.elapsed` field; the **Session Timer** is the formatted string rendered in the row).
+
+**Clear Timer**:
+The elapsed wall-clock time since the most recent `/clear` in the current transcript, shown leftmost in the wide elapsed cell when a `/clear` marker is present. Detection is a bounded head-scan (first 30 lines, `CLEAR_SCAN_MAX_LINES`) of the current transcript looking for the `<command-name>/clear</command-name>` user marker; a `/clear` always forks a new transcript so at most one marker exists per file. The clear timer is computed as `now − clear_epoch` (clamped at 0 for clock skew) and formatted with the same `_fmt_elapsed_clock` convention as the **Session Timer**. It is led by `GLYPH_CLEAR` (nf-md-refresh `\U000f0450`) and rendered in an accent colour (`CLR_CYAN`) to distinguish it from the grey **Session Timer** that follows. The two timers share the single existing elapsed-cell vsep/elbow — no additional border divider is introduced. Degrades: both timers → clear-only (session timer shed) → cell shed entirely, under the same path-protection guard as before.
+_Avoid_: "since-clear timer" (verbose) or "clear elapsed" (confusing with **Session Timer**). The **Clear Timer** is the canonical term.
 
 **Anchor**:
 The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
@@ -166,13 +178,13 @@ _Avoid_: "scroll window" (nothing scrolls — the slice is recomputed each rende
 ### Rate limits
 
 **Five-Hour Limit**:
-The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `<pct>% T-<time-to-reset>`.
+The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `ICON_LIMIT_5H (nf-md-timer_outline, 󰔛) (-H:MM) <pct>%` — reset countdown at the front in `(-H:MM)` form (seconds dropped, leading minus, single-digit hour), usage percentage to one decimal place (e.g. `58.0%`), omitted when there is no reset window. 5-hour and 7-day segments are separated by ` ┆ ` (dotted vertical, U+2506).
 
 **Seven-Day Limit**:
-The weekly quota in `rate_limits.seven_day`. Rendered in the wide layout model row as `| <pct>%` (with optional **Burndown Trend** suffix).
+The weekly quota in `rate_limits.seven_day`. Rendered in the wide layout model row as `ICON_LIMIT_7D (nf-md-calendar_week_begin, 󰨴) <pct>%` with usage percentage to one decimal place (e.g. `49.0%`) and an optional **Burndown Trend** suffix.
 
 **Burndown Trend**:
-A velocity indicator rendered alongside each active rate-limit bucket's `<pct>%`. Computed as `delta = used_percentage - ideal_pct`, where `ideal_pct = (elapsed_minutes / window_minutes) * 100` and `elapsed_minutes` is derived from `resets_at` and the window constant. Formatted as:
+A velocity indicator rendered alongside each active rate-limit bucket's `<pct>%`. Computed as `delta = used_percentage - ideal_pct`, where `ideal_pct = (elapsed_minutes / window_minutes) * 100` and `elapsed_minutes` is derived from `resets_at` and the window constant. Formatted as one decimal place (e.g. `+3.0%`, `-2.0%`):
 - `▲<abs>%` when `delta > +0.5` (over-burn, red ramp: safe → warn → alert at 5%/15%)
 - `▼<abs>%` when `delta < -0.5` (under-burn, green ramp: dim → mid → bright at 5%/15%)
 - `·` when `|delta| ≤ 0.5` (on-pace)
@@ -182,7 +194,7 @@ Suppressed when: `resets_at == 0` (no window), window expired, or within warmup 
 ### Configuration
 
 **Config**:
-The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
+The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, `justify`, `labels` (**Section Labels**), plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
 _Avoid_: "settings" (overloaded with Claude Code's `settings.json`, which is unrelated — `Config` reads `yas.toml` and `YAS_*` env vars).
 
 **Glyph Mode**:
@@ -208,6 +220,10 @@ _Avoid_: "per-model env var" (none exists by design).
 **Config-Error Row**:
 The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. Full per-value reasons are written to stderr only when `YAS_DEBUG` is set. A rejected knob silently falls back to its default — the row is informational, never fatal.
 _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single failure message, and never aborts the render).
+
+**Section Labels** (`labels` knob / `YAS_LABELS`):
+Opt-in, **wide-layout-only** superscript captions painted into the rainbow top border and the dim/solid separator rows directly above the value each names. Each label is anchored over the value's real column — `build_wide` measures the already-rendered content string (ANSI stripped, whitespace-token offsets) rather than using a fixed tuned-offset table, so a caption tracks its value exactly and is emitted only when that value is present. Coverage: `changes` over the git dirty block (`•N*M`); `session` over the session timer always plus `clear` over the clear timer only when it is displayed (clear content non-empty — otherwise `session` alone anchors over the single timer); for the 5h cell `5h` over its glyph plus, in full form, `remain` (countdown), `used` (used %), and `burn rate` (trend) — compact/reset form carries only `5h` + `used`; for the 7d cell `7d` plus `used` and `burn rate` (when a trend renders); `cache` over the cache countdown; on the context separator `context` (token count), `fill` (the context-window `(N%)`), `dumb` (the compaction-risk %); on the tokens separator `input sess/day`/`cache sess/day`/`output sess/day` over the token columns, `cost sess/day` over the cost, and `tokens over time` over the sparkline; `skills + plugins` over the skills row; and content-start captions over the dynamic section separators — `plan` (todo-checklist / task row), `subagents` (subagent cohort), `workflow` (workflow cohort), `specs` (OpenSpec change bars), with `plan` + `subagents` splitting the caption in the side-by-side checklist+subagents block. Default `false`; resolved through the **Precedence Chain** exactly like the wide-only `justify` knob. Each label glyph takes the **gradient** colour (and, on dim separators, the same per-column dim factor) of the column it occupies — never a flat colour. Labels overwrite only *fill* glyphs (`─`/`┄`); they yield to elbows (`┬┴┼`), the frame corners, the embedded session id, and any active **Model Pill** — truncating before, or dropping at, a non-fill column so no elbow, column, or content ever shifts. Narrow and medium layouts ignore the knob entirely.
+_Avoid_: "rows" (labels add no content rows — they overlay the existing border/separator frame) and "headers" (they caption individual values positionally, not whole sections as a heading row would). The value-label words map to canonical concepts: `remain` = the rate-limit reset countdown, `used` = the **Five-Hour Limit** / **Seven-Day Limit** usage percentage, `burn rate` = the **Burndown Trend**, `limit` = the **Context Window Size** `(N%)` headroom figure, and `until dumb` = the **Compaction-Risk Zone** percentage.
 
 ### Derived session state
 
@@ -249,7 +265,7 @@ The statusline source lives in `claude/yas/` as a layered package with two subpa
 
 | Module | Canonical concept |
 |--------|-------------------|
-| `constants` | ANSI colours, glyph/icon escape constants, width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
+| `constants` | ANSI colours, glyph/icon escape constants (`GLYPH_MODEL_LIGHT`, `ICON_LIMIT_5H`, `ICON_LIMIT_7D`, `SEP_RATE`, …), width/rate-limit-window constants, `_ANSI_RE`, `HOME`, `CLAUDE_DIR` |
 | `session` | Session data model: `SessionInfo`, `Model`, `Workspace`, `Cost`, `ContextWindow`, `RateLimits`, … |
 | `config` | `Config` — env/argv/toml resolution; no import-time singleton |
 | `metrics` | (see `yas/render/metrics`) |

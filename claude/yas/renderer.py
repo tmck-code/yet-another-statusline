@@ -50,10 +50,10 @@ from yas.constants import (
     GLYPH_CONTINUATION,
     GLYPH_FOLDER,
     GLYPH_CACHE,
-    GLYPH_HELPER,
+    GLYPH_CLEAR,
     GLYPH_HOURGLASS,
     GLYPH_IN,
-    GLYPH_MODEL,
+    GLYPH_MODEL_LIGHT,
     GLYPH_PLUGINS,
     GLYPH_RENAMED,
     GLYPH_REPLYING,
@@ -71,6 +71,8 @@ from yas.constants import (
     GLYPH_WF_HEADER,
     GLYPH_WF_SUMMARY,
     ICON_COST,
+    ICON_LIMIT_5H,
+    ICON_LIMIT_7D,
     ICON_TOK_RATE,
     PILL_LEFT,
     PILL_RIGHT,
@@ -309,17 +311,17 @@ class Renderer:
         return self.gradient.spark_color(t, dim)
 
     # --- Border delegations (backward compat) ---
-    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
-        return self.border.border_top(width, session_id, downs, fill, pill)
+    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_top(width, session_id, downs, fill, pill, labels)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         return self.border.border_bottom(width, ups, fill)
 
-    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
-        return self.border.border_separator(width, ups, downs, fill)
+    def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0, labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_separator(width, ups, downs, fill, labels)
 
-    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
-        return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge)
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom', labels: tuple[tuple[str, int], ...] = ()) -> str:
+        return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge, labels)
 
     def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
         return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)
@@ -414,12 +416,42 @@ class Renderer:
             return self.warn
         return self.safe
 
-    def elapsed_section(self, elapsed: str) -> tuple[str, int]:
-        text = f'{self.SESSION}{elapsed}{self.R}'
+    def elapsed_section(self, elapsed: str, clear_str: str = '') -> tuple[str, int]:
+        """Compose the elapsed-cell content and its visible width.
+
+        When *clear_str* is non-empty (session has been /clear-ed), the cell
+        shows the clear timer first — ``GLYPH_CLEAR  <accent><clear_str>`` —
+        followed by the grey right-justified session timer when *elapsed* is
+        also non-empty.  Passing ``elapsed=''`` with a non-empty *clear_str*
+        gives the clear-only degradation tier (no session timer).
+
+        When both *clear_str* and *elapsed* follow their defaults (empty), the
+        result is byte-identical to the pre-change single-timer form:
+        ``<grey><elapsed rjust 8>``.
+        """
+        if clear_str:
+            sess_part = (
+                f'  {self.SESSION}{elapsed.rjust(8)}{self.R}'
+                if elapsed else ''
+            )
+            text = f'{GLYPH_CLEAR}  {CLR_CYAN}{clear_str}{RESET}{sess_part}'
+            return text, _visible_width(text)
+        padded = elapsed.rjust(8)
+        text   = f'{self.SESSION}{padded}{self.R}'
         return text, _visible_width(text)
 
     def cache_section(self, remaining: float, elapsed_pct: int) -> tuple[str, int]:
-        dur    = fmt_dur(remaining)
+        total_s = int(remaining)
+        if total_s >= 3600:
+            h   = total_s // 3600
+            rem = total_s % 3600
+            m   = rem // 60
+            sec = rem % 60
+            dur = f'{h}:{m:02d}:{sec:02d}'
+        else:
+            m   = total_s // 60
+            sec = total_s % 60
+            dur = f'{m:02d}:{sec:02d}'
         colour = self.fill_colour(elapsed_pct)
         text   = f'{GLYPH_CACHE}  {colour}{dur}{RESET}'
         return text, _visible_width(text)
@@ -448,7 +480,7 @@ class Renderer:
         pct_clr   = self.fill_colour(float(pct))
         step      = rainbow_step()
         c_helper  = rainbow_at(step, 9)
-        rate_pct  = f'{pct_clr}{pct}%{self.R}'
+        rate_pct  = f'{pct_clr}{float(pct):.1f}%{self.R}'
 
         rate_with_time = None
         try:
@@ -467,7 +499,7 @@ class Renderer:
         def _build(name: str, rate: str) -> tuple[str, int]:
             if pct_bg:
                 cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((GLYPH_MODEL_LIGHT, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 for ch in name:
@@ -480,12 +512,12 @@ class Renderer:
                 return (
                     f'{painted}'
                     f'{self.LABEL}|{self.R}'
-                    f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
+                    f' {c_helper}{BOLD}{ICON_LIMIT_5H}{self.R} {rate}'
                 ), pw
             return (
-                f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+                f'{model_clr}{GLYPH_MODEL_LIGHT}  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
-                f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
+                f' {c_helper}{BOLD}{ICON_LIMIT_5H}{self.R} {rate}'
             ), 0
 
         if rate_with_time:
@@ -501,53 +533,64 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + ELLIPSIS, rate_pct)
 
-    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
-        step      = rainbow_step()
-        c_think   = rainbow_at(step, 0)
-        c_helper  = rainbow_at(step, 9)
-        model_clr = self.model_colour(model_name)
-        pct       = self._model_bg_pct(effort_level)
-        glyph     = GLYPH_BURN_FAST if fast_mode else GLYPH_THINKING
+    def _rate_helpers(self, rate_limits: RateLimits, gap_5h: int = 1, gap_7d: int = 1) -> tuple[str, str]:
+        """Build the 5h and (optional) 7d limit sub-sections.
 
-        if pct:
-            anchor, shift = self._model_anchor_pair(model_name)
-            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-            cells.append((GLYPH_MODEL,    anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            for ch in model_name:
-                cells.append((ch, anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((glyph,          anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            for ch in model_thinking:
-                cells.append((ch, anchor, False, True))
-            cells.append((' ', anchor, False, False))
-            pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
-            pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
-            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
-        elif model_thinking:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
-        else:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
-
-        right_w = _visible_width(right_text)
-
-        helper_text = f'{c_helper}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        ``gap_5h`` / ``gap_7d`` set the inter-stat separator width within each
+        section (default 1). The justified top row widens them toward 3 to spend
+        section slack as breathing room rather than only outer padding.
+        """
+        c_helper  = rainbow_at(rainbow_step(), 9)
+        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour, gap_5h)}{self.R}'
+        helper_7d = ''
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
-            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            seven_trend = self.burndown_trend(
+            seven_clr     = self.fill_colour(float(seven_day.used_percentage or 0))
+            seven_pct_str = f'{float(seven_day.used_percentage or 0):.1f}'
+            seven_trend   = self.burndown_trend(
                 float(seven_day.used_percentage or 0),
                 seven_day.resets_at,
                 SEVEN_DAY_MINUTES,
                 SEVEN_DAY_WARMUP_MINUTES,
             )
-            seven_trend_part = f' {seven_trend}' if seven_trend else ''
-            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}{seven_trend_part}'
+            seven_trend_part = f'{" " * gap_7d}{seven_trend}' if seven_trend else ''
+            helper_7d = f'{c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
+        return helper_5h, helper_7d
 
-        return helper_text, right_text, right_w
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, str, int]:
+        model_clr  = self.model_colour(model_name)
+        pct        = self._model_bg_pct(effort_level)
+        lead_glyph = GLYPH_BURN_FAST if fast_mode else GLYPH_MODEL_LIGHT
+
+        if pct:
+            anchor, shift = self._model_anchor_pair(model_name)
+            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+            cells.append((' ',          anchor, False, False))   # extra left padding
+            cells.append((lead_glyph,  anchor, False, False))
+            cells.append((' ',         anchor, False, False))
+            cells.append((' ',         anchor, False, False))
+            for ch in model_name:
+                cells.append((ch, anchor, False, False))
+            if model_thinking:
+                cells.append((' ', anchor, False, False))
+                cells.append(('(', anchor, False, False))
+                for ch in model_thinking:
+                    cells.append((ch, anchor, False, True))
+                cells.append((')', anchor, False, False))
+            cells.append((' ', anchor, False, False))
+            pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
+            pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
+            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
+        elif model_thinking:
+            right_text = f'{model_clr} {lead_glyph}  {model_name}{self.R} {model_clr}({model_thinking}){RESET}'
+        else:
+            right_text = f'{model_clr} {lead_glyph}  {model_name}{self.R}'
+
+        right_w = _visible_width(right_text)
+
+        helper_5h, helper_7d = self._rate_helpers(rate_limits)
+
+        return helper_5h, helper_7d, right_text, right_w
 
     def model_right_section_compact(self, model_name: str, rate_limits: RateLimits, max_right_width: int, effort_level: str = '') -> tuple[str, str, int]:
         model_clr = self.model_colour(model_name)
@@ -555,7 +598,7 @@ class Renderer:
         anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
         pct       = rate_limits.five_hour.used_percentage or 0
         pct_clr   = self.fill_colour(float(pct))
-        rate_text = f'{pct_clr}{pct}%{self.R}'
+        rate_text = f'{pct_clr}{float(pct):.1f}%{self.R}'
         try:
             if rate_limits.five_hour.resets_at:
                 resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
@@ -579,7 +622,7 @@ class Renderer:
         def _make_right(name: str) -> tuple[str, int]:
             if pct_bg:
                 cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((GLYPH_MODEL_LIGHT, anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 cells.append((' ', anchor, False, False))
                 for ch in name:
@@ -589,7 +632,7 @@ class Renderer:
                 pill_r  = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
                 painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
                 return painted, _visible_width(painted)
-            text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+            text = f'{model_clr}{GLYPH_MODEL_LIGHT}  {name}{self.R}'
             return text, _visible_width(text)
 
         right_text, right_w = _make_right(model_name)
@@ -652,6 +695,7 @@ class Renderer:
         *,
         twoline: bool = False,
         session_inout: int = 0,
+        stats_col: int | None = None,
     ) -> str:
         now     = time.time()
         is_done = sub.end_ts > 0
@@ -707,32 +751,73 @@ class Renderer:
                     seg += f'{ctx_clr}{tok_field}{self.R} {self.LABEL}{MIDDLE_DOT}{self.R} '
                 return seg + f'{model_clr}{model_str}{self.R}'
 
-            # Pick the richest cluster that fits alongside the front + a 1-col gap.
-            cluster = build_cluster(False, False)  # model-only fallback
-            for show_share, show_tok in ((True, True), (False, True)):
-                cand = build_cluster(show_share, show_tok)
-                if front_w + 1 + _visible_width(cand) <= target_w:
-                    cluster = cand
-                    break
-            cluster_w = _visible_width(cluster)
+            # Decide whether the stats cluster anchors at a fixed content
+            # column (wide layouts) or right-aligns to the content edge. The
+            # anchor only applies when even the model-only fallback fits within
+            # the slack to the right of `stats_col`; otherwise we fall through
+            # to the right-aligned path so very narrow widths stay sane.
+            model_only_w = _visible_width(build_cluster(False, False))
+            anchored     = stats_col is not None and (target_w - stats_col) >= model_only_w
 
-            # Fill the description into the space left over (truncates first).
-            desc_text  = sub.description or ''
-            desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
-            sep_desc   = ''
-            sep_desc_w = 0
-            if desc_text and desc_max > 0:
-                if _visible_width(desc_text) > desc_max:
-                    desc_text = desc_text[:desc_max - 1] + ELLIPSIS
-                desc_w = _visible_width(desc_text)
-                if is_done:
-                    sep_desc = f' {self.CTX_DIM}{MIDDLE_DOT}{self.R} {self.CTX_DIM}{desc_text}{self.R}'
-                else:
-                    sep_desc = f' {self.LABEL}{MIDDLE_DOT}{self.R} {self.CTX}{desc_text}{self.R}'
-                sep_desc_w = 3 + desc_w
+            if anchored:
+                assert stats_col is not None  # narrowed by `anchored`
+                avail = target_w - stats_col  # slack to the right of the anchor
+                # Pick the richest cluster that fits within the anchored slack.
+                cluster = build_cluster(False, False)  # model-only fallback
+                for show_share, show_tok in ((True, True), (False, True)):
+                    cand = build_cluster(show_share, show_tok)
+                    if _visible_width(cand) <= avail:
+                        cluster = cand
+                        break
+                cluster_w = _visible_width(cluster)
 
-            pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
-            line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+                # Truncate the description so it stops before the stats column
+                # with at least a 1-col gap. ' · ' separator is 3 cols wide.
+                desc_text  = sub.description or ''
+                desc_max   = stats_col - front_w - 3 - 1
+                sep_desc   = ''
+                sep_desc_w = 0
+                if desc_text and desc_max > 0:
+                    if _visible_width(desc_text) > desc_max:
+                        desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                    desc_w = _visible_width(desc_text)
+                    if is_done:
+                        sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                    else:
+                        sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                    sep_desc_w = 3 + desc_w
+
+                # Anchor the cluster's first `·` at content-offset stats_col.
+                pad1  = max(1, stats_col - front_w - sep_desc_w)
+                line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+                line1 += ' ' * max(0, target_w - _visible_width(line1))
+            else:
+                # Pick the richest cluster that fits alongside the front + a 1-col gap.
+                cluster = build_cluster(False, False)  # model-only fallback
+                for show_share, show_tok in ((True, True), (False, True)):
+                    cand = build_cluster(show_share, show_tok)
+                    if front_w + 1 + _visible_width(cand) <= target_w:
+                        cluster = cand
+                        break
+                cluster_w = _visible_width(cluster)
+
+                # Fill the description into the space left over (truncates first).
+                desc_text  = sub.description or ''
+                desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
+                sep_desc   = ''
+                sep_desc_w = 0
+                if desc_text and desc_max > 0:
+                    if _visible_width(desc_text) > desc_max:
+                        desc_text = desc_text[:desc_max - 1] + '…'  # U+2026 HORIZONTAL ELLIPSIS
+                    desc_w = _visible_width(desc_text)
+                    if is_done:
+                        sep_desc = f' {self.CTX_DIM}·{self.R} {self.CTX_DIM}{desc_text}{self.R}'
+                    else:
+                        sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
+                    sep_desc_w = 3 + desc_w
+
+                pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
+                line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
 
             # --- line 2: activity-only continuation, no right metrics (D6) ---
             # The snippet grows with the spare width line 2 has (no right
@@ -1023,12 +1108,25 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True) -> tuple[list[str], tuple[int, int], int, int]:
+    # Per-slot caps (in spaces) for the justify breathing room. Each slot fills
+    # from its 1-space minimum toward the cap as slack allows; leftover slack
+    # after every cap is met still feeds the rate/sparkline leader (as before).
+    JUSTIFY_PAD_CAP = 4
+
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True, justify: bool = False) -> tuple[list[str], tuple[int, int], int, int]:
         """One content line: tokens │ cost │ rate-and-sparkline.
 
         With ``show_day_stats`` (default), session and day figures merge per
         field as ``session/day`` with a paired cache parenthetical. When off,
         the row is session-only and keeps the original per-field justification.
+
+        When ``justify`` is on (and day stats are shown), horizontal slack that
+        would otherwise all flow to the sparkline leader is first spent as
+        breathing room *inside* the sections — widening the two inter-group gaps
+        in the tokens column and padding the cost/leader edges, each capped at
+        ``JUSTIFY_PAD_CAP`` spaces. ``min_width`` is unchanged: the optional
+        padding only consumes genuine slack, so at the tight floor the gaps
+        collapse to 1 and the row fits exactly as with ``justify`` off.
         The tokens and cost columns are sized to the *measured* content (floored
         at a realistic-widest budget), so the two ``│`` dividers always land on
         the rendered content's divider column — they never detach from the
@@ -1043,20 +1141,35 @@ class Renderer:
         in_icon  = f'{ARROW_IN_ACTIVE} '  if in_active  else f'{ARROW_IN_IDLE} '   # both 2 cols
         out_icon = f'{ARROW_OUT_ACTIVE} ' if out_active else f'{ARROW_OUT_IDLE} '  # both 2 cols
 
+        # Inter-group gaps in the tokens column and the cost/leader edge pads.
+        # They start at their minimums (gaps 1 space, edge pads 0) so the
+        # measured widths and ``min_width`` below are the tight floor; ``justify``
+        # widens them from genuine slack only (see the pad block after min_width).
+        gap1 = gap2 = ' '   # ↓in/day | (cache) | ↑out/day inter-group gaps
+        cost_lpad = cost_rpad = ''
+        leader_lpad = ''
+
         if show_day_stats:
             # Merged session/day per field; variable width, no fixed rjust (D2).
             cache = (f'{self.TOK_DIM}({fmt_tok(sess_cache)}{self.R}'
                      f'{self.TOK_DAY_DIM}/{fmt_tok(day_cache)}{self.R}'
                      f'{self.TOK_DIM}){self.R}')
-            tokens_col = (
-                f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
-                f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R} '
-                f'{cache}'
-                f'{self.LABEL} {self.BOLDY}{out_icon}{self.R}'
-                f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
-            )
-            cost_col = (f'{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
-                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}')
+
+            def build_tokens() -> str:
+                return (
+                    f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}'
+                    f'{self.TOK}{fmt_tok(sess_in)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_in)}{self.R}{gap1}'
+                    f'{cache}'
+                    f'{self.LABEL}{gap2}{self.BOLDY}{out_icon}{self.R}'
+                    f'{self.TOK}{fmt_tok(sess_out)}{self.R}{self.TOK_DAY_DIM}/{fmt_tok(day_out)}{self.R}'
+                )
+
+            def build_cost() -> str:
+                return (f'{cost_lpad}{self.safe}{ICON_COST}{self.R}  {self.COST}${sess_cost:,.2f}{self.R}'
+                        f'{self.LABEL} / {self.R}{day_clr}${day_cost:,.2f}{self.R}{cost_rpad}')
+
+            tokens_col = build_tokens()
+            cost_col   = build_cost()
         else:
             # Session-only: original per-field justification (D2).
             sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -1086,12 +1199,10 @@ class Renderer:
         # back to a compact form rather than overflow the box.
         tokens_w = _visible_width(tokens_col)
         cost_w   = _visible_width(cost_col)
-        TOKENS_BUDGET = tokens_w
-        COST_BUDGET   = cost_w
         # The rate/spark leader can never compress below its bare ``<rate> t/m``
         # label; measure it here so the budget split and min_width are exact (when
         # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
-        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label   = f'{self.TOK_ICON}{ICON_TOK_RATE}  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
         leader_min   = max(label_w + 1, rate_label_w)
 
@@ -1103,6 +1214,50 @@ class Renderer:
         # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
         # width. The builder only emits this row when ``box_width >= min_width``.
         min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
+
+        # Justify breathing room: spend genuine slack as padding *inside* the
+        # sections before it flows to the sparkline. ``free`` is the room beyond
+        # the tight minimum (min-gap content + min leader); it is exactly the
+        # slack that today all lands in the leader. We never touch ``min_width``,
+        # so at the floor ``free`` is 0, the gaps stay at 1, and the row is
+        # byte-for-byte the justify-off layout. Slots fill toward their caps via
+        # an even round-robin; whatever is consumed shrinks the leader by the
+        # same amount, and the remainder still feeds the sparkline.
+        cap = self.JUSTIFY_PAD_CAP
+        if justify and show_day_stats:
+            free = max(0, inner - tokens_w - cost_w - leader_min)
+            # (slot extra above its 1-space/0-space minimum, per-slot cap).
+            #  gap1, gap2 sit at 1 already → extra cap is cap-1; the edge pads
+            #  sit at 0 → extra cap is the full cap.
+            slots = [cap - 1, cap - 1, cap, cap, cap]  # gap1, gap2, cost_l, cost_r, leader_l
+            give  = [0, 0, 0, 0, 0]
+            budget = min(free, sum(slots))
+            while budget > 0 and any(give[i] < slots[i] for i in range(len(slots))):
+                for i in range(len(slots)):
+                    if budget <= 0:
+                        break
+                    if give[i] < slots[i]:
+                        give[i] += 1
+                        budget  -= 1
+            gap1 = ' ' * (1 + give[0])
+            gap2 = ' ' * (1 + give[1])
+            cost_lpad = ' ' * give[2]
+            cost_rpad = ' ' * give[3]
+            leader_lpad = ' ' * give[4]
+            # Rebuild the padded strings and grow the measured widths by the
+            # injected pad so the budget split and col1/col2 follow the new
+            # divider positions exactly (the leader pad is accounted separately
+            # below). min_width above stays on the unpadded floor.
+            tokens_col = build_tokens()
+            cost_col   = build_cost()
+            tokens_w  += give[0] + give[1]
+            cost_w    += give[2] + give[3]
+
+        # Budgets track the (possibly padded) measured widths, so the column
+        # sizing and col1/col2 always land on the rendered │.
+        TOKENS_BUDGET = tokens_w
+        COST_BUDGET   = cost_w
+        leader_lpad_w = len(leader_lpad)
 
         avail = inner - leader_min                 # room left after the leader minimum
         if TOKENS_BUDGET + COST_BUDGET <= avail:
@@ -1131,10 +1286,13 @@ class Renderer:
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
 
-        bar_w = leader_w - rate_label_w
+        # The justify leader pad sits between the vsep_leader │ and the rate
+        # label; it eats from the leader budget so the sparkline shrinks by the
+        # same amount it grew the breathing room.
+        bar_w = leader_w - rate_label_w - leader_lpad_w
 
         if bar_w < 10:
-            leader = rate_label
+            leader = f'{leader_lpad}{rate_label}'
         else:
             if session_id:
                 # 1 second per char (D4): span the most recent bar_w seconds, one
@@ -1146,7 +1304,7 @@ class Renderer:
                 spark = self.sparkline_1row(spark_history, live=True)
             else:
                 spark = ' ' * bar_w
-            leader = f'{rate_label}{spark}'
+            leader = f'{leader_lpad}{rate_label}{spark}'
 
         return [f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'], (col1, col2), 0, min_width
 
@@ -1215,11 +1373,16 @@ class Renderer:
 
         if fill_ratio >= 1.0:
             a = BOLD + self.risk_zone_color(total_tokens)
+            # Right-justify the visible text into fixed-width fields (applied to
+            # the plain string before ANSI wrapping, since a colour-coded string
+            # cannot be rjust-ed) so the token/window/soft columns hold a stable
+            # right edge regardless of magnitude — `194.0K (97%) 100%` lines up
+            # under `30.0K (3%) 20%` from the normal branch below.
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
-                secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
+                secondary = f' {a}{f"({pct_model:.0f}%)":>5}{self.R}'
+            prefix = f'{a}{fmt_tok(total_tokens):>6}{self.R}{secondary} {a}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
             bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -1227,11 +1390,15 @@ class Renderer:
             return f'{badge}{a}{GLYPH_HOURGLASS}{self.R} {prefix}{bar}'
 
         bar_clr = self.risk_zone_color(total_tokens)
+        # Fixed-width right-justified fields (rjust applied to the plain text
+        # before ANSI wrapping) keep the token/window/soft columns aligned with
+        # the over-limit branch above, so short and long magnitudes share a
+        # stable right edge under the `context`/`fill`/`dumb` labels.
         secondary = ''
         if ctx.context_window_size > 0:
             pct_model = total_tokens / ctx.context_window_size * 100
-            secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
-        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
+            secondary = f' {self.DIM_GREEN}{f"({pct_model:.0f}%)":>5}{self.R}'
+        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens):>6}{self.R}{secondary} {bar_clr}{BOLD}{f"{pct_soft:.0f}%":>4}{self.R} '
         bar_w  = max(0, max(4, available - _visible_width(prefix) - 3) - badge_w)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -1351,28 +1518,37 @@ class Renderer:
         colour = self.gradient.gradient_color(t)
         glyph = GLYPH_BURN_FAST if delta > 0 else GLYPH_BURN_SLOW  # colour modulation carries over/under-burn direction
         sign  = '-' if delta < 0 else '+'
-        return f'{colour}{glyph} {sign}{abs_delta:05.2f}%{self.R}'
+        return f'{colour}{glyph} {sign}{abs_delta:.1f}%{self.R}'
 
-    def helper(self, five_hour: RateBucket) -> str:
+    def helper(self, five_hour: RateBucket, gap: int = 1) -> str:
+        # ``gap`` is the inter-stat separator width (countdown↔pct, pct↔trend).
+        # It widens to give the justified top row breathing room; the glyph→stat
+        # spacing lives in the caller and is unaffected.
+        sp      = ' ' * gap
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
+        pct_str = f'{float(five_hour.used_percentage or 0):.1f}'
         try:
             if not five_hour.resets_at:
                 if not five_hour.used_percentage:
                     return GLYPH_UNLIMITED
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}{GLYPH_UNLIMITED}'
+                return f'{pct_clr}{pct_str}%{self.R}{sp}{self.COMMIT}{GLYPH_UNLIMITED}'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
                     return GLYPH_UNLIMITED
-                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}{GLYPH_UNLIMITED}'
+                return f'{pct_clr}{pct_str}%{self.R}{sp}{self.COMMIT}{GLYPH_UNLIMITED}'
+            total_s   = int(delta.total_seconds())
+            h, rem    = divmod(total_s, 3600)
+            m         = rem // 60
+            countdown = f'(-{h}:{m:02d})'
             trend = self.burndown_trend(
                 float(five_hour.used_percentage or 0),
                 five_hour.resets_at,
                 FIVE_HOUR_MINUTES,
                 FIVE_HOUR_WARMUP_MINUTES,
             )
-            trend_part = f' {trend}' if trend else ''
-            return f'{pct_clr}{five_hour.used_percentage}%{self.R}{trend_part} {self.COMMIT}T-{delta}'
+            trend_part = f'{sp}{trend}' if trend else ''
+            return f'{self.COMMIT}{countdown}{self.R}{sp}{pct_clr}{pct_str}%{self.R}{trend_part}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'

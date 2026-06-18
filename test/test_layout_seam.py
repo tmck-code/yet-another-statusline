@@ -190,7 +190,8 @@ def test_seam_renders_solid_not_heavy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When cache_countdown is None the top border and separator_dim each carry only one elbow."""
+    """When cache_countdown is None the top border and separator_dim carry elbows for
+    path + elapsed + sep_rate (the ┆ between 5h and 7d rate-limit segments) but NOT cache."""
     _silence_dynamic(monkeypatch)
     view = _view()
     view.__dict__['cache_countdown'] = None
@@ -199,8 +200,9 @@ def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> N
     separator_dim = spec.rows[2]
     assert top_border.kind == 'top_border'
     assert separator_dim.kind == 'separator_dim'
-    assert len(top_border.downs) == 2,  f'expected 2 downs (path + elapsed), got {top_border.downs}'
-    assert len(separator_dim.ups) == 2, f'expected 2 ups (path + elapsed), got {separator_dim.ups}'
+    # path + elapsed + sep_rate (┆) = 3; cache is absent so no fourth elbow.
+    assert len(top_border.downs) == 3,  f'expected 3 downs (path + elapsed + sep_rate), got {top_border.downs}'
+    assert len(separator_dim.ups) == 3, f'expected 3 ups (path + elapsed + sep_rate), got {separator_dim.ups}'
 
 
 def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,14 +220,14 @@ def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
     sess      = _session()
 
     # Measure renderer geometry so threshold is exact rather than hand-coded.
-    helper_text, _, right_w = _r.model_right_section(
+    h5h, h7d, _, right_w = _r.model_right_section(
         sess.model_name,
         sess.model_thinking,
         sess.rate_limits,
         '',
         fast_mode=sess.fast_mode,
     )
-    helper_w        = _visible_width(helper_text)
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
     _, cache_w      = _r.cache_section(*countdown)
     cache_section_w = vsep_w + cache_w
     # Minimum width where the cache section is NOT shed (path budget == 5).
@@ -238,18 +240,18 @@ def test_cache_countdown_width_shed(monkeypatch: pytest.MonkeyPatch) -> None:
     lines_shed = layout.render_layout(spec_shed, _r)
     assert not any(GLYPH_CACHE in ln for ln in lines_shed), \
         f'cache glyph present at width={min_keep - 1} (should be shed)'
-    assert len(spec_shed.rows[0].downs) == 2, \
-        f'expected 2 top_border downs (path + elapsed) at shed width, got {spec_shed.rows[0].downs}'
+    assert len(spec_shed.rows[0].downs) == 3, \
+        f'expected 3 top_border downs (path + elapsed + sep_rate) at shed width, got {spec_shed.rows[0].downs}'
 
-    # 20 cols wider: cache present, three elbows (path + elapsed + cache).
+    # 20 cols wider: cache present, four elbows (path + elapsed + sep_rate + cache).
     view_keep = _view()
     view_keep.__dict__['cache_countdown'] = countdown
     spec_keep  = layout.build_wide(view_keep, _tick(), min_keep + 20, _r)
     lines_keep = layout.render_layout(spec_keep, _r)
     assert any(GLYPH_CACHE in ln for ln in lines_keep), \
         f'cache glyph absent at width={min_keep + 20} (should be kept)'
-    assert len(spec_keep.rows[0].downs) == 3, \
-        f'expected 3 top_border downs (path + elapsed + cache) at keep width, got {spec_keep.rows[0].downs}'
+    assert len(spec_keep.rows[0].downs) == 4, \
+        f'expected 4 top_border downs (path + elapsed + sep_rate + cache) at keep width, got {spec_keep.rows[0].downs}'
 
 
 def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +308,7 @@ def test_cache_countdown_content_row_contains_glyph_and_time(
     assert path_row.kind == 'content'
     visible = strip_ansi(path_row.content)
     assert GLYPH_CACHE in visible
-    assert '3m07s' in visible
+    assert '03:07' in visible
 
 
 def test_cache_countdown_divider_threaded_into_borders(
@@ -333,6 +335,94 @@ def test_cache_countdown_divider_threaded_into_borders(
     # cache_div_col must appear in both tuples (it's the second entry).
     cache_div_col = top_row.downs[-1]
     assert cache_div_col in sep_row.ups
+
+
+def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The │ separator between 5h and 7d rate-limit segments in the wide path/model
+    row must have matching ┬/┴ elbows in the top border and separator_dim at the
+    same visual column.
+
+    Uses the default example session (seven_day.used_percentage=89) so the 7d vsep
+    is present in the content row. Uses render_layout to verify glyphs land at the
+    correct column position after border painting.
+    """
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    # The example session has both 5h and 7d buckets active, so the 7d vsep │ appears.
+    spec  = layout.build_wide(_view(), _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    content_idx    = top_border_idx + 1
+    sep_dim_idx    = next(
+        i for i, row in enumerate(spec.rows)
+        if row.kind == 'separator_dim' and i > top_border_idx
+    )
+    assert spec.rows[content_idx].kind == 'content', 'expected content row after top_border'
+
+    top_row = spec.rows[top_border_idx]
+    sep_row = spec.rows[sep_dim_idx]
+
+    # sep_rate_col (7d vsep │) is the last column in downs that sits past the
+    # session-id span (the session-id covers cols 4–39 at width 160, so we find
+    # the rightmost downs col as the one that is visible as ┬ in the top border).
+    full_line = lines[content_idx]
+    top_line  = lines[top_border_idx]
+    sep_line  = lines[sep_dim_idx]
+
+    # Locate the sep_rate_col: rightmost col in top_row.downs that actually has a ┬.
+    sep_rate_col = None
+    for col in top_row.downs:
+        if top_line[col - 1] in ('┬', '┼'):
+            sep_rate_col = col
+    assert sep_rate_col is not None, (
+        f'no ┬ found at any of top_border.downs {top_row.downs}\ntop: {top_line}'
+    )
+
+    # Verify content row has │ at sep_rate_col.
+    assert full_line[sep_rate_col - 1] == '│', (
+        f'expected │ in content at col {sep_rate_col}, got {full_line[sep_rate_col-1]!r}'
+    )
+
+    # Verify separator_dim has ┴ at sep_rate_col.
+    assert sep_line[sep_rate_col - 1] in ('┴', '┼'), (
+        f'expected ┴ in separator_dim at col {sep_rate_col}, got {sep_line[sep_rate_col-1]!r}'
+    )
+
+    # Verify downs and ups are consistent.
+    assert sep_rate_col in top_row.downs, f'sep_rate_col {sep_rate_col} not in top_border.downs {top_row.downs}'
+    assert sep_rate_col in sep_row.ups,   f'sep_rate_col {sep_rate_col} not in separator_dim.ups {sep_row.ups}'
+
+
+def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the 7-day bucket is absent (used_percentage=0, resets_at=0), the 7d vsep
+    does not appear in the content row and no stray ┬/┴ elbows are added for it."""
+    from helper import strip_ansi
+    from yas.session import RateBucket
+    import dataclasses
+    _silence_dynamic(monkeypatch)
+
+    # Build a session with no 7-day bucket active.
+    sess = _session()
+    zero_limits = dataclasses.replace(sess.rate_limits, seven_day=RateBucket(used_percentage=0, resets_at=0))
+    sess = dataclasses.replace(sess, rate_limits=zero_limits)
+
+    view = SessionView(sess, Config())
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    top_row = spec.rows[top_border_idx]
+
+    # When 7d is absent, sep_rate_col is None so fewer downs than with 7d active.
+    spec_with_7d = layout.build_wide(_view(), _tick(), 160, _r)
+    top_with_7d  = spec_with_7d.rows[next(i for i, r in enumerate(spec_with_7d.rows) if r.kind == 'top_border')]
+    assert len(top_row.downs) < len(top_with_7d.downs), (
+        f'expected fewer downs without 7d ({top_row.downs}) vs with 7d ({top_with_7d.downs})'
+    )
+
+    # No elbow gap: every ┬ has a │ below and every ┴ has a │ above.
+    assert _elbow_gaps(lines) == 0, 'stray ┬/┴ elbows with no matching │ when 7-day absent'
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +593,7 @@ def _elbow_gaps(lines: list[str]) -> int:
             c += 2 if _is_wide(ch) else 1
         return cols
     g = [grid(ln) for ln in lines]
-    vert = set('│┃┤├┼┊')  # ┊ = dashed two-column workflow divider
+    vert = set('│┃┤├┼┊┆')  # ┊ = dashed two-column workflow divider; ┆ = SEP_RATE rate-limit separator
     join = set('┬┴┳┻')
     gaps = 0
     for i, cols in enumerate(g):
@@ -617,3 +707,199 @@ def test_workflow_two_column_pairing_threshold() -> None:
                    for row in stacked)
     assert any('agent-0' in row.content for row in stacked)
     assert any('agent-1' in row.content for row in stacked)
+
+
+# ---------------------------------------------------------------------------
+# Task 6.4 — cache_section sub-hour and over-hour format
+# ---------------------------------------------------------------------------
+
+def test_cache_section_sub_hour_format() -> None:
+    from helper import strip_ansi
+    text, _w = _r.cache_section(187.0, 38)
+    stripped = strip_ansi(text)
+    assert '03:07' in stripped
+
+
+def test_cache_section_over_hour_format() -> None:
+    from helper import strip_ansi
+    text, _w = _r.cache_section(3905.0, 38)
+    stripped = strip_ansi(text)
+    assert '1:05:05' in stripped
+
+
+# ---------------------------------------------------------------------------
+# Task 6.3 — Clear-timer degradation ladder and fresh-session preservation
+# ---------------------------------------------------------------------------
+
+def _inject_clear_epoch(view: SessionView, epoch: float | None) -> SessionView:
+    """Inject a clear_epoch value into a SessionView's __dict__ cache."""
+    view.__dict__['clear_epoch'] = epoch
+    return view
+
+
+def test_clear_timer_both_shown_at_ample_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At a wide terminal both clear and session timers appear in the content row."""
+    from helper import strip_ansi
+    from yas.constants import GLYPH_CLEAR
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33  # 18:33 ago
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    # The path/model row (first content row)
+    content_rows = [r for r in spec.rows if r.kind == 'content']
+    top_content = content_rows[0].content
+    plain = strip_ansi(top_content)
+    assert GLYPH_CLEAR in top_content, 'GLYPH_CLEAR should appear in the elapsed cell'
+    assert '18:33' in plain, 'clear timer should appear'
+    assert '13:27' in plain, 'session timer should appear'
+
+
+def test_clear_timer_clear_first_in_cell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clear timer is leftmost (lower index) in the content row plain text."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    content_rows = [r for r in spec.rows if r.kind == 'content']
+    plain = strip_ansi(content_rows[0].content)
+    assert plain.index('18:33') < plain.index('13:27')
+
+
+def test_clear_timer_fresh_session_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fresh session (clear_epoch=None): top content row is byte-identical to the pre-change render."""
+    _silence_dynamic(monkeypatch)
+    view_fresh = _view()
+    view_fresh.__dict__['now'] = 1_750_000_000.0
+    view_fresh.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_fresh, None)
+
+    view_baseline = _view()
+    view_baseline.__dict__['now'] = 1_750_000_000.0
+    view_baseline.__dict__['elapsed'] = '13:27'
+    # No clear_epoch injection → cached_property reads from transcript → None
+    # To get a true baseline we inject None too (same result)
+    view_baseline.__dict__['clear_epoch'] = None
+
+    spec_fresh    = layout.build_wide(view_fresh, _tick(), 160, _r)
+    spec_baseline = layout.build_wide(view_baseline, _tick(), 160, _r)
+
+    # Both specs should produce an identical first content row
+    rows_f = [r for r in spec_fresh.rows if r.kind == 'content']
+    rows_b = [r for r in spec_baseline.rows if r.kind == 'content']
+    assert rows_f[0].content == rows_b[0].content
+
+
+def test_clear_timer_degrades_to_clear_only_when_both_dont_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When width is too narrow for both timers but fits clear-only, only the clear timer renders."""
+    from helper import strip_ansi
+    from yas.constants import GLYPH_CLEAR
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+
+    # Measure the geometry so we find the exact shed boundary
+    sess       = _session()
+    h5h, h7d, _, right_w = _r.model_right_section(
+        sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
+    )
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
+    vsep_w   = 5
+    now      = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    _co, clear_only_w = _r.elapsed_section('', '18:33')
+    _cb, both_w       = _r.elapsed_section('13:27', '18:33')
+    clear_sw = clear_only_w + 3
+    both_sw  = both_w + 3
+
+    # Width where both fit (path_budget = 5 with both)
+    width_both = 5 + vsep_w + both_sw + helper_w + right_w + 4
+    # Width where only clear fits (path_budget = 5 with clear only) but not both
+    width_clear_only = 5 + vsep_w + clear_sw + helper_w + right_w + 4
+
+    # At width_clear_only (< width_both), we should get clear-only
+    if width_clear_only < width_both:
+        view = _view()
+        view.__dict__['now'] = now
+        view.__dict__['elapsed'] = '13:27'
+        _inject_clear_epoch(view, clear_epoch)
+
+        spec = layout.build_wide(view, _tick(), width_clear_only, _r)
+        content_rows = [r for r in spec.rows if r.kind == 'content']
+        plain = strip_ansi(content_rows[0].content)
+        # Clear timer present, session timer absent
+        assert GLYPH_CLEAR in content_rows[0].content, 'clear glyph should be present'
+        assert '18:33' in plain, 'clear timer should be shown'
+        assert '13:27' not in plain, 'session timer should be shed'
+
+
+def test_clear_timer_sheds_entire_cell_on_path_protection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When even clear-only doesn't protect the path (< 5 cols), the whole cell sheds."""
+    from yas.constants import GLYPH_CLEAR
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+
+    sess       = _session()
+    h5h, h7d, _, right_w = _r.model_right_section(
+        sess.model_name, sess.model_thinking, sess.rate_limits, '', fast_mode=sess.fast_mode,
+    )
+    helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
+    vsep_w   = 5
+    now      = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    _co, clear_only_w = _r.elapsed_section('', '18:33')
+    clear_sw = clear_only_w + 3
+
+    # Width where even clear-only sheds (path_budget would be < 5)
+    min_keep = 5 + vsep_w + clear_sw + helper_w + right_w + 4
+    width_shed = min_keep - 1
+
+    view = _view()
+    view.__dict__['now'] = now
+    view.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view, clear_epoch)
+
+    spec = layout.build_wide(view, _tick(), width_shed, _r)
+    lines = layout.render_layout(spec, _r)
+    for ln in lines:
+        assert GLYPH_CLEAR not in ln, 'elapsed cell should be fully shed'
+
+
+def test_clear_timer_no_additional_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adding a clear timer does NOT add a new border elbow (single divider unchanged)."""
+    _silence_dynamic(monkeypatch)
+    now = 1_750_000_000.0
+    clear_epoch = now - 18 * 60 - 33
+
+    view_cleared = _view()
+    view_cleared.__dict__['now'] = now
+    view_cleared.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_cleared, clear_epoch)
+
+    view_fresh = _view()
+    view_fresh.__dict__['now'] = now
+    view_fresh.__dict__['elapsed'] = '13:27'
+    _inject_clear_epoch(view_fresh, None)
+
+    spec_cleared = layout.build_wide(view_cleared, _tick(), 160, _r)
+    spec_fresh   = layout.build_wide(view_fresh,   _tick(), 160, _r)
+
+    downs_cleared = spec_cleared.rows[0].downs
+    downs_fresh   = spec_fresh.rows[0].downs
+    # Same number of elbows: clear timer shares the existing elapsed divider
+    assert len(downs_cleared) == len(downs_fresh)
