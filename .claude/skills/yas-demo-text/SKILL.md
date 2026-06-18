@@ -48,6 +48,11 @@ diff -ru /tmp/yas-before demo/text     # see exactly which cells moved
   bold and italic; it leaves box-drawing and Nerd Font glyphs intact, so column
   alignment is preserved exactly.
 - Nerd Font PUA glyphs render as boxes outside a Nerd-Font terminal (e.g. on
-  GitHub), but the layout and text labels still read clearly.
+  GitHub), but the layout and text labels still read clearly. For a snapshot
+  meant to paste into GitHub markdown, render in the `github` glyph mode first
+  (`YAS_GLYPH_MODE=github make demo/img`): it folds the box-drawing frame,
+  block/sparkline ramp, and PUA icons to width-1 EAW-narrow/ASCII stand-ins, so
+  the result stays a clean, box-free rectangle in a browser monospace font. The
+  **yas-pr** skill uses this by default for before/after PR renders.
 - The repo's Python `strip_ansi` (`test/helper.py`) is SGR-only and for tests;
   this skill's sed filter is broader and for the demo snapshots.

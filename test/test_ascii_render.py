@@ -21,6 +21,7 @@ combined with the single-width fold:
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ from yas.render.text import (
 
 _EXAMPLE = Path(__file__).resolve().parent.parent / 'ops' / 'session-info-example.json'
 
-MODES = ['nerdfont', 'ascii', 'unicode']
+MODES = ['nerdfont', 'ascii', 'unicode', 'github']
 
 
 def _load_example() -> dict:
@@ -48,6 +49,11 @@ def _load_example() -> dict:
 
 def _pua(ch: str) -> bool:
     return any(0xE000 <= ord(x) <= 0xF8FF or 0xF0000 <= ord(x) <= 0xFFFFD for x in ch)
+
+
+def _browser_wide(ch: str) -> bool:
+    'True if any codepoint is East-Asian-Width Ambiguous/Wide/Fullwidth (double-width in a browser monospace font).'
+    return any(unicodedata.east_asian_width(x) in {'A', 'W', 'F'} for x in ch)
 
 
 def _string_constants() -> set[str]:
@@ -233,6 +239,28 @@ def test_unicode_mode_has_no_pua_but_keeps_box(width: int) -> None:
     assert not offenders, f'unicode render at width={width} still has PUA: {offenders}'
     # box-drawing / block / arrow glyphs are standard Unicode and stay intact.
     assert c.BOX_H in out or c.BOX_V in out, 'box-drawing glyphs should survive unicode mode'
+
+
+@pytest.mark.parametrize('width', [50, 70, 160])
+def test_github_mode_has_no_browser_wide_or_pua(width: int) -> None:
+    'github render is paste-safe: no EAW-Ambiguous/Wide/Fullwidth and no PUA codepoint (C1+C2).'
+    info = _load_example()
+    out = app.render(info, width, glyph_mode='github')
+    stripped = c._ANSI_RE.sub('', out)
+    wide = sorted({hex(ord(ch)) for ch in stripped if _browser_wide(ch)})
+    assert not wide, f'github render at width={width} has browser-wide chars: {wide}'
+    pua = sorted({hex(ord(ch)) for ch in stripped if _pua(ch)})
+    assert not pua, f'github render at width={width} still has PUA: {pua}'
+
+
+def test_github_translate_values_are_narrow_non_pua() -> None:
+    'Every GITHUB_TRANSLATE value is width-1 and ASCII or EAW-narrow and non-PUA (locks C1).'
+    for cp, val in c.GITHUB_TRANSLATE.items():
+        assert len(val) == 1, f'github translate {hex(cp)} -> {val!r} is not length 1'
+        ch = val
+        narrow = ord(ch) < 128 or unicodedata.east_asian_width(ch) in {'N', 'Na', 'H'}
+        assert narrow, f'github translate {hex(cp)} -> {ch!r} is browser-wide (EAW {unicodedata.east_asian_width(ch)})'
+        assert not _pua(ch), f'github translate {hex(cp)} -> {ch!r} is itself PUA'
 
 
 def test_single_width_folds_injected_wide_dynamic_content() -> None:

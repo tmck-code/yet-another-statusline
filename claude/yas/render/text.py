@@ -12,6 +12,7 @@ from yas.constants import (
     CLAUDE_DIR,
     DEFAULT_MAX_WIDTH,
     ELLIPSIS,
+    GITHUB_TRANSLATE,
     MIDDLE_DOT,
     UNICODE_TRANSLATE,
 )
@@ -113,13 +114,16 @@ def apply_glyph_mode(s: str, mode: str) -> str:
     """Apply the selected glyph mode as a single final pass over a finished render.
 
     nerdfont -> identity (no pass); ascii -> PUA+frame ASCII fallback table;
-    unicode -> PUA-only non-PUA Unicode table. An unknown mode is treated as
-    nerdfont (identity) — defensive; config already validates the value
-    upstream. Single-width folding is orthogonal (see ``apply_glyphs``)."""
+    unicode -> PUA-only non-PUA Unicode table; github -> browser-wide+PUA fold to
+    EAW-narrow/ASCII (paste-safe). An unknown mode is treated as nerdfont
+    (identity) — defensive; config already validates the value upstream.
+    Single-width folding is orthogonal (see ``apply_glyphs``)."""
     if mode == 'ascii':
         return s.translate(ASCII_TRANSLATE)
     if mode == 'unicode':
         return s.translate(UNICODE_TRANSLATE)
+    if mode == 'github':
+        return s.translate(GITHUB_TRANSLATE)
     return s
 
 

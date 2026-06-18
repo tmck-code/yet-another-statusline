@@ -366,6 +366,23 @@ def test_env_selects_glyph_mode(tmp_path: Path) -> None:
     assert cfg.glyph_mode == 'ascii'
 
 
+def test_env_selects_github_glyph_mode(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': 'github'}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
+def test_env_github_glyph_mode_strips_and_lowercases(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_GLYPH_MODE': ' GitHub '}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
+@requires_tomllib
+def test_toml_selects_github_glyph_mode(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nmode = "github"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.glyph_mode == 'github'
+
+
 def test_glyph_mode_default_is_nerdfont(tmp_path: Path) -> None:
     cfg = config.Config.load(env={}, config_dir=tmp_path)
     assert cfg.glyph_mode == 'nerdfont'

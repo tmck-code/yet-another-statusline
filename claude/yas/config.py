@@ -100,9 +100,9 @@ def _parse_bg_shift(raw: object, origin: str) -> str:
 
 def _parse_glyph_mode(raw: object, origin: str) -> str:
     v = str(raw).strip().lower()
-    if v in ('nerdfont', 'ascii', 'unicode'):
+    if v in ('nerdfont', 'ascii', 'unicode', 'github'):
         return v
-    raise ValueError(f'expected one of nerdfont, ascii, unicode, got {v!r}')
+    raise ValueError(f'expected one of nerdfont, ascii, unicode, github, got {v!r}')
 
 
 def _env_sources(env: dict[str, str], canonical: str, *aliases: str) -> list[tuple[str, object]]:

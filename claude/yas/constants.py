@@ -297,6 +297,43 @@ UNICODE_PUA: dict[str, str] = {
 # Pre-built {codepoint: char} map for str.translate (used by `unicode` glyph_mode).
 UNICODE_TRANSLATE = {ord(g): u for g, u in UNICODE_PUA.items()}
 
+# GitHub-paste-safe mode. `github` glyph_mode folds EVERY browser-wide glyph
+# (East-Asian-Width Ambiguous/Wide/Fullwidth) and every Nerd Font PUA codepoint
+# to a width-1, EAW-narrow (N/Na/H) or ASCII replacement, so a pasted statusline
+# keeps its column geometry in a proportional-blind monospace web font (GitHub,
+# Slack, etc.) where Ambiguous chars otherwise render double-width. Unlike
+# `unicode` (which only swaps PUA icons), `github` also ASCII-folds the
+# box-drawing frame and block ramp, because those are EAW-Ambiguous in a browser.
+#
+# PUA icons keep the prettier `unicode` substitutions where those are already
+# EAW-narrow; the five whose `unicode` target is EAW-Ambiguous get a narrow
+# override below (verified against unicodedata.east_asian_width).
+GITHUB_PUA: dict[str, str] = dict(UNICODE_PUA)
+
+# EAW-narrow overrides for icons whose `unicode` substitution is EAW-Ambiguous
+# (would render double-width in a browser), plus one non-PUA nicety. Every target
+# is verified width-1 and EAW N/Na/H so the C1 invariant holds.
+GITHUB_ICON_OVERRIDE: dict[str, str] = {
+    GLYPH_MODEL:        '⊞',  # ⊞ squared plus      (was ▦ U+25A6, EAW=A)
+    GLYPH_TASKS:        '⊟',  # ⊟ squared minus     (was ▤ U+25A4, EAW=A)
+    GLYPH_TASK_PENDING: '◌',  # ◌ dotted circle     (was ○ U+25CB, EAW=A)
+    GLYPH_SKILLS:       '⬦',  # ⬦ white medium diamond (was ◆ U+25C6, EAW=A)
+    GLYPH_HELPER:       '✦',  # ✦ black four-pointed star (was ★ U+2605, EAW=A)
+    GLYPH_SUBAGENT:     '⫶',  # ⫶ triple colon (stacked list, was ☰ tasks)
+    GLYPH_SUBAGENT_ROW: '▸',  # ▸ small right triangle (was ▶ U+25B6, EAW=A)
+}
+
+# Pre-built {codepoint: str} map for str.translate (used by `github` glyph_mode).
+# Precedence (later wins on key collision): ASCII frame/punctuation/block/PUA
+# fallback, then the sparkline ramp, then prettier narrow unicode for PUA icons,
+# then the EAW-narrow overrides.
+GITHUB_TRANSLATE: dict[int, str] = (
+    {ord(g): a for g, a in ASCII_GLYPHS.items()}
+    | _RAMP_FALLBACK
+    | {ord(g): u for g, u in GITHUB_PUA.items()}
+    | {ord(g): u for g, u in GITHUB_ICON_OVERRIDE.items()}
+)
+
 # Workflow cohort thresholds. A run is kept visible while any agent transcript
 # was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
 # cohort's windows so a run rides through between-phase lulls). At most
