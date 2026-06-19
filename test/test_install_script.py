@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -526,6 +525,9 @@ def _source_build_yas_toml() -> str:
 def test_build_yas_toml_carries_four_values_and_parses():
     """Task 10.5 — the generated yas.toml carries the four chosen values and is
     valid TOML (parsed with tomllib)."""
+    # tomllib is stdlib only on 3.11+; the project supports 3.10, so import it
+    # lazily and skip there rather than breaking collection for the whole module.
+    tomllib = pytest.importorskip('tomllib')
     func = _source_build_yas_toml()
     script = f'{func}\nbuild_yas_toml "ascii" "true" "dracula" "500000"\n'
     result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)

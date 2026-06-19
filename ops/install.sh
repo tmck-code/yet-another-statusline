@@ -110,7 +110,6 @@ fi
 # `printf '%s'` emits exactly the original bytes. Stored as $'...' literals.
 if [ "$COLOR_DEPTH" -gt 0 ]; then
     C_RESET=$'\033[0m'
-    C_BOLD=$'\033[1m'
     C_DIM=$'\033[2m'
     C_GREEN=$'\033[32m'
     C_RED=$'\033[31m'
@@ -118,7 +117,6 @@ if [ "$COLOR_DEPTH" -gt 0 ]; then
     C_WHITE_BOLD=$'\033[1;37m'
 else
     C_RESET=''
-    C_BOLD=''
     C_DIM=''
     C_GREEN=''
     C_RED=''
@@ -283,6 +281,9 @@ YAS_PLAIN
 # checkbox.sh (multi-select, by a different author) is deliberately NOT embedded;
 # multi-select is a non-goal here.
 
+# UI_WIDGET_RC is a documented widget output (mirrors the upstream convention),
+# set by ui_select for callers/future use; nothing reads it in-script yet.
+# shellcheck disable=SC2034
 UI_WIDGET_RC=-1
 UI_WIDGET_VALUE=""
 
@@ -372,6 +373,7 @@ ui_select() {
             up)   if [ "$cur" -gt 0 ]; then cur=$((cur - 1)); _render; fi ;;
             down) if [ "$cur" -lt $((n - 1)) ]; then cur=$((cur + 1)); _render; fi ;;
             enter)
+                # shellcheck disable=SC2034  # documented output; see decl above
                 UI_WIDGET_RC=$cur
                 UI_WIDGET_VALUE="${items[$cur]}"
                 return 0
