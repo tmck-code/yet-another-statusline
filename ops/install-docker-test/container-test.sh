@@ -6,11 +6,13 @@
 # across three scenarios:
 #
 #   S1 (uv present): install.sh --wire-only provisions a private uv-managed
-#       CPython 3.15 under .python, wires it, renders, settings shape is correct.
+#       CPython (the resolved ${YAS_PYTHON:-3.13} default — stable 3.13) under
+#       .python, wires it, renders, settings shape is correct.
 #   S2 (uv hidden):  with `uv` removed from PATH (a curated /app/pybin holds only
 #       python/python3 symlinks; uv lives in /usr/local/bin and /uv/.venv/bin,
 #       neither of which is on the scrubbed PATH), command -v uv fails → the
-#       script BOOTSTRAPS uv into $CLAUDE_PLUGIN_ROOT/.uv, then provisions 3.15.
+#       script BOOTSTRAPS uv into $CLAUDE_PLUGIN_ROOT/.uv, then provisions the
+#       resolved default (3.13).
 #   S3 (uninstall):  install.sh --uninstall strips .statusLine AND removes both
 #       $CLAUDE_PLUGIN_ROOT/.python and $CLAUDE_PLUGIN_ROOT/.uv.
 #
@@ -114,12 +116,16 @@ SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
 printf '  CLAUDE_PLUGIN_ROOT=%s\n' "$CLAUDE_PLUGIN_ROOT"
 printf '  CLAUDE_CONFIG_DIR=%s\n' "$CLAUDE_CONFIG_DIR"
 
-# assert_wired_3_15 — shared S1/S2 assertion: settings wired to a private
-# uv-managed CPython 3.15 under .python, renders non-empty, shape correct.
-assert_wired_3_15() {
+# assert_wired_uv — shared S1/S2 assertion: settings wired to a private
+# uv-managed CPython at the expected version (arg 2) under .python, renders
+# non-empty, shape correct.
+#   $1 — scenario label
+#   $2 — expected version (e.g. 3.13)
+assert_wired_uv() {
     local scenario="$1"
+    local WANT_VER="$2"
 
-    printf '\n== %s/A1: wired-to-uv-3.15 ==\n' "$scenario"
+    printf '\n== %s/A1: wired-to-uv-%s ==\n' "$scenario" "$WANT_VER"
     local CMD
     CMD=$(json_get "$SETTINGS" statusLine.command)
     printf '  statusLine.command = %s\n' "$CMD"
@@ -133,8 +139,8 @@ assert_wired_3_15() {
         *) A1_OK=0; printf '  - command does not reference .python/\n' ;;
     esac
     case "$CMD" in
-        *python3.15*|*cpython-3.15*) : ;;
-        *) A1_OK=0; printf '  - command lacks a python3.15 / cpython-3.15 path component\n' ;;
+        *python$WANT_VER*|*cpython-$WANT_VER*) : ;;
+        *) A1_OK=0; printf '  - command lacks a python%s / cpython-%s path component\n' "$WANT_VER" "$WANT_VER" ;;
     esac
     case "$CMD" in
         *python3.14*|*cpython-3.14*) A1_OK=0; printf '  - command points at 3.14\n' ;;
@@ -152,14 +158,14 @@ assert_wired_3_15() {
         VER=$("$BIN" --version 2>&1)
         printf '  interpreter --version = %s\n' "$VER"
         case "$VER" in
-            "Python 3.15"*) : ;;
-            *) A1_OK=0; printf '  - interpreter is not Python 3.15\n' ;;
+            "Python $WANT_VER"*) : ;;
+            *) A1_OK=0; printf '  - interpreter is not Python %s\n' "$WANT_VER" ;;
         esac
     fi
     if [ "$A1_OK" -eq 1 ]; then
-        pass "$scenario A1: wired to private uv-managed CPython 3.15 ($BIN)"
+        pass "$scenario A1: wired to private uv-managed CPython $WANT_VER ($BIN)"
     else
-        fail "$scenario A1: not wired to a private uv-managed CPython 3.15"
+        fail "$scenario A1: not wired to a private uv-managed CPython $WANT_VER"
     fi
 
     printf '\n== %s/A2: renders ==\n' "$scenario"
@@ -205,7 +211,7 @@ S1_RC=$?
 printf '%s\n' "$S1_OUT"
 printf '  install.sh exit code: %d\n' "$S1_RC"
 [ "$S1_RC" -eq 0 ] || fail "S1: install.sh --wire-only exited non-zero ($S1_RC)"
-assert_wired_3_15 "S1"
+assert_wired_uv "S1" "3.13"
 
 # === S2: uv hidden → bootstrap ================================================
 # uv exists at /usr/local/bin/uv AND /uv/.venv/bin/uv (the latter co-located with
@@ -253,7 +259,7 @@ else
     fail "S2 B1: $UVBIN missing or not executable"
 fi
 
-assert_wired_3_15 "S2"
+assert_wired_uv "S2" "3.13"
 
 # === S3: uninstall removes .statusLine + .python + .uv ========================
 printf '\n############ S3: uninstall ############\n'

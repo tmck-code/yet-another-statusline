@@ -1,27 +1,4 @@
-## Purpose
-
-Define the behaviour of `ops/install.sh`, the single source of truth for wiring YAS into Claude Code. It covers full vs wire-only modes, the curl-pipe bootstrap entrypoint, plugin orchestration, safe `settings.json` writes performed entirely through Python (no `jq`), private CPython provisioning via `uv` (bootstrapped when absent), per-mode preflight, dry-run, uninstall cleanup, and the `yas:init` skill's delegation to the script.
-
-## Requirements
-
-### Requirement: Single install script with two modes
-
-The repository SHALL provide a single executable bash script at `ops/install.sh` that operates in one of two modes — full mode or wire-only mode — and that serves as the single source of truth for wiring YAS into Claude Code. The same script SHALL be runnable both by a human via `curl … | bash` and by the `yas:init` skill.
-
-#### Scenario: Mode auto-detection via CLAUDE_PLUGIN_ROOT
-
-- **WHEN** the script runs with the `CLAUDE_PLUGIN_ROOT` environment variable set and no overriding flag
-- **THEN** it selects wire-only mode and skips all plugin-management steps
-
-#### Scenario: Default to full mode
-
-- **WHEN** the script runs with `CLAUDE_PLUGIN_ROOT` unset and no overriding flag
-- **THEN** it selects full mode (marketplace + plugin management followed by settings wiring)
-
-#### Scenario: Explicit mode override
-
-- **WHEN** the script is invoked with `--wire-only` or `--full`
-- **THEN** that flag overrides the `CLAUDE_PLUGIN_ROOT`-based auto-detection
+## MODIFIED Requirements
 
 ### Requirement: curl-pipe bootstrap entrypoint
 
@@ -42,112 +19,6 @@ This entrypoint SHALL run full mode, installing the latest plugin version served
 
 - **WHEN** a user pipes the branch copy of `ops/install.sh` to bash attached to a terminal and `YAS_NO_TTY` is unset
 - **THEN** the script reopens standard input from `/dev/tty` once and runs the interactive flow without re-fetching or re-executing itself
-
-### Requirement: Full-mode plugin orchestration
-
-In full mode the script SHALL ensure the marketplace and plugin are present and current before wiring settings, branching on inspection of Claude Code's on-disk state.
-
-#### Scenario: Marketplace absent
-
-- **WHEN** `known_marketplaces.json` does not contain the `yet-another-statusline` key
-- **THEN** the script runs `claude plugin marketplace add tmck-code/yet-another-statusline`
-
-#### Scenario: Marketplace already present
-
-- **WHEN** `known_marketplaces.json` already contains the `yet-another-statusline` key
-- **THEN** the script does not re-add the marketplace
-
-#### Scenario: Plugin not installed
-
-- **WHEN** `installed_plugins.json` does not contain `yas@yet-another-statusline`
-- **THEN** the script runs `claude plugin install yas@yet-another-statusline --scope user`
-
-#### Scenario: Plugin already installed
-
-- **WHEN** `installed_plugins.json` already contains `yas@yet-another-statusline`
-- **THEN** the script runs `claude plugin update yas@yet-another-statusline --scope user`
-
-#### Scenario: All plugin CLI invocations are user-scoped
-
-- **WHEN** the script shells `claude plugin marketplace add`, `install`, or `update`
-- **THEN** it passes `--scope user` explicitly on the install and update commands
-
-### Requirement: Wire-only settings write
-
-In both modes the script SHALL write `statusLine.command` into `settings.json` under `$CLAUDE_CONFIG_DIR` (default `~/.claude/`), pointing at the newest installed renderer, and SHALL do so safely. In wire-only mode it SHALL target the renderer under `CLAUDE_PLUGIN_ROOT` directly without scanning, and SHALL NOT perform plugin management, network access (other than the `uv`/CPython provisioning described under "Private interpreter provisioning"), or nested `claude` invocations. All JSON reads, transforms, and validation SHALL be performed through the resolved Python interpreter and SHALL NOT depend on `jq` or any other external JSON tool.
-
-#### Scenario: Renderer discovery in full mode
-
-- **WHEN** the script wires settings in full mode
-- **THEN** it locates the newest plugin root whose `claude/statusline_command.py` exists on disk, preferring `installed_plugins.json` and falling back to a version-sorted cache scan
-
-#### Scenario: Atomic write with backup
-
-- **WHEN** `settings.json` already exists and its `statusLine.command` differs from the target
-- **THEN** the script backs the file up, writes the new value via a temp file and atomic rename, and validates the result
-
-#### Scenario: Exact-match skip
-
-- **WHEN** the existing `statusLine.command` exactly equals the target command
-- **THEN** the script makes no change and reports the skip
-
-#### Scenario: Corrupt write rollback
-
-- **WHEN** the written `settings.json` fails JSON validation
-- **THEN** the script restores the pre-write backup and exits non-zero
-
-#### Scenario: Legacy file cleanup
-
-- **WHEN** legacy `statusline-info-*` files exist under `$CLAUDE_CONFIG_DIR`
-- **THEN** the script removes them
-
-#### Scenario: Existing settings keys preserved
-
-- **WHEN** `settings.json` already contains unrelated top-level keys
-- **THEN** the script merges `statusLine` in without dropping or altering those keys
-
-#### Scenario: JSON handling needs no jq
-
-- **WHEN** the script reads, merges, or validates `settings.json` (or `known_marketplaces.json` / `installed_plugins.json`)
-- **THEN** it does so via the resolved Python interpreter and never shells `jq`, so the flow succeeds on a machine where `jq` is absent
-
-#### Scenario: Values are passed safely to the JSON helper
-
-- **WHEN** the script passes a file path or a value (such as the command string) into the Python JSON helper
-- **THEN** it passes them as process arguments (argv), never string-interpolated into the Python source, so paths or values containing quotes, backslashes, or shell metacharacters cannot corrupt the JSON or inject code
-
-### Requirement: Dry-run mode
-
-The script SHALL support a `--dry-run` flag that prints the intended actions for the selected mode without shelling `claude` or modifying `settings.json`.
-
-#### Scenario: Dry-run prints decisions only
-
-- **WHEN** the script runs with `--dry-run`
-- **THEN** it prints whether it would add the marketplace, install vs update the plugin, and wire settings, but performs none of those side effects
-
-### Requirement: Per-mode preflight and strictness
-
-The script SHALL run under `set -uo pipefail`, check only the dependencies its selected mode needs, and remain portable across macOS and Linux. The preflight substrate gate SHALL be the presence of a system Python ≥3.10 (the bootstrap substrate), NOT the presence of `uv` and NOT the presence of `jq`.
-
-#### Scenario: Full-mode dependency check
-
-- **WHEN** full mode runs and `claude` is not on PATH
-- **THEN** the script reports the missing dependency with an install hint and exits non-zero
-
-#### Scenario: Wire-only dependency check
-
-- **WHEN** wire-only mode runs
-- **THEN** the script does not require `claude`, `curl`, or `jq` to be present, only a system Python interpreter ≥3.10
-
-#### Scenario: Missing Python substrate
-
-- **WHEN** no system Python ≥3.10 interpreter is found on PATH
-- **THEN** the script reports the error and exits non-zero without modifying `settings.json`
-
-#### Scenario: uv is not a preflight precondition
-
-- **WHEN** preflight runs on a machine that has a system Python ≥3.10 but no `uv` on PATH
-- **THEN** preflight passes (it does not reject for a missing `uv`), because `uv` is bootstrapped later during provisioning
 
 ### Requirement: Private interpreter provisioning via uv
 
@@ -188,25 +59,6 @@ The script SHALL provision a private, plugin-local CPython under `$PLUGIN_ROOT/.
 - **WHEN** the script runs with `--dry-run` and would provision the interpreter
 - **THEN** it prints what it would bootstrap/install/wire at the resolved version and downloads nothing (no `uv` installer fetch, no `uv python install`)
 
-### Requirement: Uninstall removes plugin-local provisioning artifacts
-
-The uninstall flow SHALL remove the plugin-local provisioning artifacts it created — both `$PLUGIN_ROOT/.python` and `$PLUGIN_ROOT/.uv` — on a best-effort basis, honouring `--dry-run`.
-
-#### Scenario: Uninstall removes the private CPython directory
-
-- **WHEN** uninstall runs and `$PLUGIN_ROOT/.python` exists
-- **THEN** the script removes it (or, under `--dry-run`, reports that it would remove it)
-
-#### Scenario: Uninstall removes the bootstrapped uv directory
-
-- **WHEN** uninstall runs and `$PLUGIN_ROOT/.uv` exists
-- **THEN** the script removes it (or, under `--dry-run`, reports that it would remove it)
-
-#### Scenario: Uninstall needs no jq
-
-- **WHEN** uninstall removes `statusLine` from `settings.json` and checks plugin presence
-- **THEN** it performs all JSON reads/edits via the resolved Python interpreter and never shells `jq`
-
 ### Requirement: Skill delegates to the script
 
 The `yas:init` skill SHALL delegate its wiring work to `ops/install.sh` rather than carrying an inline implementation, preserving its observable behaviour of writing a wire-only `statusLine.command`. The plugin SHALL additionally ship a `yas:config` skill that delegates reconfiguration to `ops/install.sh --reconfigure`.
@@ -220,6 +72,8 @@ The `yas:init` skill SHALL delegate its wiring work to `ops/install.sh` rather t
 
 - **WHEN** the `yas:config` skill runs
 - **THEN** it invokes `bash "${CLAUDE_PLUGIN_ROOT}/ops/install.sh" --reconfigure`, which re-runs the interactive wizard against that plugin root without performing marketplace or plugin install
+
+## ADDED Requirements
 
 ### Requirement: TTY detection and interactivity gating
 

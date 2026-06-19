@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -427,3 +428,202 @@ def test_uninstall_removes_uv_dir(uninstall_env, tmp_path):
     assert result.returncode == 0, result.stderr
     assert 'Removed bootstrapped uv dir' in result.stdout
     assert not uv_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Interactive installer — Python version policy + TTY gating
+#
+# NOTE: the live interactive TTY render path is NOT CI-testable (no terminal).
+# These tests exercise the non-interactive / --dry-run branches only. --dry-run
+# is treated as non-interactive by install.sh (a non-mutating preview never
+# prompts), so even on a developer's real terminal these stay deterministic.
+# ---------------------------------------------------------------------------
+
+def test_dry_run_default_provisions_3_13(wire_env):
+    """Task 10.1 — the non-interactive default provisions the stable 3.13."""
+    config_dir, plugin_root, env = wire_env
+    result = run_install('--wire-only', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert 'CPython 3.13' in combined
+    assert 'private uv-managed 3.13' in combined
+    # The default must NOT silently provision the prerelease 3.15. (The preflight
+    # line legitimately reports the *system* Python version, which may itself be
+    # 3.15 on some machines — only the provisioning messages must avoid it.)
+    assert 'uv-managed 3.15' not in combined
+    assert 'CPython 3.15' not in combined
+
+
+def test_yas_no_tty_forces_non_interactive(wire_env):
+    """Task 10.2 — YAS_NO_TTY=1 issues no prompts, writes no yas.toml, completes."""
+    config_dir, plugin_root, env = wire_env
+    env = {**env, 'YAS_NO_TTY': '1'}
+    result = run_install('--wire-only', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    # No prompt text leaked, and no yas.toml was written under the config dir.
+    assert 'Use Python 3.15' not in (result.stdout + result.stderr)
+    assert not (config_dir / 'yas.toml').exists()
+
+
+def test_yas_python_3_15_overrides_version(wire_env):
+    """Task 10.3 — YAS_PYTHON=3.15 overrides the dry-run preview version."""
+    config_dir, plugin_root, env = wire_env
+    env = {**env, 'YAS_PYTHON': '3.15'}
+    result = run_install('--wire-only', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert 'CPython 3.15' in combined
+    assert 'private uv-managed 3.15' in combined
+
+
+def test_reconfigure_non_interactive_errors_cleanly(wire_env):
+    """Task 10.4 — --reconfigure with no TTY errors out without touching plugins.
+
+    Reconfigure has no useful non-interactive behaviour, so it must error rather
+    than silently doing nothing — and must never attempt marketplace/plugin mgmt.
+    """
+    config_dir, plugin_root, env = wire_env
+    env = {**env, 'YAS_NO_TTY': '1'}
+    result = run_install('--reconfigure', env_extra=env)
+    assert result.returncode != 0
+    combined = (result.stdout + result.stderr).lower()
+    assert 'interactive' in combined
+    # No plugin management attempted.
+    assert 'marketplace' not in combined
+    assert 'installing yas plugin' not in combined
+    assert 'updating yas plugin' not in combined
+    # Reconfigure writes no yas.toml when it cannot run.
+    assert not (config_dir / 'yas.toml').exists()
+
+
+def _source_build_yas_toml() -> str:
+    """Extract the build_yas_toml bash function body from install.sh.
+
+    The live interactive wizard cannot be driven in CI (no tty), so we exercise
+    the pure template builder directly by sourcing just this function.
+    """
+    lines = INSTALL_SH.read_text().splitlines()
+    out: list[str] = []
+    capturing = False
+    for line in lines:
+        if line.startswith('build_yas_toml() {'):
+            capturing = True
+        if capturing:
+            out.append(line)
+            if line == '}':
+                break
+    assert out and out[-1] == '}', 'build_yas_toml not found in install.sh'
+    return '\n'.join(out)
+
+
+def test_build_yas_toml_carries_four_values_and_parses():
+    """Task 10.5 — the generated yas.toml carries the four chosen values and is
+    valid TOML (parsed with tomllib)."""
+    func = _source_build_yas_toml()
+    script = f'{func}\nbuild_yas_toml "ascii" "true" "dracula" "500000"\n'
+    result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    data = tomllib.loads(result.stdout)
+    assert data['appearance']['glyphs']['mode'] == 'ascii'
+    assert data['layout']['labels'] is True
+    assert data['appearance']['theme'] == 'dracula'
+    assert data['tokens']['soft_limit'] == 500000
+
+
+# ---------------------------------------------------------------------------
+# ANSI colorization — gating + alignment safety
+#
+# The installer emits 16-color SGR for its messages, gated on:
+#   color ON iff (stdout is a tty AND NO_COLOR unset AND TERM != dumb)
+#               OR YAS_FORCE_COLOR=1   — and NO_COLOR set always wins (off).
+#
+# Under pytest stdout is captured (not a tty) and the suite never sets
+# YAS_FORCE_COLOR, so color is OFF by default and every plain-text assertion
+# above still holds. The tests below force color on the message paths (the
+# "YAS!" logo is interactive-only and unreachable from these non-tty paths) and
+# prove (a) the gate and (b) that color wrapping never splits a phrase.
+# ---------------------------------------------------------------------------
+
+def test_no_color_when_piped_by_default(uninstall_env):
+    """Captured (non-tty) output with no YAS_FORCE_COLOR carries no ESC byte."""
+    config_dir, env = uninstall_env
+    result = run_install('--uninstall', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert '\x1b' not in combined
+
+
+def test_no_color_respects_NO_COLOR_env(uninstall_env):
+    """NO_COLOR wins even when YAS_FORCE_COLOR=1 is also set — output stays plain."""
+    config_dir, env = uninstall_env
+    env = {**env, 'YAS_FORCE_COLOR': '1', 'NO_COLOR': '1'}
+    result = run_install('--uninstall', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert '\x1b' not in combined
+
+
+def test_force_color_emits_ansi(uninstall_env):
+    """YAS_FORCE_COLOR=1 emits an ESC byte on a message path, phrase intact."""
+    config_dir, env = uninstall_env
+    env = {**env, 'YAS_FORCE_COLOR': '1'}
+    result = run_install('--uninstall', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert '\x1b' in combined
+    # Color wrapping must not split the phrase apart.
+    assert 'Would remove statusLine' in result.stdout
+
+
+def test_force_color_failure_is_red(wire_env):
+    """A forced-color failure path emits the red SGR code, error phrase intact.
+
+    --reconfigure with no TTY is the most deterministic/hermetic failure path:
+    it errors before any plugin/marketplace work and needs no claude/curl/uv.
+    """
+    config_dir, plugin_root, env = wire_env
+    env = {**env, 'YAS_NO_TTY': '1', 'YAS_FORCE_COLOR': '1'}
+    result = run_install('--reconfigure', env_extra=env)
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert '\x1b[31m' in combined
+    # The error message survives color wrapping.
+    assert 'interactive' in combined.lower()
+
+
+def test_existing_phrases_survive_under_force_color(uninstall_env):
+    """Existing dry-run substrings remain verbatim under YAS_FORCE_COLOR=1.
+
+    Proves SGR escapes wrap whole messages and are never interleaved into the
+    phrases the rest of the suite relies on. Covers both an uninstall dry-run
+    phrase and a wire-only dry-run phrase (built in a sibling dir so the two
+    runs stay hermetically separate).
+    """
+    config_dir, env = uninstall_env
+
+    # Uninstall dry-run phrase.
+    un_env = {**env, 'YAS_FORCE_COLOR': '1'}
+    un_result = run_install('--uninstall', '--dry-run', env_extra=un_env)
+    assert un_result.returncode == 0, un_result.stderr
+    assert 'Would remove statusLine' in un_result.stdout
+
+    # Wire-only dry-run phrase (default 3.13). Build a fresh plugin root + a
+    # distinct config dir under the same tmp tree to avoid clobbering above.
+    home        = Path(env['HOME'])
+    wire_config = home / 'wire_config'
+    wire_config.mkdir()
+    plugin_root = home / 'wire_plugin_root'
+    (plugin_root / 'claude').mkdir(parents=True)
+    (plugin_root / 'claude' / 'statusline_command.py').write_text('# fake renderer\n')
+    wire_env_extra = {
+        'CLAUDE_CONFIG_DIR':  str(wire_config),
+        'CLAUDE_PLUGIN_ROOT': str(plugin_root),
+        'HOME':               str(home),
+        'YAS_FORCE_COLOR':    '1',
+    }
+    wire_result = run_install('--wire-only', '--dry-run', env_extra=wire_env_extra)
+    assert wire_result.returncode == 0, wire_result.stderr
+    combined = wire_result.stdout + wire_result.stderr
+    assert 'private uv-managed 3.13' in combined
+    # Color codes must never inject the prerelease version into the default path.
+    assert '3.15' not in combined
