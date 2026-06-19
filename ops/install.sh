@@ -70,6 +70,13 @@ is_interactive() {
 
 if is_interactive; then INTERACTIVE=1; else INTERACTIVE=0; fi
 
+# Defensive terminal restore. A piped child (notably claude's install spinner)
+# can hide the cursor on our stdout and have its restore swallowed; the menu's
+# redraws can leave it hidden too. Always re-show the cursor on exit so the
+# user's shell prompt is visible afterwards. Guarded on stdout being a tty so we
+# never spew control bytes into a redirected log.
+[ -t 1 ] && trap 'printf "\033[?25h"' EXIT
+
 # Color detection + constants ------------------
 # _color_on — emit color only when stdout is a tty AND NO_COLOR is unset/empty
 # AND $TERM != dumb; OR when YAS_FORCE_COLOR=1 forces it (overriding the not-a-tty
@@ -143,7 +150,11 @@ run_claude_green() {
         "$@"
         return $?
     fi
-    "$@" | while IFS= read -r _line; do
+    # The `|| [ -n "$_line" ]` clause flushes a final line that lacks a trailing
+    # newline. A piped TUI (e.g. claude's install spinner) hides the cursor and
+    # emits its restoring `\033[?25h` as exactly such an unterminated tail; without
+    # this, the loop swallows it and the cursor stays hidden after we exit.
+    "$@" | while IFS= read -r _line || [ -n "$_line" ]; do
         case "$_line" in
             *✔*) printf '%s%s%s\n' "$C_GREEN" "$_line" "$C_RESET" ;;
             *)   printf '%s\n' "$_line" ;;
@@ -196,17 +207,23 @@ wrap() {
     [ -n "$line" ] && printf '%s%s\n' "$indent" "$line"
 }
 
-# Reopen stdin from the terminal exactly once, in the interactive branches only.
-# Under `curl | bash`, bash has already consumed the whole script body from the
-# pipe before main() runs, so fd 0 is an exhausted pipe; reattaching it to the
-# terminal is safe and lets `read` (and the embedded selector's fallback) work.
-# No re-download, no re-exec, no subshell. The flag makes this idempotent.
-_TTY_REATTACHED=0
+# reattach_tty — intentionally a no-op; kept so the interactive branches in main()
+# read self-documentingly.
+#
+# It used to `exec < /dev/tty`. Under `curl | bash` that is a TRAP: bash reads the
+# script from the curl pipe in CHUNKS (it does NOT slurp the whole body first —
+# that premise only holds for scripts small enough to fit one read buffer). Once
+# `exec` swaps fd 0 to the terminal, bash can never reach the pipe's EOF, so after
+# the script body ends it keeps reading fd 0 — now the keyboard — and runs the
+# user's keystrokes as if they were more script. That is the "hangs at the end /
+# my prompt is gone, my typing runs as commands" report.
+#
+# The reattach was never needed: every interactive read already redirects from
+# /dev/tty itself (the selector's `read ... < /dev/tty`, ask_yes_no's
+# `read ... < /dev/tty`). Leaving fd 0 as the exhausted curl pipe means the final
+# post-script read hits EOF and bash exits cleanly.
 reattach_tty() {
-    [ "$INTERACTIVE" = "1" ] || return 0
-    [ "$_TTY_REATTACHED" = "1" ] && return 0
-    exec < /dev/tty
-    _TTY_REATTACHED=1
+    :
 }
 
 # Embedded logo ---------------------------------
