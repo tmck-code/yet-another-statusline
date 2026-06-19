@@ -2,7 +2,7 @@
 
 🌈 Check out the official landing page here: [YAS! Yet Another Statusline](https://tmck-code.github.io/pages/yas.html)
 
-<img width="1685" height="320" alt="image" src="https://github.com/user-attachments/assets/516cb692-3318-4552-b813-e3e34ca96858" />
+<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
@@ -22,21 +22,13 @@ claude plugin install yas@yet-another-statusline
 claude -p "/yas:init"
 ```
 
-### Interactive install
+If you need to install non-interactively (e.g. in CI/docker)
 
-When run attached to a terminal the installer is **interactive by default**: it
-shows the logo, asks whether to use Python 3.15, then runs a short wizard (glyph
-mode, theme, labels, token soft-limit) with **live render previews** and writes a
-`yas.toml` for you. Under `curl … | bash` it reopens the terminal once via
-`/dev/tty` to drive the prompts (no re-download, no re-exec).
-
-- **`YAS_NO_TTY=1`** — force the fully non-interactive flow (no prompts, no
-  `yas.toml` written). This is also the automatic behaviour in CI or any context
-  with no readable `/dev/tty`, so the installer never blocks on input.
-- **`YAS_PYTHON`** — pick the private CPython version the installer provisions.
-  The default is now the **stable 3.13** (the non-interactive default no longer
-  silently installs a prerelease). Set `YAS_PYTHON=3.15` (any mode) to opt into
-  3.15, which starts ~6–8 ms faster but is currently a prerelease.
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | YAS_NO_TTY=1 bash
+# install with specific python version e.g. 3.15
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | YAS_NO_TTY=1 YAS_PYTHON=3.15 bash
+```
 
 ### Reconfigure later — `/yas:config`
 
@@ -50,10 +42,6 @@ marketplace or reinstalling the plugin.
 A dummy session to demonstrate the layout:
 
 <img width="3084" height="1250" alt="yas-0 2 5" src="https://github.com/user-attachments/assets/94d318c7-d7b4-4ad0-a06c-90f303d7f9a7" />
-
-## Layout Reference
-
-<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
 ## Widths
 
