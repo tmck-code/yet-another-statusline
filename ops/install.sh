@@ -3,11 +3,14 @@
 #
 # Modes:
 #   full      — register marketplace, install/update the yas plugin, then wire
-#               settings.json. Requires: claude, curl, jq, Python 3.10+.
+#               settings.json. Requires: claude, curl, system Python 3.10+.
 #   wire-only — skip the plugin-manager steps and only write settings.json.
-#               Requires: jq, Python 3.10+.
+#               Requires: system Python 3.10+.
 #   uninstall — remove statusLine from settings.json and clean up legacy files.
-#               With --full, also runs `claude plugin uninstall`. Requires: jq.
+#               With --full, also runs `claude plugin uninstall`.
+#
+# All JSON is handled through the resolved Python interpreter (see json_py) — the
+# script needs no external JSON tool. `uv` is bootstrapped plugin-locally when absent.
 #
 # Mode is auto-detected from the environment:
 #   CLAUDE_PLUGIN_ROOT set   → wire-only (plugin already installed by the host)
@@ -18,7 +21,7 @@
 #   bash ops/install.sh [--wire-only|--full|--uninstall] [--dry-run] [--main]
 
 # NOTE: -e is intentionally omitted. Several probe commands below are expected
-# to return non-zero (e.g. `command -v`, jq key-presence checks); using -e
+# to return non-zero (e.g. `command -v`, json_py key-presence checks); using -e
 # would abort on them rather than letting the script branch.
 set -uo pipefail
 
@@ -52,12 +55,140 @@ fi
 
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
+# JSON helper -----------------------------------
+# json_py OP [ARGS...] — all JSON reads/transforms/validation go through the
+# Python interpreter the script already resolves, so the installer needs no
+# external JSON tool dependency.
+#
+# INJECTION SAFETY (hard requirement): the Python heredoc below is SINGLE-QUOTED
+# and reads the op selector, file paths, and values exclusively from sys.argv.
+# No `$var` is ever interpolated into the Python source — a path or command
+# string containing quotes, backslashes, or shell metacharacters arrives as a
+# process argument and cannot corrupt the JSON or inject code. Any future edit
+# that splices a shell variable into the heredoc body is a defect.
+#
+# Interpreter: caller-provided $PYTHON_BIN if set, else find_python (the system
+# >=3.10 substrate preflight guarantees). The marketplace/plugin reads run
+# before do_wire selects a private interpreter, so they fall through to
+# find_python; the wiring reads/writes use the already-selected PYTHON_BIN.
+json_py() {
+    local _py
+    _py="${PYTHON_BIN:-}"
+    if [ -z "$_py" ]; then
+        _py=$(find_python) || return 1
+    fi
+    "$_py" - "$@" <<'PY'
+import json, sys
+
+def load(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+op = sys.argv[1]
+
+if op == "get-key":
+    # get-key FILE KEY   (KEY may be dotted, e.g. statusLine.command)
+    data = load(sys.argv[2])
+    cur = data
+    for part in sys.argv[3].split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            cur = ""
+            break
+    if cur is None:
+        cur = ""
+    if isinstance(cur, (dict, list)):
+        sys.stdout.write(json.dumps(cur))
+    else:
+        sys.stdout.write(str(cur))
+
+elif op == "has-key":
+    # has-key FILE KEY            top-level key presence
+    # has-key FILE PARENT CHILD   nested: PARENT[CHILD] presence
+    # has-key FILE PARENT.CHILD   dotted equivalent of the two-arg form
+    data = load(sys.argv[2])
+    if len(sys.argv) >= 5:
+        parent, child = sys.argv[3], sys.argv[4]
+    elif "." in sys.argv[3]:
+        parent, child = sys.argv[3].split(".", 1)
+    else:
+        parent, child = None, sys.argv[3]
+    if parent is None:
+        present = isinstance(data, dict) and child in data
+    else:
+        node = data.get(parent) if isinstance(data, dict) else None
+        present = isinstance(node, dict) and child in node
+    sys.stdout.write("true" if present else "false")
+
+elif op == "installpaths":
+    # installpaths FILE   installPath of every .plugins entry whose key
+    #                     (ascii-lower) contains "yas", one per line
+    data = load(sys.argv[2])
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if isinstance(plugins, dict):
+        for key, entries in plugins.items():
+            if "yas" not in str(key).lower():
+                continue
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict):
+                    ip = entry.get("installPath")
+                    if ip is not None:
+                        sys.stdout.write(str(ip) + "\n")
+
+elif op == "set-statusline":
+    # set-statusline FILE CMD   merge .statusLine, print serialized JSON
+    data = load(sys.argv[2])
+    if not isinstance(data, dict):
+        data = {}
+    data["statusLine"] = {
+        "async": True,
+        "command": sys.argv[3],
+        "refreshInterval": 1,
+        "type": "command",
+        "padding": 1,
+    }
+    sys.stdout.write(json.dumps(data, indent=2))
+
+elif op == "del-key":
+    # del-key FILE KEY   remove top-level KEY, print serialized JSON
+    data = load(sys.argv[2])
+    if isinstance(data, dict):
+        data.pop(sys.argv[3], None)
+    sys.stdout.write(json.dumps(data, indent=2))
+
+elif op == "validate":
+    # validate FILE   exit 0 iff json.load succeeds
+    try:
+        with open(sys.argv[2]) as f:
+            json.load(f)
+    except Exception:
+        sys.exit(1)
+    sys.exit(0)
+
+else:
+    sys.stderr.write("json_py: unknown op: %s\n" % op)
+    sys.exit(2)
+PY
+}
+
 # Python 3.15 provisioning + detection ----------
 # — reused by preflight and do_wire
 
 # Where a plugin-local, uv-managed CPython lives (provisioned by provision_python).
 yas_python_dir() {
     printf '%s/.python\n' "$1"  # $1 = PLUGIN_ROOT
+}
+
+# Where a bootstrapped, plugin-local uv lives (installed by provision_python when
+# uv is absent from PATH).
+yas_uv_dir() {
+    printf '%s/.uv\n' "$1"  # $1 = PLUGIN_ROOT
 }
 
 # provision_python PLUGIN_ROOT
@@ -70,14 +201,39 @@ yas_python_dir() {
 # per-invocation overhead — the statusline is spawned on every prompt — would
 # erase the win).
 #
-# Returns non-zero if uv is absent or the install/resolve fails (caller falls
-# back to find_python).
+# uv is the guaranteed engine: if it is on PATH we use it; otherwise we bootstrap
+# a plugin-local copy into $PLUGIN_ROOT/.uv (no shell-rc / PATH / system mutation)
+# and reference it by absolute path. Returns non-zero only if uv cannot be
+# obtained or the install/resolve fails (caller then falls back to find_python).
 provision_python() {
     local plugin_root="$1"
-    command -v uv > /dev/null 2>&1 || return 1
 
-    local pydir
+    local pydir uvdir
     pydir=$(yas_python_dir "$plugin_root")
+    uvdir=$(yas_uv_dir "$plugin_root")
+
+    # Resolve the uv engine: prefer one already on PATH, else bootstrap.
+    local UV_BIN=""
+    if command -v uv > /dev/null 2>&1; then
+        UV_BIN=$(command -v uv)
+    elif [ "$DRY_RUN" = "1" ]; then
+        # No network in dry-run: report what we'd bootstrap and continue the
+        # synthetic preview below.
+        printf "  Would bootstrap uv → %s\n" "$uvdir" 1>&2
+    else
+        # Bootstrap uv plugin-locally. INSTALLER_NO_MODIFY_PATH keeps it from
+        # touching shell rc / PATH; UV_INSTALL_DIR pins the destination. The
+        # official installer lands the binary flat at $uvdir/uv (no bin/ nesting).
+        printf "  Bootstrapping uv → %s (no system/PATH mutation)\n" "$uvdir" 1>&2
+        INSTALLER_NO_MODIFY_PATH=1 UV_INSTALL_DIR="$uvdir" \
+            sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' > /dev/null 2>&1 || return 1
+        UV_BIN="$uvdir/uv"
+        if [ ! -x "$UV_BIN" ]; then
+            # Defensive: if a future installer nests the binary, glob for it.
+            UV_BIN=$(find "$uvdir" -name uv -type f -perm -u+x 2>/dev/null | head -1)
+        fi
+        [ -n "$UV_BIN" ] && [ -x "$UV_BIN" ] || return 1
+    fi
 
     if [ "$DRY_RUN" = "1" ]; then
         printf "  Would provision private CPython 3.15 → %s (via uv)\n" "$pydir" 1>&2
@@ -88,11 +244,11 @@ provision_python() {
 
     # Install is idempotent: uv reuses an existing 3.15 in the install dir and,
     # across plugin reinstalls, hydrates from uv's shared download cache (fast).
-    UV_PYTHON_INSTALL_DIR="$pydir" uv python install 3.15 > /dev/null 2>&1 || return 1
+    UV_PYTHON_INSTALL_DIR="$pydir" "$UV_BIN" python install 3.15 > /dev/null 2>&1 || return 1
 
     # Resolve the concrete binary. Primary: ask uv, scoped to our managed dir.
     local bin
-    bin=$(UV_PYTHON_INSTALL_DIR="$pydir" uv python find 3.15 --managed-python 2>/dev/null)
+    bin=$(UV_PYTHON_INSTALL_DIR="$pydir" "$UV_BIN" python find 3.15 --managed-python 2>/dev/null)
     if [ -z "$bin" ] || [ ! -x "$bin" ]; then
         # Fallback: glob the install dir for the newest 3.15 interpreter.
         # find (not ls) so odd chars in the path are handled; sort -Vr → newest.
@@ -129,12 +285,11 @@ find_python() {
 # Preflight checks ------------------------------
 
 preflight_full() {
-    for tool in claude curl jq; do
+    for tool in claude curl; do
         command -v "$tool" > /dev/null 2>&1 && continue
         case "$tool" in
             claude) printf "! claude not found — install from https://claude.ai/download and re-run\n" ;;
             curl)   printf "! curl not found — install from https://curl.se and re-run\n" ;;
-            jq)     printf "! jq not found — install from https://jqlang.github.io/jq and re-run\n" ;;
         esac
         exit 1
     done
@@ -142,8 +297,7 @@ preflight_full() {
 }
 
 preflight_wire_only() {
-    command -v jq > /dev/null 2>&1 || { printf "! jq not found — install from https://jqlang.github.io/jq and re-run\n"; exit 1; }
-    find_python > /dev/null         || { printf "! Python 3.10+ not found — install Python 3.10+ and re-run\n"; exit 1; }
+    find_python > /dev/null || { printf "! Python 3.10+ not found — install Python 3.10+ and re-run\n"; exit 1; }
 }
 
 # ensure_marketplace (full mode only)
@@ -160,8 +314,7 @@ preflight_wire_only() {
 
 ensure_marketplace() {
     local present
-    present=$(jq -r 'has("yet-another-statusline")' \
-        "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" 2>/dev/null) || present="false"
+    present=$(json_py has-key "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" yet-another-statusline 2>/dev/null) || present="false"
 
     if [ "$present" = "true" ]; then
         if [ "$DRY_RUN" = "1" ]; then
@@ -184,8 +337,7 @@ ensure_marketplace() {
 # ensure_plugin (full mode only) ----------------
 ensure_plugin() {
     local present
-    present=$(jq -r '.plugins | has("yas@yet-another-statusline")' \
-        "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null) || present="false"
+    present=$(json_py has-key "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" plugins yas@yet-another-statusline 2>/dev/null) || present="false"
 
     if [ "$present" = "false" ]; then
         if [ "$DRY_RUN" = "1" ]; then
@@ -228,14 +380,7 @@ do_wire() {
         # Full mode: prefer installed_plugins.json, fall back to cache scan
 
         # From installed_plugins.json
-        PLUGIN_ROOT=$(jq -r '
-            .plugins
-            | to_entries[]
-            | select(.key | ascii_downcase | contains("yas"))
-            | .value[]
-            | select(.installPath != null)
-            | .installPath
-        ' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
+        PLUGIN_ROOT=$(json_py installpaths "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
             | while IFS= read -r d; do
                 [ -f "$d/claude/statusline_command.py" ] && echo "$d"
               done \
@@ -285,7 +430,7 @@ do_wire() {
     # Exact-match skip
     local NEW_CMD OLD_CMD
     NEW_CMD="\"$PYTHON_BIN\" \"$SCRIPT\""
-    OLD_CMD=$(jq -r '.statusLine.command // ""' "$SETTINGS" 2>/dev/null || printf '')
+    OLD_CMD=$(json_py get-key "$SETTINGS" statusLine.command 2>/dev/null || printf '')
     if [ "$OLD_CMD" = "$NEW_CMD" ]; then
         printf "  statusLine already set to current version — skipping.\n"
         exit 0
@@ -309,10 +454,8 @@ do_wire() {
     fi
 
     local _result
-    if ! _result=$(jq --arg cmd "$NEW_CMD" \
-        '.statusLine = {"async":true,"command":$cmd,"refreshInterval":1,"type":"command","padding":1}' \
-        "$SETTINGS") || [ -z "$_result" ]; then
-        printf "! jq failed — settings.json unchanged\n"; exit 1
+    if ! _result=$(json_py set-statusline "$SETTINGS" "$NEW_CMD") || [ -z "$_result" ]; then
+        printf "! JSON merge failed — settings.json unchanged\n"; exit 1
     fi
 
     local _tmp
@@ -320,7 +463,7 @@ do_wire() {
     printf '%s\n' "$_result" > "$_tmp" || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
     mv "$_tmp" "$SETTINGS"
 
-    if ! jq empty "$SETTINGS" 2>/dev/null; then
+    if ! json_py validate "$SETTINGS" 2>/dev/null; then
         printf "! settings.json invalid after write — restoring backup\n"
         [ -n "$BAK" ] && cp "$BAK" "$SETTINGS"
         exit 1
@@ -339,8 +482,6 @@ do_wire() {
 do_uninstall() {
     local SETTINGS="$CLAUDE_CONFIG_DIR/settings.json"
 
-    command -v jq > /dev/null 2>&1 || { printf "! jq not found — install from https://jqlang.github.io/jq and re-run\n"; exit 1; }
-
     # Legacy cleanup (always, even if settings has nothing to remove)
     for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
         [ -e "$f" ] || continue
@@ -356,7 +497,7 @@ do_uninstall() {
         printf "  settings.json not found — nothing to unwire.\n"
     else
         local HAS_KEY
-        HAS_KEY=$(jq 'has("statusLine")' "$SETTINGS" 2>/dev/null) || HAS_KEY="false"
+        HAS_KEY=$(json_py has-key "$SETTINGS" statusLine 2>/dev/null) || HAS_KEY="false"
         if [ "$HAS_KEY" != "true" ]; then
             printf "  statusLine not present in settings.json — nothing to unwire.\n"
         elif [ "$DRY_RUN" = "1" ]; then
@@ -368,8 +509,8 @@ do_uninstall() {
             printf "  Backed up → %s\n" "$(basename "$BAK")"
 
             local _result
-            if ! _result=$(jq 'del(.statusLine)' "$SETTINGS") || [ -z "$_result" ]; then
-                printf "! jq failed — settings.json unchanged\n"; exit 1
+            if ! _result=$(json_py del-key "$SETTINGS" statusLine) || [ -z "$_result" ]; then
+                printf "! JSON edit failed — settings.json unchanged\n"; exit 1
             fi
 
             local _tmp
@@ -377,7 +518,7 @@ do_uninstall() {
             printf '%s\n' "$_result" > "$_tmp" || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
             mv "$_tmp" "$SETTINGS"
 
-            if ! jq empty "$SETTINGS" 2>/dev/null; then
+            if ! json_py validate "$SETTINGS" 2>/dev/null; then
                 printf "! settings.json invalid after write — restoring backup\n"
                 cp "$BAK" "$SETTINGS"
                 exit 1
@@ -390,19 +531,12 @@ do_uninstall() {
     # Discover the plugin root the same ways do_wire does, then remove its
     # .python dir if present.
     local UN_ROOT=""
-    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$(yas_python_dir "$CLAUDE_PLUGIN_ROOT")" ]; then
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && { [ -d "$(yas_python_dir "$CLAUDE_PLUGIN_ROOT")" ] || [ -d "$(yas_uv_dir "$CLAUDE_PLUGIN_ROOT")" ]; }; then
         UN_ROOT="$CLAUDE_PLUGIN_ROOT"
     else
-        UN_ROOT=$(jq -r '
-            .plugins
-            | to_entries[]
-            | select(.key | ascii_downcase | contains("yas"))
-            | .value[]
-            | select(.installPath != null)
-            | .installPath
-        ' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
+        UN_ROOT=$(json_py installpaths "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null \
             | while IFS= read -r d; do
-                [ -d "$(yas_python_dir "$d")" ] && echo "$d"
+                { [ -d "$(yas_python_dir "$d")" ] || [ -d "$(yas_uv_dir "$d")" ]; } && echo "$d"
               done \
             | head -1)
     fi
@@ -416,14 +550,22 @@ do_uninstall() {
                 rm -rf "$PYDIR" && printf "  Removed private CPython dir %s\n" "$PYDIR"
             fi
         fi
+        local UVDIR
+        UVDIR=$(yas_uv_dir "$UN_ROOT")
+        if [ -d "$UVDIR" ]; then
+            if [ "$DRY_RUN" = "1" ]; then
+                printf "  Would remove bootstrapped uv dir %s\n" "$UVDIR"
+            else
+                rm -rf "$UVDIR" && printf "  Removed bootstrapped uv dir %s\n" "$UVDIR"
+            fi
+        fi
     fi
 
     # Plugin uninstall (--full only)
     if [ "$FULL_FLAG" = "1" ]; then
         command -v claude > /dev/null 2>&1 || { printf "! claude not found — cannot uninstall plugin\n"; exit 1; }
         local present
-        present=$(jq -r '.plugins | has("yas@yet-another-statusline")' \
-            "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" 2>/dev/null) || present="false"
+        present=$(json_py has-key "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" plugins yas@yet-another-statusline 2>/dev/null) || present="false"
         if [ "$present" != "true" ]; then
             printf "  yas plugin not installed — skipping plugin uninstall.\n"
         elif [ "$DRY_RUN" = "1" ]; then

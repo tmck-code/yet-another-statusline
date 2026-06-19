@@ -117,9 +117,80 @@ def test_wire_only_output_is_valid_json(wire_env):
 
 
 # ---------------------------------------------------------------------------
+# Task 7.2 — wire-only proves no jq dependency
+# ---------------------------------------------------------------------------
+
+def test_wire_only_works_without_jq(wire_env, tmp_path):
+    """Run wire-only with a `jq` stub that always fails (and is first on PATH).
+
+    If install.sh shelled `jq` anywhere, the stub's non-zero exit would corrupt
+    the read/merge/validate and the wiring would break. A clean exit 0 with a
+    correctly wired settings.json proves all JSON now goes through Python.
+    """
+    config_dir, plugin_root, env = wire_env
+    stub_bin = tmp_path / 'stub_bin'
+    stub_bin.mkdir()
+    jq_stub = stub_bin / 'jq'
+    jq_stub.write_text('#!/usr/bin/env bash\necho "jq must not be called" >&2\nexit 127\n')
+    jq_stub.chmod(0o755)
+    env = {**env, 'PATH': f'{stub_bin}:{os.environ["PATH"]}'}
+    result = run_install(env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'jq must not be called' not in result.stderr
+    settings = json.loads((config_dir / 'settings.json').read_text())
+    script_path = str(plugin_root / 'claude' / 'statusline_command.py')
+    assert script_path in settings['statusLine']['command']
+    assert settings['statusLine']['type'] == 'command'
+
+
+# ---------------------------------------------------------------------------
+# Task 7.3 — uv bootstrap dry-run preview (hermetic, no network)
+# ---------------------------------------------------------------------------
+
+def test_wire_only_dry_run_previews_uv_bootstrap_when_uv_absent(wire_env, tmp_path):
+    """With `uv` absent from PATH and --dry-run set, provision_python must report
+    it would bootstrap uv → .uv, write nothing, and make no network call.
+
+    PATH is scrubbed to a curated dir holding only the binaries install.sh needs
+    (bash, python3, coreutils, find, grep, sed) plus a `curl` stub that fails if
+    called — proving the dry-run path never fetches the installer.
+    """
+    config_dir, plugin_root, env = wire_env
+
+    curated = tmp_path / 'curated_bin'
+    curated.mkdir()
+    # Symlink the real interpreters/coreutils install.sh relies on, but NOT uv.
+    needed = [
+        'bash', 'sh', 'env', 'python3', 'find', 'grep', 'sed', 'sort', 'head',
+        'mktemp', 'date', 'dirname', 'basename', 'rm', 'cp', 'mv', 'cat',
+        'printf', 'xargs', 'which',
+    ]
+    for tool in needed:
+        src = subprocess.run(['which', tool], capture_output=True, text=True).stdout.strip()
+        if src:
+            (curated / tool).symlink_to(src)
+    # curl stub: any invocation is a failure (the dry-run path must not fetch).
+    curl_stub = curated / 'curl'
+    curl_stub.write_text('#!/usr/bin/env bash\necho "curl must not be called in dry-run" >&2\nexit 99\n')
+    curl_stub.chmod(0o755)
+
+    env = {**env, 'PATH': str(curated)}
+    result = run_install('--wire-only', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert 'Would bootstrap uv' in combined
+    assert '.uv' in combined
+    assert 'curl must not be called' not in combined
+    # Dry-run writes nothing.
+    assert not (config_dir / 'settings.json').exists()
+    assert not (plugin_root / '.uv').exists()
+    assert not (plugin_root / '.python').exists()
+
+
+# ---------------------------------------------------------------------------
 # Task 4.2 — dry-run assertions (full-mode decision logic)
 #
-# These tests run `--full --dry-run`.  They need `claude`, `curl`, and `jq`
+# These tests run `--full --dry-run`.  They need `claude` and `curl`
 # on PATH (preflight_full runs before --dry-run takes effect), plus a fake
 # plugin root for do_wire to discover.
 #
@@ -129,9 +200,10 @@ def test_wire_only_output_is_valid_json(wire_env):
 # the yas key under `.plugins` to satisfy both checks.
 # ---------------------------------------------------------------------------
 
-# Guard: preflight_full requires claude, curl, and jq to be on PATH.
+# Guard: preflight_full requires claude and curl to be on PATH (jq is no longer
+# a dependency — JSON goes through the resolved Python interpreter via json_py).
 _PREFLIGHT_MISSING = [
-    t for t in ('claude', 'curl', 'jq')
+    t for t in ('claude', 'curl')
     if subprocess.run(['which', t], capture_output=True).returncode != 0
 ]
 requires_full_preflight = pytest.mark.skipif(
@@ -323,3 +395,35 @@ def test_uninstall_dry_run_no_changes(uninstall_env):
     mtime_after = (config_dir / 'settings.json').stat().st_mtime
     assert mtime_before == mtime_after
     assert not list(config_dir.glob('settings.json.bak-yas-*'))
+
+
+# ---------------------------------------------------------------------------
+# Task 7.4 — uninstall reports it would remove the .uv dir (dry-run, hermetic)
+# ---------------------------------------------------------------------------
+
+def test_uninstall_dry_run_reports_uv_dir_removal(uninstall_env, tmp_path):
+    config_dir, env = uninstall_env
+    plugin_root = tmp_path / 'plugin_root'
+    uv_dir = plugin_root / '.uv'
+    uv_dir.mkdir(parents=True)
+    (uv_dir / 'uv').write_text('# fake bootstrapped uv\n')
+    env = {**env, 'CLAUDE_PLUGIN_ROOT': str(plugin_root)}
+    result = run_install('--uninstall', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'Would remove bootstrapped uv dir' in result.stdout
+    assert str(uv_dir) in result.stdout
+    # Dry-run leaves the dir in place.
+    assert uv_dir.exists()
+
+
+def test_uninstall_removes_uv_dir(uninstall_env, tmp_path):
+    config_dir, env = uninstall_env
+    plugin_root = tmp_path / 'plugin_root'
+    uv_dir = plugin_root / '.uv'
+    uv_dir.mkdir(parents=True)
+    (uv_dir / 'uv').write_text('# fake bootstrapped uv\n')
+    env = {**env, 'CLAUDE_PLUGIN_ROOT': str(plugin_root)}
+    result = run_install('--uninstall', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'Removed bootstrapped uv dir' in result.stdout
+    assert not uv_dir.exists()
