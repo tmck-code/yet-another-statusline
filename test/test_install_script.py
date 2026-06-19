@@ -48,6 +48,13 @@ def wire_env(tmp_path: Path) -> tuple[Path, Path, dict]:
         'CLAUDE_CONFIG_DIR': str(config_dir),
         'CLAUDE_PLUGIN_ROOT': str(plugin_root),
         'HOME': str(tmp_path),
+        # Force non-interactive so the mutating (non --dry-run) wire-only tests
+        # never enter the wizard. is_interactive() keys off a *readable* /dev/tty
+        # (intentional, for `curl | bash`), which is present whenever the suite
+        # runs attached to a real terminal — without this the wizard blocks on
+        # `read < /dev/tty` and the test hangs. CI has no tty, so it only bites
+        # locally.
+        'YAS_NO_TTY': '1',
     }
     return config_dir, plugin_root, env
 
