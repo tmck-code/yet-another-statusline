@@ -1,0 +1,95 @@
+
+===== render sorted by cumulative =====
+         3491817 function calls in 1.363 seconds
+
+   Ordered by: cumulative time
+   List reduced from 277 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      200    0.003    0.000    1.367    0.007 /home/freman/dev/yet-another-statusline/claude/yas/app.py:38(render)
+      200    0.012    0.000    0.554    0.003 /home/freman/dev/yet-another-statusline/claude/yas/layout.py:367(build_wide)
+      200    0.002    0.000    0.401    0.002 /home/freman/dev/yet-another-statusline/claude/yas/layout.py:908(render_layout)
+      200    0.006    0.000    0.327    0.002 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:1116(tokens_cost)
+      200    0.005    0.000    0.264    0.001 /home/freman/dev/yet-another-statusline/claude/yas/app.py:19(record_tick)
+      400    0.001    0.000    0.252    0.001 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:323(border_separator_dim)
+      400    0.053    0.000    0.252    0.001 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:181(border_separator_dim)
+      200    0.089    0.000    0.214    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:143(update)
+    64000    0.033    0.000    0.153    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:175(_dim_for_col)
+      200    0.077    0.000    0.126    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:178(history)
+      200    0.076    0.000    0.125    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:218(recently_active)
+      200    0.011    0.000    0.122    0.001 /home/freman/dev/yet-another-statusline/claude/yas/config.py:238(load)
+   123400    0.047    0.000    0.119    0.000 {built-in method builtins.min}
+     2400    0.003    0.000    0.112    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/functools.py:1023(__get__)
+     3200    0.003    0.000    0.098    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/text.py:76(_visible_width)
+     3400    0.014    0.000    0.080    0.000 {built-in method builtins.sum}
+   123000    0.044    0.000    0.073    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:178(grad_at)
+   299574    0.072    0.000    0.072    0.000 {method 'split' of 'str' objects}
+   352000    0.053    0.000    0.072    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:176(<genexpr>)
+   149800    0.029    0.000    0.066    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/text.py:78(<genexpr>)
+     1800    0.003    0.000    0.066    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:539(read_text)
+     4000    0.002    0.000    0.065    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:510(stat)
+     4000    0.014    0.000    0.063    0.000 {built-in method posix.stat}
+     6200    0.003    0.000    0.063    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:166(__fspath__)
+     1800    0.003    0.000    0.062    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_abc.py:628(read_text)
+      600    0.000    0.000    0.062    0.000 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:326(border_line)
+      600    0.001    0.000    0.062    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:229(border_line)
+     9200    0.012    0.000    0.061    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:227(__str__)
+      200    0.000    0.000    0.056    0.000 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:304(sparkline_1row)
+      200    0.001    0.000    0.056    0.000 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:314(border_top)
+      200    0.015    0.000    0.056    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:208(sparkline_1row)
+      200    0.016    0.000    0.055    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:61(border_top)
+    10200    0.014    0.000    0.053    0.000 {method 'join' of 'str' objects}
+      200    0.001    0.000    0.049    0.000 /home/freman/dev/yet-another-statusline/claude/yas/config.py:177(_load_toml)
+     2000    0.001    0.000    0.048    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:529(open)
+
+
+
+
+===== render sorted by tottime =====
+         3491817 function calls in 1.363 seconds
+
+   Ordered by: internal time
+   List reduced from 277 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      200    0.089    0.000    0.214    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:143(update)
+      200    0.077    0.000    0.126    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:178(history)
+      200    0.076    0.000    0.125    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:218(recently_active)
+   299574    0.072    0.000    0.072    0.000 {method 'split' of 'str' objects}
+   352000    0.053    0.000    0.072    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:176(<genexpr>)
+      400    0.053    0.000    0.252    0.001 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:181(border_separator_dim)
+   123400    0.047    0.000    0.119    0.000 {built-in method builtins.min}
+   123000    0.044    0.000    0.073    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:178(grad_at)
+    87324    0.039    0.000    0.039    0.000 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:167(<genexpr>)
+    64000    0.033    0.000    0.153    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:175(_dim_for_col)
+     2000    0.031    0.000    0.046    0.000 {built-in method _io.open}
+   149800    0.029    0.000    0.066    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/text.py:78(<genexpr>)
+   146600    0.027    0.000    0.037    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/text.py:67(_is_wide)
+   261140    0.027    0.000    0.027    0.000 {built-in method builtins.max}
+   343574    0.025    0.000    0.025    0.000 {built-in method builtins.len}
+   176804    0.024    0.000    0.024    0.000 {method 'append' of 'list' objects}
+   288000    0.019    0.000    0.019    0.000 {built-in method builtins.abs}
+    15800    0.019    0.000    0.023    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:142(spark_rgb)
+      800    0.018    0.000    0.018    0.000 {method 'splitlines' of 'str' objects}
+     5200    0.016    0.000    0.016    0.000 {method 'sub' of 're.Pattern' objects}
+      200    0.016    0.000    0.055    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:61(border_top)
+    10800    0.016    0.000    0.019    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:160(gradient_rgb)
+      200    0.015    0.000    0.056    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/gradient.py:208(sparkline_1row)
+      200    0.015    0.000    0.042    0.000 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:95(update)
+     3400    0.014    0.000    0.080    0.000 {built-in method builtins.sum}
+    10200    0.014    0.000    0.053    0.000 {method 'join' of 'str' objects}
+     4000    0.014    0.000    0.063    0.000 {built-in method posix.stat}
+     9200    0.012    0.000    0.061    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:227(__str__)
+      200    0.012    0.000    0.554    0.003 /home/freman/dev/yet-another-statusline/claude/yas/layout.py:367(build_wide)
+     5000    0.012    0.000    0.021    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:257(_parse_path)
+     9000    0.012    0.000    0.019    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:117(__init__)
+      200    0.011    0.000    0.122    0.001 /home/freman/dev/yet-another-statusline/claude/yas/config.py:238(load)
+     2000    0.010    0.000    0.010    0.000 {method '__exit__' of '_io._IOBase' objects}
+     1800    0.010    0.000    0.014    0.000 {method 'read' of '_io.TextIOWrapper' objects}
+   113400    0.010    0.000    0.010    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/pill.py:24(active)
+
+
+
+[wrote /home/freman/dev/yet-another-statusline/ops/profile-out/render.pstats]
+
+[render-only wall clock: 3.083 ms/call over 200 calls]

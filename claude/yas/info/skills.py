@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from yas.constants import _sanitize
 
 
-@dataclass
 class LoadedSkills:
-    names: list[str] = field(default_factory=list)
+    __slots__ = ('names',)
+
+    def __init__(self, names: list[str] | None = None) -> None:
+        self.names = names if names is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, LoadedSkills):
+            return NotImplemented
+        return self.names == other.names
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'LoadedSkills(names={self.names!r})'
 
     @classmethod
     def from_transcript(cls, transcript_path: str) -> LoadedSkills:

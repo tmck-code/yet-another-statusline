@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 import os
-import shutil
-import subprocess
 import unicodedata
 
 from yas.constants import (
@@ -19,14 +17,18 @@ from yas.constants import (
 
 
 def terminal_width() -> int:
-    try:
-        w = int(subprocess.run([
-            "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
-        ], capture_output=True, text=True, timeout=0.2).stdout.strip().replace("'", ""))
-        if w > 0:
-            return w
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
-        pass
+    # Deferred: only sessions running under tmux pay the subprocess import +
+    # fork/exec; a plain terminal never touches subprocess at all.
+    if 'TMUX_PANE' in os.environ:
+        import subprocess
+        try:
+            w = int(subprocess.run([
+                "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
+            ], capture_output=True, text=True, timeout=0.2).stdout.strip().replace("'", ""))
+            if w > 0:
+                return w
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
 
     try:
         w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
@@ -42,7 +44,13 @@ def terminal_width() -> int:
     except ValueError:
         pass
 
-    w = shutil.get_terminal_size(fallback=(0, 0)).columns
+    # os.get_terminal_size (stdout) replaces shutil.get_terminal_size: same
+    # probe minus the COLUMNS check already done above, and it avoids pulling
+    # shutil -> bz2/lzma/zlib at import time.
+    try:
+        w = os.get_terminal_size().columns
+    except OSError:
+        w = 0
     if w > 0:
         return w
 

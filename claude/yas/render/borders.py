@@ -130,13 +130,27 @@ class BorderRenderer:
         parts.append(self.R)
         return ''.join(parts)
 
-    def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
+    def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0, timing: str = '') -> str:
         ups_set = set(ups)
-        parts = [self.gradient.grad_at(0, width, fill=fill), BOX_ARC_BL]
+        chars: list[str] = [BOX_ARC_BL]
         for i in range(width - 2):
-            ch = BOX_T_UP if (i + 2) in ups_set else BOX_H
-            parts += [self.gradient.grad_at(i + 1, width, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), BOX_ARC_BR, self.R]
+            chars.append(BOX_T_UP if (i + 2) in ups_set else BOX_H)
+        chars.append(BOX_ARC_BR)
+        # Overlay the run-time annotation right-aligned into the bottom edge,
+        # leaving two fill cells before the corner (`…47.2ms──╯`). Glyphs land
+        # only on plain fill columns, so an elbow or the corner is never
+        # disturbed and the visible width stays exactly `width`.
+        if timing:
+            start = width - 3 - _visible_width(timing)
+            if start >= 1:
+                for off, g in enumerate(timing):
+                    idx = start + off
+                    if 0 <= idx < width and chars[idx] == BOX_H:
+                        chars[idx] = g
+        parts: list[str] = []
+        for i in range(width):
+            parts += [self.gradient.grad_at(i, width, fill=fill), chars[i]]
+        parts.append(self.R)
         return ''.join(parts)
 
     def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0, labels: tuple[tuple[str, int], ...] = ()) -> str:

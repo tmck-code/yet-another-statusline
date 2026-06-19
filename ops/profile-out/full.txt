@@ -1,0 +1,93 @@
+
+===== full sorted by cumulative =====
+         57727 function calls (56905 primitive calls) in 0.045 seconds
+
+   Ordered by: cumulative time
+   List reduced from 749 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     52/1    0.000    0.000    0.038    0.038 <frozen importlib._bootstrap>:1349(_find_and_load)
+     52/1    0.000    0.000    0.038    0.038 <frozen importlib._bootstrap>:1304(_find_and_load_unlocked)
+    105/3    0.000    0.000    0.038    0.013 <frozen importlib._bootstrap>:480(_call_with_frames_removed)
+     51/2    0.000    0.000    0.038    0.019 <frozen importlib._bootstrap>:911(_load_unlocked)
+     40/2    0.000    0.000    0.038    0.019 <frozen importlib._bootstrap_external>:1020(exec_module)
+     65/2    0.007    0.000    0.037    0.019 {built-in method builtins.exec}
+        1    0.000    0.000    0.037    0.037 /home/freman/dev/yet-another-statusline/claude/yas/app.py:1(<module>)
+        1    0.000    0.000    0.020    0.020 /home/freman/dev/yet-another-statusline/claude/yas/info/__init__.py:1(<module>)
+       25    0.000    0.000    0.018    0.001 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:1294(wrap)
+       25    0.001    0.000    0.017    0.001 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:929(_process_class)
+       25    0.000    0.000    0.013    0.001 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:1277(dataclass)
+        1    0.000    0.000    0.010    0.010 /home/freman/dev/yet-another-statusline/claude/yas/config.py:1(<module>)
+       25    0.000    0.000    0.008    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:470(add_fns_to_class)
+        1    0.000    0.000    0.007    0.007 /home/freman/dev/yet-another-statusline/claude/yas/app.py:38(render)
+        1    0.000    0.000    0.006    0.006 /home/freman/dev/yet-another-statusline/claude/yas/layout.py:1(<module>)
+       40    0.000    0.000    0.005    0.000 <frozen importlib._bootstrap_external>:1093(get_code)
+        1    0.000    0.000    0.005    0.005 /home/freman/dev/yet-another-statusline/claude/yas/info/git.py:1(<module>)
+        1    0.000    0.000    0.004    0.004 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/tomllib/__init__.py:1(<module>)
+        1    0.000    0.000    0.004    0.004 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/subprocess.py:1(<module>)
+       13    0.000    0.000    0.004    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/__init__.py:330(_compile)
+        1    0.000    0.000    0.004    0.004 /home/freman/dev/yet-another-statusline/claude/yas/session.py:1(<module>)
+       11    0.000    0.000    0.004    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/__init__.py:287(compile)
+       12    0.000    0.000    0.004    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/_compiler.py:743(compile)
+        1    0.000    0.000    0.004    0.004 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/tomllib/_parser.py:1(<module>)
+        1    0.000    0.000    0.004    0.004 /home/freman/dev/yet-another-statusline/claude/yas/themes.py:1(<module>)
+        1    0.000    0.000    0.003    0.003 /home/freman/dev/yet-another-statusline/claude/yas/info/workflows.py:1(<module>)
+       79    0.001    0.000    0.003    0.000 {built-in method builtins.__build_class__}
+       40    0.000    0.000    0.003    0.000 <frozen importlib._bootstrap_external>:782(_compile_bytecode)
+        1    0.000    0.000    0.003    0.003 /home/freman/dev/yet-another-statusline/claude/yas/renderer.py:1(<module>)
+       40    0.003    0.000    0.003    0.000 {built-in method marshal.loads}
+       52    0.000    0.000    0.003    0.000 <frozen importlib._bootstrap>:1240(_find_spec)
+        1    0.000    0.000    0.003    0.003 /home/freman/dev/yet-another-statusline/claude/yas/layout.py:367(build_wide)
+       12    0.000    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/_parser.py:970(parse)
+    59/12    0.000    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/_parser.py:451(_parse_sub)
+        1    0.000    0.000    0.002    0.002 /home/freman/dev/yet-another-statusline/claude/yas/render/tasks_view.py:1(<module>)
+
+
+
+
+===== full sorted by tottime =====
+         57727 function calls (56905 primitive calls) in 0.045 seconds
+
+   Ordered by: internal time
+   List reduced from 749 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     65/2    0.007    0.000    0.037    0.019 {built-in method builtins.exec}
+       40    0.003    0.000    0.003    0.000 {built-in method marshal.loads}
+       48    0.002    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/inspect.py:176(get_annotations)
+       25    0.001    0.000    0.017    0.001 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:929(_process_class)
+    73/13    0.001    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/_parser.py:511(_parse)
+       79    0.001    0.000    0.003    0.000 {built-in method builtins.__build_class__}
+      483    0.001    0.000    0.001    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:709(_is_type)
+      191    0.001    0.000    0.001    0.000 {built-in method posix.stat}
+      161    0.001    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:768(_get_field)
+     4231    0.000    0.000    0.000    0.000 {built-in method builtins.isinstance}
+       40    0.000    0.000    0.000    0.000 {built-in method _io.open_code}
+     3306    0.000    0.000    0.000    0.000 {method 'append' of 'list' objects}
+    69/23    0.000    0.000    0.002    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/inspect.py:2477(_signature_from_callable)
+       69    0.000    0.000    0.002    0.000 <frozen importlib._bootstrap_external>:1624(find_spec)
+        1    0.000    0.000    0.001    0.001 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:143(update)
+   106/12    0.000    0.000    0.001    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/re/_compiler.py:37(_compile)
+     1205    0.000    0.000    0.000    0.000 {method 'split' of 'str' objects}
+       52    0.000    0.000    0.003    0.000 <frozen importlib._bootstrap>:1240(_find_spec)
+       23    0.000    0.000    0.001    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/inspect.py:2373(_signature_from_function)
+       40    0.000    0.000    0.000    0.000 {method 'read' of '_io.BufferedReader' objects}
+3406/3283    0.000    0.000    0.000    0.000 {built-in method builtins.len}
+        9    0.000    0.000    0.000    0.000 {built-in method builtins.eval}
+      389    0.000    0.000    0.001    0.000 <frozen importlib._bootstrap_external>:131(_path_join)
+      519    0.000    0.000    0.000    0.000 {method 'match' of 're.Pattern' objects}
+      866    0.000    0.000    0.000    0.000 {method 'join' of 'str' objects}
+     1787    0.000    0.000    0.000    0.000 {method 'get' of 'dict' objects}
+     1309    0.000    0.000    0.000    0.000 {built-in method builtins.getattr}
+       25    0.000    0.000    0.008    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/dataclasses.py:470(add_fns_to_class)
+      853    0.000    0.000    0.001    0.000 {built-in method builtins.min}
+        9    0.000    0.000    0.001    0.000 /home/freman/.local/share/uv/python/cpython-3.13.1-linux-x86_64-gnu/lib/python3.13/collections/__init__.py:358(namedtuple)
+        1    0.000    0.000    0.000    0.000 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:218(recently_active)
+       12    0.000    0.000    0.000    0.000 {built-in method _io.open}
+     1760    0.000    0.000    0.000    0.000 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:176(<genexpr>)
+        2    0.000    0.000    0.001    0.001 /home/freman/dev/yet-another-statusline/claude/yas/render/borders.py:181(border_separator_dim)
+        1    0.000    0.000    0.000    0.000 /home/freman/dev/yet-another-statusline/claude/yas/tokens.py:178(history)
+
+
+
+[wrote /home/freman/dev/yet-another-statusline/ops/profile-out/full.pstats]

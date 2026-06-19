@@ -120,7 +120,9 @@ def test_dirty_uses_no_optional_locks(monkeypatch: pytest.MonkeyPatch, tmp_path:
         captured.append(cmd)
         return FakeCompleted()
 
-    monkeypatch.setattr(git.subprocess, 'run', fake_run)
+    # subprocess is imported lazily inside _dirty; patch the shared module
+    # object (the deferred `import subprocess` binds this same object).
+    monkeypatch.setattr(subprocess, 'run', fake_run)
     git.GitInfo._dirty(str(tmp_path))
 
     assert len(captured) == 1

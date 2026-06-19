@@ -7,8 +7,8 @@ Imports:
 
 from __future__ import annotations
 
+import functools
 import time
-from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from yas.constants import CLAUDE_DIR
@@ -23,11 +23,13 @@ if TYPE_CHECKING:
 # from layout.py which must not import from app.py)
 # ---------------------------------------------------------------------------
 
-@dataclass
 class TickRecord:
-    token_log: 'TokenLog'
-    day_cost:  float
-    tok_rate:  int
+    __slots__ = ('token_log', 'day_cost', 'tok_rate')
+
+    def __init__(self, token_log: 'TokenLog', day_cost: float, tok_rate: int) -> None:
+        self.token_log = token_log
+        self.day_cost  = day_cost
+        self.tok_rate  = tok_rate
 
 
 # ---------------------------------------------------------------------------
@@ -86,11 +88,24 @@ def compute_day_cost(model: Model, token_log: 'TokenLog') -> float:
 # TokenLog
 # ---------------------------------------------------------------------------
 
-@dataclass
 class TokenLog:
-    day_in: int = 0
-    day_cache_read: int = 0
-    day_out: int = 0
+    __slots__ = ('day_in', 'day_cache_read', 'day_out')
+
+    def __init__(self, day_in: int = 0, day_cache_read: int = 0, day_out: int = 0) -> None:
+        self.day_in         = day_in
+        self.day_cache_read = day_cache_read
+        self.day_out        = day_out
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TokenLog):
+            return NotImplemented
+        return (self.day_in, self.day_cache_read, self.day_out) == \
+               (other.day_in, other.day_cache_read, other.day_out)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'TokenLog(day_in={self.day_in}, day_cache_read={self.day_cache_read}, day_out={self.day_out})'
 
     @classmethod
     def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> TokenLog:
@@ -131,13 +146,18 @@ class TokenLog:
 # TokenRate
 # ---------------------------------------------------------------------------
 
+@functools.cache
 def _token_window() -> float:
     from yas.config import Config
     return Config.load().token_window
 
 
 class TokenRate:
-    WINDOW: float = _token_window()
+    # Resolved lazily (see _token_window): evaluating it at import time forced a
+    # full Config.load() — and, when a yas.toml exists, the tomllib import — into
+    # every startup. None means "resolve from config on first use"; an explicit
+    # float (e.g. set by tests) is honoured as-is.
+    WINDOW: float | None = None
     KEEP = 300.0
 
     @classmethod
@@ -167,7 +187,8 @@ class TokenRate:
             log.write_text('\n'.join(f'{ts:.3f} {sid} {ti} {to}' for ts, sid, ti, to in rows) + '\n')
         except OSError:
             pass
-        samples = [(ts, ti, to) for ts, sid, ti, to in rows if sid == session_id and now - ts <= cls.WINDOW]
+        window  = cls.WINDOW if cls.WINDOW is not None else _token_window()
+        samples = [(ts, ti, to) for ts, sid, ti, to in rows if sid == session_id and now - ts <= window]
         if len(samples) < 2:
             return 0
         samples.sort()
@@ -241,3 +262,66 @@ class TokenRate:
         ti0, to0 = samples[0][1], samples[0][2]
         ti1, to1 = samples[-1][1], samples[-1][2]
         return ti1 > ti0, to1 > to0
+
+
+# ---------------------------------------------------------------------------
+# RenderTiming
+# ---------------------------------------------------------------------------
+
+class RenderTiming:
+    """Per-session persistence of the last render's wall-clock duration.
+
+    A render can't know its own total time before it has finished drawing, so
+    the bottom-border annotation shows the *previous* run's duration: each run
+    reads the last value (to display) at the start and writes its own (for the
+    next run) at the end. Keyed by session_id in one log file — like
+    TokenRate — so panes don't show each other's timings; lines idle longer
+    than KEEP are pruned so the file can't grow without bound.
+    """
+
+    KEEP = 300.0
+
+    @classmethod
+    def read(cls, session_id: str) -> float | None:
+        if not session_id:
+            return None
+        log = CLAUDE_DIR / 'statusline-render.log'
+        if not log.exists():
+            return None
+        try:
+            for ln in log.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) >= 3 and parts[1] == session_id:
+                    return float(parts[2])
+        except (OSError, ValueError):
+            return None
+        return None
+
+    @classmethod
+    def write(cls, session_id: str, ms: float) -> None:
+        if not session_id:
+            return
+        log = CLAUDE_DIR / 'statusline-render.log'
+        now = time.time()
+        rows: list[str] = []
+        if log.exists():
+            try:
+                for ln in log.read_text().splitlines():
+                    parts = ln.split()
+                    if len(parts) < 3 or parts[1] == session_id:
+                        continue
+                    try:
+                        ts = float(parts[0])
+                    except ValueError:
+                        continue
+                    if now - ts > cls.KEEP:
+                        continue
+                    rows.append(ln)
+            except OSError:
+                pass
+        rows.append(f'{now:.3f} {session_id} {ms:.1f}')
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text('\n'.join(rows) + '\n')
+        except OSError:
+            pass

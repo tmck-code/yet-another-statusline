@@ -10,7 +10,6 @@ themes have no per-theme snapshots (curation choice, not regression target).
 from __future__ import annotations
 
 import json
-from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -50,9 +49,9 @@ def test_themes_registry_contains_expected() -> None:
 @pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))
 def test_theme_has_every_slot_filled(theme_name: str) -> None:
     t = THEMES[theme_name]
-    for f in fields(Theme):
-        value = getattr(t, f.name)
-        assert value is not None, f'{theme_name}: slot {f.name!r} is None'
+    for name in Theme.__slots__:
+        value = getattr(t, name)
+        assert value is not None, f'{theme_name}: slot {name!r} is None'
 
 
 @pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))

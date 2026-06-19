@@ -398,14 +398,16 @@ def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch
     """When the 7-day bucket is absent (used_percentage=0, resets_at=0), the 7d vsep
     does not appear in the content row and no stray ┬/┴ elbows are added for it."""
     from helper import strip_ansi
-    from yas.session import RateBucket
-    import dataclasses
+    from yas.session import RateBucket, RateLimits, SessionInfo
     _silence_dynamic(monkeypatch)
 
     # Build a session with no 7-day bucket active.
     sess = _session()
-    zero_limits = dataclasses.replace(sess.rate_limits, seven_day=RateBucket(used_percentage=0, resets_at=0))
-    sess = dataclasses.replace(sess, rate_limits=zero_limits)
+    zero_limits = RateLimits(
+        five_hour=sess.rate_limits.five_hour,
+        seven_day=RateBucket(used_percentage=0, resets_at=0),
+    )
+    sess = SessionInfo(**{**sess.__dict__, 'rate_limits': zero_limits})
 
     view = SessionView(sess, Config())
     spec = layout.build_wide(view, _tick(), 160, _r)

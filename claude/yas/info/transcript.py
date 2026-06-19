@@ -3,21 +3,50 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from yas.constants import CACHE_TTL_1H_SECONDS, CACHE_TTL_SECONDS
 
 
-@dataclass
 class TranscriptUsage:
-    input_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    output_tokens: int = 0
-    cache_anchor_epoch: float = 0.0
-    cache_ttl: int = 0
+    __slots__ = (
+        'input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens',
+        'output_tokens', 'cache_anchor_epoch', 'cache_ttl',
+    )
+
+    def __init__(
+        self,
+        input_tokens:                int   = 0,
+        cache_creation_input_tokens: int   = 0,
+        cache_read_input_tokens:     int   = 0,
+        output_tokens:               int   = 0,
+        cache_anchor_epoch:          float = 0.0,
+        cache_ttl:                   int   = 0,
+    ) -> None:
+        self.input_tokens                = input_tokens
+        self.cache_creation_input_tokens = cache_creation_input_tokens
+        self.cache_read_input_tokens     = cache_read_input_tokens
+        self.output_tokens               = output_tokens
+        self.cache_anchor_epoch          = cache_anchor_epoch
+        self.cache_ttl                   = cache_ttl
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TranscriptUsage):
+            return NotImplemented
+        return (self.input_tokens, self.cache_creation_input_tokens, self.cache_read_input_tokens,
+                self.output_tokens, self.cache_anchor_epoch, self.cache_ttl) == \
+               (other.input_tokens, other.cache_creation_input_tokens, other.cache_read_input_tokens,
+                other.output_tokens, other.cache_anchor_epoch, other.cache_ttl)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return (f'TranscriptUsage(input_tokens={self.input_tokens}, '
+                f'cache_creation_input_tokens={self.cache_creation_input_tokens}, '
+                f'cache_read_input_tokens={self.cache_read_input_tokens}, '
+                f'output_tokens={self.output_tokens}, '
+                f'cache_anchor_epoch={self.cache_anchor_epoch}, cache_ttl={self.cache_ttl})')
 
     @classmethod
     def from_transcript(cls, transcript_path: str) -> TranscriptUsage:
