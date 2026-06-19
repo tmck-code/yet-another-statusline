@@ -68,6 +68,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
 | `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | — | `[appearance.glyphs].mode` | `nerdfont` |
 | `single_width` | `YAS_GLYPH_SINGLE_WIDTH` (also `--glyph-single-width` CLI) | — | `[appearance.glyphs].single_width` | `false` |
+| `show_render_time` | `YAS_SHOW_RENDER_TIME` | — | `[layout].show_render_time` | `false` |
 
 - Valid `theme` values (14 built-in themes):
   - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
@@ -78,6 +79,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 - Valid `glyph_mode` values: `nerdfont` (default; full fidelity, needs a Nerd Font), `ascii` (every non-ASCII glyph → width-1 ASCII; maximum compatibility), `unicode` (only Nerd Font PUA icons → non-PUA Unicode; keeps box/block/arrow glyphs), `github` (GitHub-paste-safe: folds every glyph a browser renders double-wide — the box-drawing frame, block/sparkline ramp, and EAW-ambiguous punctuation/icons — to a width-1, EAW-narrow/ASCII stand-in, so a render stays column-aligned when pasted into a GitHub markdown code block). All modes preserve column geometry. An unknown value falls back to `nerdfont`.
 - `single_width` is an orthogonal boolean that folds double-width dynamic content (wide emoji, CJK in branch names/paths) to width-1; it may be combined with any `glyph_mode`. The statusline's own glyphs are already width-1, so column geometry is preserved.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
+- `show_render_time`, when `true`, annotates the bottom-right border with the previous run's wall-clock render time (e.g. `…47.2ms──╯`). Off by default; each run shows the prior run's timing, so it is blank on a session's first render.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
 

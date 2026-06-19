@@ -65,6 +65,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.glyph_mode == 'nerdfont'
     assert cfg.single_width is False
     assert cfg.show_day_stats is True
+    assert cfg.show_render_time is False
     assert cfg.justify is False
     assert cfg.labels is False
     assert cfg.errors == ()
@@ -184,6 +185,42 @@ def test_env_full_width_zero_overrides_toml_true(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nfull_width = true\n')
     cfg = config.Config.load(env={'YAS_FULL_WIDTH': '0'}, config_dir=tmp_path)
     assert cfg.full_width is False
+
+
+# show_render_time (bottom-right render-time annotation; off by default)
+
+@requires_tomllib
+def test_toml_show_render_time_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_render_time = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_render_time is True
+
+
+@requires_tomllib
+def test_toml_show_render_time_must_be_real_bool(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_render_time = "yes"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_render_time is False
+    assert 'show_render_time' in cfg.errors
+
+
+def test_env_show_render_time_truthy_values(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'TRUE'):
+        cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': val}, config_dir=tmp_path)
+        assert cfg.show_render_time is True, f'expected True for YAS_SHOW_RENDER_TIME={val!r}'
+
+
+def test_env_show_render_time_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'FALSE'):
+        cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': val}, config_dir=tmp_path)
+        assert cfg.show_render_time is False, f'expected False for YAS_SHOW_RENDER_TIME={val!r}'
+
+
+@requires_tomllib
+def test_env_show_render_time_zero_overrides_toml_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_render_time = true\n')
+    cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': '0'}, config_dir=tmp_path)
+    assert cfg.show_render_time is False
 
 
 # show_day_stats (seventh knob)

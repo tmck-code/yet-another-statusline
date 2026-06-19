@@ -292,7 +292,8 @@ class Config:
     __slots__ = (
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
         'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
-        'show_day_stats', 'soft_limit_models', 'errors', 'debug_lines',
+        'show_day_stats', 'show_render_time', 'soft_limit_models', 'errors',
+        'debug_lines',
     )
 
     max_width:         int
@@ -306,6 +307,7 @@ class Config:
     glyph_mode:        str
     single_width:      bool
     show_day_stats:    bool
+    show_render_time:  bool
     soft_limit_models: tuple[tuple[str, int], ...]
     errors:            tuple[str, ...]
     debug_lines:       tuple[str, ...]
@@ -323,6 +325,7 @@ class Config:
         glyph_mode:        str = 'nerdfont',
         single_width:      bool = False,
         show_day_stats:    bool = DEFAULT_SHOW_DAY_STATS,
+        show_render_time:  bool = False,
         soft_limit_models: tuple[tuple[str, int], ...] = (),
         errors:            tuple[str, ...] = (),
         debug_lines:       tuple[str, ...] = (),
@@ -339,6 +342,7 @@ class Config:
         s(self, 'glyph_mode', glyph_mode)
         s(self, 'single_width', single_width)
         s(self, 'show_day_stats', show_day_stats)
+        s(self, 'show_render_time', show_render_time)
         s(self, 'soft_limit_models', soft_limit_models)
         s(self, 'errors', errors)
         s(self, 'debug_lines', debug_lines)
@@ -354,7 +358,8 @@ class Config:
                 f'justify={self.justify}, labels={self.labels}, soft_limit={self.soft_limit}, '
                 f'token_window={self.token_window}, theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
                 f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
-                f'show_day_stats={self.show_day_stats}, soft_limit_models={self.soft_limit_models!r}, '
+                f'show_day_stats={self.show_day_stats}, show_render_time={self.show_render_time}, '
+                f'soft_limit_models={self.soft_limit_models!r}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
@@ -439,6 +444,10 @@ class Config:
             'show_day_stats',
             _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
             _parse_show_day_stats, DEFAULT_SHOW_DAY_STATS, errors, debug)
+        show_render_time = _resolve(
+            'show_render_time',
+            _env_sources(env, 'YAS_SHOW_RENDER_TIME') + toml_src(layout, 'show_render_time'),
+            _parse_bool, False, errors, debug)
         justify = _resolve(
             'justify',
             _env_sources(env, 'YAS_JUSTIFY') + toml_src(layout, 'justify'),
@@ -462,6 +471,7 @@ class Config:
             glyph_mode=glyph_mode,
             single_width=single_width,
             show_day_stats=show_day_stats,
+            show_render_time=show_render_time,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

@@ -262,3 +262,66 @@ class TokenRate:
         ti0, to0 = samples[0][1], samples[0][2]
         ti1, to1 = samples[-1][1], samples[-1][2]
         return ti1 > ti0, to1 > to0
+
+
+# ---------------------------------------------------------------------------
+# RenderTiming
+# ---------------------------------------------------------------------------
+
+class RenderTiming:
+    """Per-session persistence of the last render's wall-clock duration.
+
+    A render can't know its own total time before it has finished drawing, so
+    the bottom-border annotation shows the *previous* run's duration: each run
+    reads the last value (to display) at the start and writes its own (for the
+    next run) at the end. Keyed by session_id in one log file — like
+    TokenRate — so panes don't show each other's timings; lines idle longer
+    than KEEP are pruned so the file can't grow without bound.
+    """
+
+    KEEP = 300.0
+
+    @classmethod
+    def read(cls, session_id: str) -> float | None:
+        if not session_id:
+            return None
+        log = CLAUDE_DIR / 'statusline-render.log'
+        if not log.exists():
+            return None
+        try:
+            for ln in log.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) >= 3 and parts[1] == session_id:
+                    return float(parts[2])
+        except (OSError, ValueError):
+            return None
+        return None
+
+    @classmethod
+    def write(cls, session_id: str, ms: float) -> None:
+        if not session_id:
+            return
+        log = CLAUDE_DIR / 'statusline-render.log'
+        now = time.time()
+        rows: list[str] = []
+        if log.exists():
+            try:
+                for ln in log.read_text().splitlines():
+                    parts = ln.split()
+                    if len(parts) < 3 or parts[1] == session_id:
+                        continue
+                    try:
+                        ts = float(parts[0])
+                    except ValueError:
+                        continue
+                    if now - ts > cls.KEEP:
+                        continue
+                    rows.append(ln)
+            except OSError:
+                pass
+        rows.append(f'{now:.3f} {session_id} {ms:.1f}')
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text('\n'.join(rows) + '\n')
+        except OSError:
+            pass
