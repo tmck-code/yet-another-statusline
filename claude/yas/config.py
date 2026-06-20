@@ -19,6 +19,9 @@ from typing import TYPE_CHECKING, TypeVar
 
 from yas.constants import (
     CLAUDE_DIR,
+    DEFAULT_CONTEXT_LABELS,
+    DEFAULT_CONTEXT_STATE,
+    DEFAULT_CONTEXT_THRESHOLDS,
     DEFAULT_JUSTIFY,
     DEFAULT_LABELS,
     DEFAULT_MAX_WIDTH,
@@ -288,47 +291,95 @@ def _parse_models(raw: object, errors: list[str], debug: list[str]) -> list[tupl
     return out
 
 
+def _as_seq(raw: object) -> list[object]:
+    """Normalise a list knob to a list of items.
+
+    A TOML array arrives as a ``list``; an env/CLI value arrives as a
+    comma-separated ``str``. Anything else is rejected by the caller.
+    """
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(',')]
+    raise ValueError('expected a list or comma-separated string')
+
+
+def _parse_context_labels(raw: object, origin: str) -> tuple[str, ...]:
+    """Exactly 5 non-empty label words (Smart..Dumb by default)."""
+    items = [str(s).strip() for s in _as_seq(raw)]
+    if len(items) != 5 or not all(items):
+        raise ValueError('expected exactly 5 non-empty labels')
+    return tuple(items)
+
+
+def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
+    """Exactly 4 strictly-ascending ints in 1..99 (band starts for levels 2-5).
+
+    Mirrors Dumbometer's DUMBOMETER_THRESHOLDS validation.
+    """
+    seq = _as_seq(raw)
+    if any(isinstance(x, bool) for x in seq):
+        raise ValueError('expected integers')
+    try:
+        nums = [int(str(x).strip()) for x in seq]
+    except (TypeError, ValueError):
+        raise ValueError('expected integers')
+    if (
+        len(nums) != 4
+        or not all(1 <= n <= 99 for n in nums)
+        or not (nums[0] < nums[1] < nums[2] < nums[3])
+    ):
+        raise ValueError('expected 4 strictly ascending ints in 1..99')
+    return tuple(nums)
+
+
 class Config:
     __slots__ = (
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
         'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
-        'show_day_stats', 'show_render_time', 'soft_limit_models', 'errors',
-        'debug_lines',
+        'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
+        'show_render_time', 'soft_limit_models', 'errors', 'debug_lines',
     )
 
-    max_width:         int
-    full_width:        bool
-    justify:           bool
-    labels:            bool
-    soft_limit:        int
-    token_window:      float
-    theme:             str
-    bg_shift:          str
-    glyph_mode:        str
-    single_width:      bool
-    show_day_stats:    bool
-    show_render_time:  bool
-    soft_limit_models: tuple[tuple[str, int], ...]
-    errors:            tuple[str, ...]
-    debug_lines:       tuple[str, ...]
+    max_width:          int
+    full_width:         bool
+    justify:            bool
+    labels:             bool
+    soft_limit:         int
+    token_window:       float
+    theme:              str
+    bg_shift:           str
+    glyph_mode:         str
+    single_width:       bool
+    show_day_stats:     bool
+    context_state:      bool
+    context_labels:     tuple[str, ...]
+    context_thresholds: tuple[int, ...]
+    show_render_time:   bool
+    soft_limit_models:  tuple[tuple[str, int], ...]
+    errors:             tuple[str, ...]
+    debug_lines:        tuple[str, ...]
 
     def __init__(
         self,
-        max_width:         int = DEFAULT_MAX_WIDTH,
-        full_width:        bool = False,
-        justify:           bool = DEFAULT_JUSTIFY,
-        labels:            bool = DEFAULT_LABELS,
-        soft_limit:        int = DEFAULT_SOFT_LIMIT,
-        token_window:      float = DEFAULT_TOKEN_WINDOW,
-        theme:             str = DEFAULT_THEME,
-        bg_shift:          str = 'warm',
-        glyph_mode:        str = 'nerdfont',
-        single_width:      bool = False,
-        show_day_stats:    bool = DEFAULT_SHOW_DAY_STATS,
-        show_render_time:  bool = False,
-        soft_limit_models: tuple[tuple[str, int], ...] = (),
-        errors:            tuple[str, ...] = (),
-        debug_lines:       tuple[str, ...] = (),
+        max_width:          int = DEFAULT_MAX_WIDTH,
+        full_width:         bool = False,
+        justify:            bool = DEFAULT_JUSTIFY,
+        labels:             bool = DEFAULT_LABELS,
+        soft_limit:         int = DEFAULT_SOFT_LIMIT,
+        token_window:       float = DEFAULT_TOKEN_WINDOW,
+        theme:              str = DEFAULT_THEME,
+        bg_shift:           str = 'warm',
+        glyph_mode:         str = 'nerdfont',
+        single_width:       bool = False,
+        show_day_stats:     bool = DEFAULT_SHOW_DAY_STATS,
+        context_state:      bool = DEFAULT_CONTEXT_STATE,
+        context_labels:     tuple[str, ...] = DEFAULT_CONTEXT_LABELS,
+        context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS,
+        show_render_time:   bool = False,
+        soft_limit_models:  tuple[tuple[str, int], ...] = (),
+        errors:             tuple[str, ...] = (),
+        debug_lines:        tuple[str, ...] = (),
     ) -> None:
         s = object.__setattr__
         s(self, 'max_width', max_width)
@@ -342,6 +393,9 @@ class Config:
         s(self, 'glyph_mode', glyph_mode)
         s(self, 'single_width', single_width)
         s(self, 'show_day_stats', show_day_stats)
+        s(self, 'context_state', context_state)
+        s(self, 'context_labels', context_labels)
+        s(self, 'context_thresholds', context_thresholds)
         s(self, 'show_render_time', show_render_time)
         s(self, 'soft_limit_models', soft_limit_models)
         s(self, 'errors', errors)
@@ -358,7 +412,9 @@ class Config:
                 f'justify={self.justify}, labels={self.labels}, soft_limit={self.soft_limit}, '
                 f'token_window={self.token_window}, theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
                 f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
-                f'show_day_stats={self.show_day_stats}, show_render_time={self.show_render_time}, '
+                f'show_day_stats={self.show_day_stats}, context_state={self.context_state}, '
+                f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
+                f'show_render_time={self.show_render_time}, '
                 f'soft_limit_models={self.soft_limit_models!r}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
@@ -390,6 +446,7 @@ class Config:
             return v if isinstance(v, dict) else {}
 
         layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
+        context = _table('context')
         glyphs = _table_in(appearance, 'glyphs')
         cli = _parse_argv(argv) if argv is not None else {}
 
@@ -456,6 +513,18 @@ class Config:
             'labels',
             _env_sources(env, 'YAS_LABELS') + toml_src(layout, 'labels'),
             _parse_bool, DEFAULT_LABELS, errors, debug)
+        context_state = _resolve(
+            'context_state',
+            _env_sources(env, 'YAS_CONTEXT_STATE') + toml_src(context, 'state'),
+            _parse_bool, DEFAULT_CONTEXT_STATE, errors, debug)
+        context_labels = _resolve(
+            'context_labels',
+            _env_sources(env, 'YAS_CONTEXT_LABELS') + toml_src(context, 'labels'),
+            _parse_context_labels, DEFAULT_CONTEXT_LABELS, errors, debug)
+        context_thresholds = _resolve(
+            'context_thresholds',
+            _env_sources(env, 'YAS_CONTEXT_THRESHOLDS') + toml_src(context, 'thresholds'),
+            _parse_context_thresholds, DEFAULT_CONTEXT_THRESHOLDS, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
 
@@ -471,6 +540,9 @@ class Config:
             glyph_mode=glyph_mode,
             single_width=single_width,
             show_day_stats=show_day_stats,
+            context_state=context_state,
+            context_labels=context_labels,
+            context_thresholds=context_thresholds,
             show_render_time=show_render_time,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),

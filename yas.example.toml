@@ -58,3 +58,13 @@
 # boolean and combines with any mode above. (env: YAS_GLYPH_SINGLE_WIDTH,
 # CLI: --glyph-single-width)
 # single_width = false
+
+# [context]
+# Context state word — a morphing Smart -> Coasting -> Foggy -> Cooked -> Dumb
+# label on the context line, naming how full the window is. Off by default.
+# Ported from Dumbometer (https://github.com/MaximoCorrea1/dumbometer, MIT); see
+# NOTICE. The word is driven by the soft-limit fill ratio, so it agrees with the
+# context bar. (env: YAS_CONTEXT_STATE / YAS_CONTEXT_LABELS / YAS_CONTEXT_THRESHOLDS)
+# state = false
+# labels = ["Smart", "Coasting", "Foggy", "Cooked", "Dumb"]  # exactly 5 non-empty words
+# thresholds = [25, 50, 70, 90]                              # exactly 4 ascending ints, 1..99
