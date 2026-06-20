@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -295,19 +294,20 @@ def test_unknown_keys_and_sections_ignored(tmp_path: Path) -> None:
     assert cfg.errors == ()
 
 
-# 4.5 Python-3.10 degrade (tomllib is None)
+# 4.5 TOML parses via whatever parser the interpreter provides
 
-def test_python310_tomllib_none_skips_toml(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
-    # Simulate Python 3.10 (no stdlib tomllib): setting sys.modules['tomllib']
-    # to None makes the deferred `import tomllib` in _load_toml raise ImportError.
-    monkeypatch.setitem(sys.modules, 'tomllib', None)
+def test_toml_loads_via_available_parser(tmp_path: Path) -> None:
+    # _load_toml parses a valid yas.toml using whatever parser the interpreter
+    # provides (stdlib tomllib on 3.11+, the tomli backport on 3.10). A parser
+    # is guaranteed on every supported interpreter — pyproject declares
+    # tomli>=2.0 for python_version < '3.11' — so this test runs unguarded and
+    # exercises the real parser selection in config._load_toml on whatever
+    # interpreter runs it (3.10 -> tomli, 3.11+ -> stdlib).
     (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
     cfg = config.Config.load(env={'YAS_SOFT_LIMIT': '1000000'}, config_dir=tmp_path)
-    assert cfg.max_width == 140              # toml skipped → default
+    assert cfg.max_width == 200              # toml honored via the available parser
     assert cfg.soft_limit == 1_000_000       # env still applies
-    assert cfg.errors == ()                  # silent skip, no parse error
+    assert cfg.errors == ()                  # parsed cleanly, no error
 
 
 # 4.6 soft_limit env cases (folds PR #32)

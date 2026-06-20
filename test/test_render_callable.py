@@ -140,9 +140,14 @@ def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     # and pin YAS_MAX_WIDTH to DEFAULT_MAX_WIDTH so the cap matches exactly.
     env = {k: v for k, v in os.environ.items()
            if k not in ('TMUX_PANE', 'TMUX', 'YAS_FULL_WIDTH')}
+    # rainbow_step() is wall-clock-based by default, so the in-process render and
+    # the subprocess (which carries interpreter-startup latency) can straddle a
+    # 1-second boundary and pick adjacent rainbow colours. Pin the step in both
+    # paths so the model-row glyphs render identically.
     env.update({
         'COLUMNS':           str(DEFAULT_MAX_WIDTH + 6),
         'YAS_MAX_WIDTH':     str(DEFAULT_MAX_WIDTH),
+        'YAS_RAINBOW_STEP':  '0',
         'HOME':              str(tmp_home),
         'CLAUDE_CONFIG_DIR': str(claude_dir),
     })
@@ -156,6 +161,7 @@ def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     )
     result_cli = proc.stdout
 
+    monkeypatch.setenv('YAS_RAINBOW_STEP', '0')
     result_api = app.render(info, DEFAULT_MAX_WIDTH)
 
     assert result_api == result_cli.rstrip('\n')

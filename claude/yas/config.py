@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
@@ -227,8 +228,9 @@ def _write_toml_cache(cache_path: Path, mtime_ns: int, size: int, data: dict[str
 def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
     """Read config_dir/yas.toml.
 
-    Returns (data, error). Missing file or no tomllib (Python 3.10) → ({}, None),
-    i.e. silently skipped. A parse failure → ({}, "yas.toml: parse error").
+    Returns (data, error). Missing file → ({}, None), i.e. silently skipped.
+    On Python 3.10 (no stdlib tomllib) the tomli backport is used instead, so
+    TOML is still parsed. A parse failure → ({}, "yas.toml: parse error").
 
     A binary (marshal) cache of the parsed dict lives at yas.toml.cache next to
     the source. On a warm, unchanged file the dict is returned straight from the
@@ -254,10 +256,10 @@ def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
         return {}, None
     # Deferred: tomllib (parser + regex tables) is imported only on a cache miss
     # when a yas.toml actually exists — warm hits and the no-config path skip it.
-    try:
+    if sys.version_info >= (3, 11):
         import tomllib
-    except ImportError:  # Python 3.10 ships no stdlib tomllib; yas.toml is skipped.
-        return {}, None
+    else:  # Python 3.10 — use the tomli backport
+        import tomli as tomllib
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, ValueError):
