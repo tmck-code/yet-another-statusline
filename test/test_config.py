@@ -295,19 +295,20 @@ def test_unknown_keys_and_sections_ignored(tmp_path: Path) -> None:
     assert cfg.errors == ()
 
 
-# 4.5 Python-3.10 degrade (tomllib is None)
+# 4.5 Python-3.10 fallback (no stdlib tomllib → tomli backport)
 
-def test_python310_tomllib_none_skips_toml(
+def test_python310_tomllib_falls_back_to_tomli(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     # Simulate Python 3.10 (no stdlib tomllib): setting sys.modules['tomllib']
-    # to None makes the deferred `import tomllib` in _load_toml raise ImportError.
+    # to None makes the deferred `import tomllib` in _load_toml raise ImportError,
+    # which now falls back to `import tomli as tomllib` and parses TOML normally.
     monkeypatch.setitem(sys.modules, 'tomllib', None)
     (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
     cfg = config.Config.load(env={'YAS_SOFT_LIMIT': '1000000'}, config_dir=tmp_path)
-    assert cfg.max_width == 140              # toml skipped → default
+    assert cfg.max_width == 200              # toml honored via the tomli backport
     assert cfg.soft_limit == 1_000_000       # env still applies
-    assert cfg.errors == ()                  # silent skip, no parse error
+    assert cfg.errors == ()                  # parsed cleanly, no error
 
 
 # 4.6 soft_limit env cases (folds PR #32)
