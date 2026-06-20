@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from yas.constants import (
@@ -104,16 +103,38 @@ def _parse_script_phases(scripts_dir: Path, run_id: str) -> list[str]:
         return []
 
 
-@dataclass
 class RunningWorkflow:
     """One Workflow-tool run and the agents it spawned."""
 
-    run_id: str
-    name:   str
-    phase:  str
-    agents: list[RunningSubagent] = field(default_factory=list)
-    status: str = ''  # raw run-JSON status ('' when no JSON); liveness hint only
-    phases: list[str] = field(default_factory=list)
+    __slots__ = ('run_id', 'name', 'phase', 'agents', 'status', 'phases')
+
+    def __init__(
+        self,
+        run_id: str,
+        name:   str,
+        phase:  str,
+        agents: list[RunningSubagent] | None = None,
+        status: str = '',  # raw run-JSON status ('' when no JSON); liveness hint only
+        phases: list[str] | None = None,
+    ) -> None:
+        self.run_id = run_id
+        self.name   = name
+        self.phase  = phase
+        self.agents = agents if agents is not None else []
+        self.status = status
+        self.phases = phases if phases is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningWorkflow):
+            return NotImplemented
+        return (self.run_id, self.name, self.phase, self.agents, self.status, self.phases) == \
+               (other.run_id, other.name, other.phase, other.agents, other.status, other.phases)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return (f'RunningWorkflow(run_id={self.run_id!r}, name={self.name!r}, phase={self.phase!r}, '
+                f'agents={self.agents!r}, status={self.status!r}, phases={self.phases!r})')
 
     @property
     def agent_count(self) -> int:
@@ -139,9 +160,21 @@ class RunningWorkflow:
         return self.status.strip().lower() in _NONTERMINAL_STATUSES
 
 
-@dataclass
 class RunningWorkflows:
-    workflows: list[RunningWorkflow] = field(default_factory=list)
+    __slots__ = ('workflows',)
+
+    def __init__(self, workflows: list[RunningWorkflow] | None = None) -> None:
+        self.workflows = workflows if workflows is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningWorkflows):
+            return NotImplemented
+        return self.workflows == other.workflows
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'RunningWorkflows(workflows={self.workflows!r})'
 
     @classmethod
     def from_session(cls, session_id: str, project_dir: str) -> RunningWorkflows:

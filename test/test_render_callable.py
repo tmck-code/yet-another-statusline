@@ -76,6 +76,49 @@ def test_yas_full_width_fills_terminal(tmp_path, monkeypatch, capsys):
     assert default_w  == max_width,   f'default: expected {max_width}, got {default_w}'
 
 
+def _run_main(info, tmp_path, monkeypatch, env_extra):
+    import io
+    monkeypatch.setattr(app, 'terminal_width', lambda: 200)
+    monkeypatch.setattr(app, 'CLAUDE_DIR', tmp_path / '.claude')
+    for k in ('YAS_MAX_WIDTH', 'YAS_FULL_WIDTH', 'YAS_SHOW_RENDER_TIME'):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env_extra.items():
+        monkeypatch.setenv(k, v)
+    buf = io.StringIO()
+    monkeypatch.setattr(app.sys, 'stdout', buf)
+    monkeypatch.setattr(app.sys, 'stdin', io.StringIO(json.dumps(info)))
+    app.main()
+    return buf.getvalue()
+
+
+def test_show_render_time_off_emits_no_annotation(tmp_path, monkeypatch):
+    # Even with a populated render cache, the flag being off (default) means the
+    # bottom border carries no timing and the cache is never rewritten.
+    from yas.tokens import RenderTiming
+    monkeypatch.setattr(RenderTiming, 'read', staticmethod(lambda sid: 47.2))
+    writes: list = []
+    monkeypatch.setattr(RenderTiming, 'write', staticmethod(lambda sid, ms: writes.append((sid, ms))))
+
+    from helper import strip_ansi
+    info = _load_example()
+    out  = _run_main(info, tmp_path, monkeypatch, {})
+    assert 'ms' not in strip_ansi(out.splitlines()[-1])
+    assert writes == []  # cache untouched when the feature is off
+
+
+def test_show_render_time_on_emits_annotation(tmp_path, monkeypatch):
+    from yas.tokens import RenderTiming
+    monkeypatch.setattr(RenderTiming, 'read', staticmethod(lambda sid: 47.2))
+    writes: list = []
+    monkeypatch.setattr(RenderTiming, 'write', staticmethod(lambda sid, ms: writes.append((sid, ms))))
+
+    from helper import strip_ansi
+    info = _load_example()
+    out  = _run_main(info, tmp_path, monkeypatch, {'YAS_SHOW_RENDER_TIME': '1'})
+    assert '47.2ms' in strip_ansi(out.splitlines()[-1])
+    assert len(writes) == 1  # this run records its own duration for the next
+
+
 def test_render_matches_cli_subprocess(tmp_home, monkeypatch):
     import os
     from yas.constants import DEFAULT_MAX_WIDTH

@@ -13,12 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-try:
-    import tomllib
-except ImportError:  # Python 3.10 ships no stdlib tomllib; yas.toml is skipped.
-    tomllib = None  # type: ignore[assignment]
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -177,22 +172,97 @@ def _parse_argv(argv: Sequence[str]) -> dict[str, str]:
     return out
 
 
+# Bump to invalidate every on-disk yas.toml.cache (e.g. if the cached shape ever
+# changes). A stamp mismatch — including this version — silently reparses.
+CACHE_VERSION = 1
+
+
+def _read_toml_cache(cache_path: Path, mtime_ns: int, size: int) -> dict[str, object] | None:
+    """Return the cached parsed dict iff fresh, else None.
+
+    The cache is keyed on (CACHE_VERSION, mtime_ns, size) of yas.toml. ANY
+    mismatch — stale, a backwards mtime jump (restore/checkout), or a version
+    bump — is treated as a miss. A corrupt/unreadable cache or a marshal error
+    is swallowed and also reported as a miss; the cache is a pure optimization,
+    so correctness never depends on it. A hit lets the caller skip importing
+    tomllib and re-reading/parsing yas.toml entirely.
+    """
+    import marshal  # builtin: zero marginal import cost
+    try:
+        blob = cache_path.read_bytes()
+        cached = marshal.loads(blob)
+    except (OSError, ValueError, EOFError, TypeError):
+        return None
+    if (isinstance(cached, tuple) and len(cached) == 4
+            and cached[0] == CACHE_VERSION
+            and cached[1] == mtime_ns
+            and cached[2] == size
+            and isinstance(cached[3], dict)):
+        return cached[3]
+    return None
+
+
+def _write_toml_cache(cache_path: Path, mtime_ns: int, size: int, data: dict[str, object]) -> None:
+    """Atomically write the parsed dict to the cache, swallowing any failure.
+
+    Writes to a temp file in the same dir then os.replace()s it into place so a
+    concurrent reader never sees a torn file. A read-only dir, a marshal error
+    (shouldn't happen — TOML primitives are all marshal-safe), or any OSError is
+    swallowed: a failed write just means the next run reparses.
+    """
+    import marshal
+    tmp = cache_path.with_name(f'{cache_path.name}.{os.getpid()}.tmp')
+    try:
+        blob = marshal.dumps((CACHE_VERSION, mtime_ns, size, data))
+        with open(tmp, 'wb') as fh:
+            fh.write(blob)
+        os.replace(tmp, cache_path)
+    except (OSError, ValueError, TypeError):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
     """Read config_dir/yas.toml.
 
     Returns (data, error). Missing file or no tomllib (Python 3.10) → ({}, None),
     i.e. silently skipped. A parse failure → ({}, "yas.toml: parse error").
+
+    A binary (marshal) cache of the parsed dict lives at yas.toml.cache next to
+    the source. On a warm, unchanged file the dict is returned straight from the
+    cache, skipping BOTH `import tomllib` and the read+parse. Any cache miss/
+    staleness/corruption falls through to the live parse below, which then
+    refreshes the cache.
     """
-    if tomllib is None:
-        return {}, None
+    toml_path = config_dir / 'yas.toml'
+    cache_path = config_dir / 'yas.toml.cache'
     try:
-        text = (config_dir / 'yas.toml').read_text()
+        st = toml_path.stat()
     except OSError:
         return {}, None  # missing file is not an error
+    mtime_ns, size = st.st_mtime_ns, st.st_size
+
+    cached = _read_toml_cache(cache_path, mtime_ns, size)
+    if cached is not None:
+        return cached, None  # warm hit: tomllib never imported
+
+    try:
+        text = toml_path.read_text()
+    except OSError:
+        return {}, None
+    # Deferred: tomllib (parser + regex tables) is imported only on a cache miss
+    # when a yas.toml actually exists — warm hits and the no-config path skip it.
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10 ships no stdlib tomllib; yas.toml is skipped.
+        return {}, None
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, ValueError):
-        return {}, 'yas.toml: parse error'
+        return {}, 'yas.toml: parse error'  # no cache written for a parse error
+    _write_toml_cache(cache_path, mtime_ns, size, data)
     return data, None
 
 
@@ -263,25 +333,90 @@ def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
     return tuple(nums)
 
 
-@dataclass(frozen=True)
 class Config:
-    max_width: int = DEFAULT_MAX_WIDTH
-    full_width: bool = False
-    justify: bool = DEFAULT_JUSTIFY
-    labels: bool = DEFAULT_LABELS
-    soft_limit: int = DEFAULT_SOFT_LIMIT
-    token_window: float = DEFAULT_TOKEN_WINDOW
-    theme: str = DEFAULT_THEME
-    bg_shift: str = 'warm'
-    glyph_mode: str = 'nerdfont'
-    single_width: bool = False
-    show_day_stats: bool = DEFAULT_SHOW_DAY_STATS
-    context_state: bool = DEFAULT_CONTEXT_STATE
-    context_labels: tuple[str, ...] = DEFAULT_CONTEXT_LABELS
-    context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS
-    soft_limit_models: tuple[tuple[str, int], ...] = ()
-    errors: tuple[str, ...] = ()
-    debug_lines: tuple[str, ...] = ()
+    __slots__ = (
+        'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
+        'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
+        'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
+        'show_render_time', 'soft_limit_models', 'errors', 'debug_lines',
+    )
+
+    max_width:          int
+    full_width:         bool
+    justify:            bool
+    labels:             bool
+    soft_limit:         int
+    token_window:       float
+    theme:              str
+    bg_shift:           str
+    glyph_mode:         str
+    single_width:       bool
+    show_day_stats:     bool
+    context_state:      bool
+    context_labels:     tuple[str, ...]
+    context_thresholds: tuple[int, ...]
+    show_render_time:   bool
+    soft_limit_models:  tuple[tuple[str, int], ...]
+    errors:             tuple[str, ...]
+    debug_lines:        tuple[str, ...]
+
+    def __init__(
+        self,
+        max_width:          int = DEFAULT_MAX_WIDTH,
+        full_width:         bool = False,
+        justify:            bool = DEFAULT_JUSTIFY,
+        labels:             bool = DEFAULT_LABELS,
+        soft_limit:         int = DEFAULT_SOFT_LIMIT,
+        token_window:       float = DEFAULT_TOKEN_WINDOW,
+        theme:              str = DEFAULT_THEME,
+        bg_shift:           str = 'warm',
+        glyph_mode:         str = 'nerdfont',
+        single_width:       bool = False,
+        show_day_stats:     bool = DEFAULT_SHOW_DAY_STATS,
+        context_state:      bool = DEFAULT_CONTEXT_STATE,
+        context_labels:     tuple[str, ...] = DEFAULT_CONTEXT_LABELS,
+        context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS,
+        show_render_time:   bool = False,
+        soft_limit_models:  tuple[tuple[str, int], ...] = (),
+        errors:             tuple[str, ...] = (),
+        debug_lines:        tuple[str, ...] = (),
+    ) -> None:
+        s = object.__setattr__
+        s(self, 'max_width', max_width)
+        s(self, 'full_width', full_width)
+        s(self, 'justify', justify)
+        s(self, 'labels', labels)
+        s(self, 'soft_limit', soft_limit)
+        s(self, 'token_window', token_window)
+        s(self, 'theme', theme)
+        s(self, 'bg_shift', bg_shift)
+        s(self, 'glyph_mode', glyph_mode)
+        s(self, 'single_width', single_width)
+        s(self, 'show_day_stats', show_day_stats)
+        s(self, 'context_state', context_state)
+        s(self, 'context_labels', context_labels)
+        s(self, 'context_thresholds', context_thresholds)
+        s(self, 'show_render_time', show_render_time)
+        s(self, 'soft_limit_models', soft_limit_models)
+        s(self, 'errors', errors)
+        s(self, 'debug_lines', debug_lines)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f'cannot assign to field {name!r}')
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f'cannot delete field {name!r}')
+
+    def __repr__(self) -> str:
+        return (f'Config(max_width={self.max_width}, full_width={self.full_width}, '
+                f'justify={self.justify}, labels={self.labels}, soft_limit={self.soft_limit}, '
+                f'token_window={self.token_window}, theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
+                f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
+                f'show_day_stats={self.show_day_stats}, context_state={self.context_state}, '
+                f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
+                f'show_render_time={self.show_render_time}, '
+                f'soft_limit_models={self.soft_limit_models!r}, '
+                f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
     def load(
@@ -366,6 +501,10 @@ class Config:
             'show_day_stats',
             _env_sources(env, 'YAS_SHOW_DAY_STATS') + toml_src(tokens, 'show_day_stats'),
             _parse_show_day_stats, DEFAULT_SHOW_DAY_STATS, errors, debug)
+        show_render_time = _resolve(
+            'show_render_time',
+            _env_sources(env, 'YAS_SHOW_RENDER_TIME') + toml_src(layout, 'show_render_time'),
+            _parse_bool, False, errors, debug)
         justify = _resolve(
             'justify',
             _env_sources(env, 'YAS_JUSTIFY') + toml_src(layout, 'justify'),
@@ -404,6 +543,7 @@ class Config:
             context_state=context_state,
             context_labels=context_labels,
             context_thresholds=context_thresholds,
+            show_render_time=show_render_time,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 
 from yas.config import Config
 from yas.constants import (
@@ -55,27 +54,53 @@ def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
     return pos
 
 
-@dataclass
 class RowSpec:
-    kind: str  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
-    content: str = ''
-    bg_lead: str = ''
-    bg_trail: str = ''
-    pill_flush: bool = False
-    ups: tuple[int, ...] = ()
-    downs: tuple[int, ...] = ()
-    pill: Pill | None = None
-    pill_edge: str = 'bottom'
-    right_pill: str = ''
-    labels: list[tuple[str, int]] = field(default_factory=list)
+    __slots__ = (
+        'kind', 'content', 'bg_lead', 'bg_trail', 'pill_flush', 'ups', 'downs',
+        'pill', 'pill_edge', 'right_pill', 'labels',
+    )
+
+    def __init__(
+        self,
+        kind:       str,  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
+        content:    str = '',
+        bg_lead:    str = '',
+        bg_trail:   str = '',
+        pill_flush: bool = False,
+        ups:        tuple[int, ...] = (),
+        downs:      tuple[int, ...] = (),
+        pill:       Pill | None = None,
+        pill_edge:  str = 'bottom',
+        right_pill: str = '',
+        labels:     list[tuple[str, int]] | None = None,
+    ) -> None:
+        self.kind       = kind
+        self.content    = content
+        self.bg_lead    = bg_lead
+        self.bg_trail   = bg_trail
+        self.pill_flush = pill_flush
+        self.ups        = ups
+        self.downs      = downs
+        self.pill       = pill
+        self.pill_edge  = pill_edge
+        self.right_pill = right_pill
+        self.labels     = labels if labels is not None else []
 
 
-@dataclass
 class LayoutSpec:
-    width: int
-    fill: float
-    session_id: str
-    rows: list[RowSpec] = field(default_factory=list)
+    __slots__ = ('width', 'fill', 'session_id', 'rows')
+
+    def __init__(
+        self,
+        width:      int,
+        fill:       float,
+        session_id: str,
+        rows:       list[RowSpec] | None = None,
+    ) -> None:
+        self.width      = width
+        self.fill       = fill
+        self.session_id = session_id
+        self.rows       = rows if rows is not None else []
 
 
 def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) -> None:
@@ -906,13 +931,13 @@ def build_wide(
     return spec
 
 
-def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
+def render_layout(spec: LayoutSpec, r: Renderer, timing: str = '') -> list[str]:
     lines: list[str] = []
     for row in spec.rows:
         if row.kind == 'top_border':
             lines.append(r.border_top(spec.width, spec.session_id, downs=row.downs, fill=spec.fill, pill=row.pill, labels=tuple(row.labels)))
         elif row.kind == 'bottom_border':
-            lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill))
+            lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill, timing=timing))
         elif row.kind == 'separator':
             lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill, labels=tuple(row.labels)))
         elif row.kind == 'separator_seam':

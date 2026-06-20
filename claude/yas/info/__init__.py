@@ -8,7 +8,6 @@ fields never touch the filesystem.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 from functools import cached_property
 
 from yas.config import Config
@@ -75,11 +74,11 @@ def _fmt_elapsed(mtime: float | None, now: float) -> str:
 # SessionView
 # ---------------------------------------------------------------------------
 
-@dataclass
 class SessionView:
-    session: SessionInfo
-    cfg:     Config
-    now:     float = field(default_factory=time.time)
+    def __init__(self, session: SessionInfo, cfg: Config, now: float | None = None) -> None:
+        self.session = session
+        self.cfg     = cfg
+        self.now     = time.time() if now is None else now
 
     # ------------------------------------------------------------------
     # Leaf readers — each delegates to its existing classmethod

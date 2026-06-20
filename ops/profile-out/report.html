@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YAS Statusline — CPU Profiling Report</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --accent2:#bc8cff;
+    --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent)}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 22px 80px}
+
+  header h1{font-size:1.7rem;margin:0 0 4px;letter-spacing:-.4px}
+  header h1 .tag{color:var(--accent2)}
+  header .sub{color:var(--muted);font-size:.92rem;margin-bottom:6px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--muted);font-size:.8rem;font-family:var(--mono);margin-top:10px}
+  .meta b{color:var(--fg);font-weight:600}
+
+  .hero{margin:26px 0;padding:20px 22px;border:1px solid var(--border);border-left:3px solid var(--good);
+        background:linear-gradient(180deg,var(--panel),var(--panel2));border-radius:10px}
+  .hero .big{font-size:1.35rem;font-weight:700;margin:0 0 4px}
+  .hero p{margin:6px 0 0;color:var(--muted);max-width:74ch}
+  .hero .pill{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+              background:rgba(63,185,80,.15);color:var(--good);padding:3px 10px;border-radius:20px;margin-bottom:8px}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:22px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .stat .n{font-size:1.55rem;font-weight:700;font-family:var(--mono)}
+  .stat .n .was{color:var(--muted);font-size:.62em;text-decoration:line-through;font-weight:400;margin-right:6px}
+  .stat .l{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .stat.accent .n{color:var(--accent)} .stat.bad .n{color:var(--bad)} .stat.good .n{color:var(--good)}
+
+  .section{margin:34px 0}
+  .section h2{font-size:1.15rem;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  .section h2 .pct{font-family:var(--mono);font-size:.78rem;color:var(--muted);font-weight:400}
+  .section .lead{color:var(--muted);margin:0 0 16px;max-width:80ch}
+
+  .breakdown{display:flex;height:46px;border-radius:8px;overflow:hidden;border:1px solid var(--border);margin:8px 0 6px}
+  .breakdown .seg{display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:600;color:#0d1117;white-space:nowrap;overflow:hidden;transition:filter .15s}
+  .breakdown .seg:hover{filter:brightness(1.12)}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.8rem;color:var(--muted);margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:26px 0 0;flex-wrap:wrap}
+  .tab{appearance:none;background:none;border:0;color:var(--muted);font:inherit;font-size:.9rem;padding:10px 16px;cursor:pointer;
+       border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab:hover{color:var(--fg)}
+  .tab.active{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
+  .panel{display:none;padding-top:22px}
+  .panel.active{display:block;animation:fade .2s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  table{width:100%;border-collapse:collapse;font-size:.85rem;margin:6px 0 4px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.74rem;text-transform:uppercase;letter-spacing:.4px}
+  tbody tr:hover{background:var(--panel)}
+  td .mono,th .mono{color:var(--accent)}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .delta{color:var(--good);font-weight:700}
+  .barcell{position:relative;min-width:120px}
+  .barcell .b{position:absolute;left:0;top:50%;transform:translateY(-50%);height:60%;background:var(--accent);opacity:.18;border-radius:3px;z-index:0}
+  .barcell span{position:relative;z-index:1;font-family:var(--mono)}
+
+  .badge{display:inline-block;font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+  .b-low{background:rgba(63,185,80,.15);color:var(--good)}
+  .b-med{background:rgba(210,153,34,.15);color:var(--warn)}
+  .b-high{background:rgba(248,81,73,.15);color:var(--bad)}
+  .b-yes{background:rgba(63,185,80,.15);color:var(--good)}
+  .b-no{background:rgba(139,148,158,.15);color:var(--muted)}
+  .b-cond{background:rgba(88,166,255,.15);color:var(--accent)}
+  .b-done{background:var(--good);color:#0d1117}
+  .b-moot{background:rgba(188,140,249,.18);color:var(--accent2)}
+
+  .rec{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin:12px 0;border-left:3px solid var(--border)}
+  .rec.done{border-left-color:var(--good)}
+  .rec.win-high{border-left-color:var(--good)}
+  .rec.win-med{border-left-color:var(--warn)}
+  .rec .rh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  .rec .rn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem}
+  .rec.done .rn{color:var(--good)}
+  .rec .rt{font-weight:600;font-size:.98rem;flex:1;min-width:220px}
+  .rec .rd{color:var(--muted);font-size:.88rem;margin:6px 0 0}
+  .rec .badges{display:flex;gap:6px;flex-wrap:wrap}
+  pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-family:var(--mono);font-size:.8rem;margin:10px 0 0}
+  pre .c{color:var(--muted)}
+
+  .note{font-size:.82rem;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent2);border-radius:8px;padding:12px 14px;margin:14px 0}
+  .filelist{list-style:none;padding:0;margin:10px 0}
+  .filelist li{padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin:7px 0;background:var(--panel);font-size:.86rem}
+  .filelist li .f{font-family:var(--mono);color:var(--accent);font-weight:600}
+  footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--border);color:var(--muted);font-size:.78rem}
+  .fileref{font-family:var(--mono);color:var(--accent);font-size:.8em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>YAS Statusline <span class="tag">·</span> CPU Profiling Report</h1>
+    <div class="sub">Where the time goes, what was fixed, and what's left.</div>
+    <div class="meta">
+      <span><b>Target:</b> <span class="mono">cat ops/session-info-example.json | python3 claude/statusline_command.py</span></span>
+      <span><b>Tooling:</b> cProfile · -X importtime · wall-clock A/B</span>
+      <span><b>Python:</b> 3.15.0b1 (was 3.13.1)</span>
+      <span><b>Date:</b> 2026-06-19</span>
+    </div>
+  </header>
+
+  <div class="hero">
+    <span class="pill">✓ lazy imports implemented · 1047 tests pass</span>
+    <p class="big">Startup was the cost — and it's down.</p>
+    <p>~95% of runtime was import/startup, not rendering. Deferring the conditional imports (<span class="mono">subprocess</span>, <span class="mono">shutil</span>, <span class="mono">tomllib</span>) plus killing an import-time <span class="mono">Config.load()</span> cut a clean-machine render to <b style="color:var(--good)">39.8&nbsp;ms</b> (from 47&nbsp;ms on 3.15, ~70&nbsp;ms on the original 3.13). <span class="mono">import yas.app</span> now pulls none of the three.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat good"><div class="n"><span class="was">47</span>39.8<small style="font-size:.5em">ms</small></div><div class="l">Clean machine ▼15%</div></div>
+    <div class="stat accent"><div class="n"><span class="was">28.6</span>21.8<small style="font-size:.5em">ms</small></div><div class="l">import yas.app</div></div>
+    <div class="stat good"><div class="n">0</div><div class="l">subprocess/shutil/tomllib on import</div></div>
+    <div class="stat"><div class="n">~3<small style="font-size:.5em">ms</small></div><div class="l">render() (unchanged)</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Time breakdown <span class="pct">~40 ms total · Python 3.15, after</span></h2>
+    <p class="lead">Hover a segment for detail. Even after the deferrals the interpreter + required stdlib (json/re/pathlib/enum) + executing the package's class bodies are the floor; <span class="mono">render()</span> itself is ~3 ms.</p>
+    <div class="breakdown" id="breakdown"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-p="results">Results</button>
+    <button class="tab" data-p="imports">Import overhead</button>
+    <button class="tab" data-p="render">Render &amp; I/O</button>
+    <button class="tab" data-p="recs">Recommendations</button>
+    <button class="tab" data-p="method">Methodology</button>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="panel active" id="p-results">
+    <div class="section" style="margin-top:0">
+      <h2>Before / after <span class="pct">Python 3.15 · best-of-50 median, full invocation</span></h2>
+      <p class="lead">Clean A/B via <span class="mono">git stash</span> on the identical harness. The win depends on the environment: a plain terminal with no <span class="mono">yas.toml</span> skips all three deferred imports entirely; a tmux session with a config still loads <span class="mono">subprocess</span>/<span class="mono">tomllib</span> — but now at <i>runtime</i> where they're actually needed, not on every import.</p>
+      <table>
+        <thead><tr><th>Scenario</th><th class="num">Before</th><th class="num">After</th><th class="num">Δ</th></tr></thead>
+        <tbody>
+          <tr><td>Clean machine — no tmux, no <span class="mono">yas.toml</span> (full deferral)</td><td class="num">47.0 ms</td><td class="num">39.8 ms</td><td class="num delta">−7.2 ms · −15%</td></tr>
+          <tr><td>This box — tmux + <span class="mono">yas.toml</span> (both load at runtime)</td><td class="num">54.7 ms</td><td class="num">51.3 ms</td><td class="num delta">−3.4 ms</td></tr>
+          <tr><td><span class="mono">import yas.app</span> cumulative (-X importtime)</td><td class="num">28.6 ms</td><td class="num">21.8 ms</td><td class="num delta">−6.8 ms</td></tr>
+        </tbody>
+      </table>
+
+      <h2 style="margin-top:30px">What changed</h2>
+      <ul class="filelist">
+        <li><span class="f">render/text.py</span> — <span class="mono">subprocess</span> deferred into <span class="mono">terminal_width()</span> behind a <span class="mono">$TMUX_PANE</span> guard; <span class="mono">shutil.get_terminal_size</span> → <span class="mono">os.get_terminal_size</span> (kills the <span class="mono">bz2/lzma/zlib</span> pull).</li>
+        <li><span class="f">info/git.py</span> — <span class="mono">subprocess</span> deferred into <span class="mono">_dirty()</span>.</li>
+        <li><span class="f">config.py</span> — <span class="mono">tomllib</span> deferred into <span class="mono">_load_toml()</span>, imported only after a <span class="mono">yas.toml</span> read succeeds.</li>
+        <li><span class="f">tokens.py</span> — <b style="color:var(--fg)">the hidden one:</b> <span class="mono">TokenRate.WINDOW = _token_window()</span> ran a full <span class="mono">Config.load()</span> (and <span class="mono">tomllib</span>) at <i>import time</i>. Made lazy + <span class="mono">@functools.cache</span>d — this is what lets the <span class="mono">tomllib</span> deferral actually land.</li>
+        <li><span class="f">test_config.py · test_git_info.py</span> — updated to not couple to removed module-level names (<span class="mono">config.tomllib</span>, <span class="mono">git.subprocess</span>); use <span class="mono">importlib.util.find_spec</span> / <span class="mono">sys.modules</span> patching instead.</li>
+      </ul>
+      <div class="note"><b>Python 3.15 is itself a big win:</b> ~70 ms (3.13) → ~47–55 ms before any edits, partly because 3.15's <span class="mono">dataclasses</span> lazy-loads <span class="mono">inspect</span> — so the original ~5.5 ms <span class="mono">dataclasses→inspect</span> chain is largely gone, making the "eliminate dataclasses" idea (IMP-4) low-value now.</div>
+    </div>
+  </div>
+
+  <!-- IMPORTS -->
+  <div class="panel" id="p-imports">
+    <div class="section" style="margin-top:0">
+      <h2>Heavy stdlib pulls</h2>
+      <p class="lead">The render path is imported eagerly via <span class="mono">app.py → config.py, info/*, layout.py</span>. Conditional imports (used only sometimes) were the deferral targets — all three are now removed from the import path.</p>
+      <table>
+        <thead><tr><th>Module</th><th class="num">Cum. import</th><th>First pulled by</th><th>Used</th><th>Status</th></tr></thead>
+        <tbody id="imp-table"></tbody>
+      </table>
+      <div class="note"><span class="mono">dataclasses</span> dropped from ~5.5 ms (3.13) to ~1.7 ms on 3.15 because it now lazy-loads <span class="mono">inspect</span>. <span class="mono">from __future__ import annotations</span> is already present everywhere, so dataclass annotations are never evaluated.</div>
+    </div>
+  </div>
+
+  <!-- RENDER -->
+  <div class="panel" id="p-render">
+    <div class="section" style="margin-top:0">
+      <h2>Render hotspots <span class="pct">render() ≈ 3 ms / call · unchanged</span></h2>
+      <p class="lead">Shares of the profiled run (cProfile absolutes are ~2× inflated). Not yet touched — the token-rate log is still read &amp; parsed <b>three times</b> per render. Worthwhile but small next to import cost.</p>
+      <table>
+        <thead><tr><th>Function</th><th class="num">Cum %</th><th class="num">Calls</th><th>Note</th></tr></thead>
+        <tbody id="ren-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- RECS -->
+  <div class="panel" id="p-recs">
+    <div class="section" style="margin-top:0">
+      <h2>Recommendations <span class="pct">✓ = implemented</span></h2>
+      <div id="recs"></div>
+    </div>
+  </div>
+
+  <!-- METHOD -->
+  <div class="panel" id="p-method">
+    <div class="section" style="margin-top:0">
+      <h2>How this was measured</h2>
+      <p class="lead">Harness: <span class="fileref">ops/profile_statusline.py</span> (two cProfile scopes) + <span class="mono">-X importtime</span> + a stash-based wall-clock A/B (best-of-50 median, identical env each side). Raw artifacts in <span class="fileref">ops/profile-out/</span>.</p>
+      <pre><span class="c"># cold path: imports + one render (per-module import cost)</span>
+cat ops/session-info-example.json | python3 ops/profile_statusline.py full
+
+<span class="c"># steady-state: render() ×200, imports warmed outside the profiled region</span>
+cat ops/session-info-example.json | python3 ops/profile_statusline.py render
+
+<span class="c"># per-module import timing</span>
+cat ops/session-info-example.json | PYTHONPATH=claude \
+  python3 -X importtime claude/statusline_command.py >/dev/null 2> importtime.txt
+
+<span class="c"># confirm the deferral: import path no longer pulls the three</span>
+PYTHONPATH=claude python3 -X importtime -c "import yas.app" \
+  | grep -E ' (subprocess|shutil|tomllib)$'   <span class="c"># → (no output)</span></pre>
+      <div class="note"><b>Caveat:</b> wall-clock at the shell's 10 ms granularity can't see a 6 ms win — hence the in-process best-of-50 median timer and the deterministic <span class="mono">-X importtime</span> cumulative as the primary signals.</div>
+      <h2 style="margin-top:30px">What's left, in order</h2>
+      <ol style="color:var(--muted);font-size:.9rem;line-height:1.8">
+        <li><b style="color:var(--fg)">REN-1</b> — collapse the token-rate triple-read to one parse. Halves render, cheap.</li>
+        <li><b style="color:var(--fg)">REN-3</b> — memoise <span class="mono">Config.load()</span> for the process (render + main both call it).</li>
+        <li><b style="color:var(--fg)">REN-4</b> — hoist <span class="mono">_dim_for_col</span> out of the per-column loop (matters on wide terminals).</li>
+        <li><b style="color:var(--accent2)">IMP-4</b> — now low-value on 3.15; revisit only if you must support 3.13.</li>
+      </ol>
+    </div>
+  </div>
+
+  <footer>
+    Generated from <span class="fileref">ops/profile-out/FINDINGS.md</span> · self-contained, no external dependencies · open directly in any browser.
+  </footer>
+
+</div>
+
+<script>
+const PHASES = [
+  {l:"import yas.app",  ms:22, c:"#f85149", d:"The yas package + stdlib it imports. Was the addressable cost — now 22 ms (was 28.6)."},
+  {l:"bare interpreter",ms:10, c:"#58a6ff", d:"python -c pass. Unavoidable floor."},
+  {l:"main() I/O",      ms:5,  c:"#bc8cff", d:"stdin read + json parse + statusline-output payload write."},
+  {l:"render()",        ms:3,  c:"#3fb950", d:"The actual painting: layout, borders, gradient, token logs."},
+];
+const IMPORTS = [
+  {m:"json",cum:"~3.7 ms",by:"config.py:14, app.py:3",used:"always",st:"keep",w:.95},
+  {m:"subprocess (+threading…)",cum:"~2.7 ms",by:"text.py, info/git.py",used:"conditional",st:"deferred",w:.69},
+  {m:"re",cum:"~2.5 ms",by:"constants.py:5",used:"always",st:"keep",w:.64},
+  {m:"shutil (+bz2/lzma/zlib)",cum:"~2.2 ms",by:"render/text.py:5",used:"conditional",st:"removed",w:.56},
+  {m:"yas.themes / yas.session",cum:"~2.2 ms ea",by:"@dataclass class bodies",used:"always",st:"keep",w:.56},
+  {m:"tomllib (+parser/re)",cum:"~1.9 ms",by:"config.py + tokens.py import-time load",used:"conditional",st:"deferred",w:.49},
+  {m:"dataclasses → inspect",cum:"~1.7 ms*",by:"every @dataclass module",used:"always",st:"moot",w:.43},
+  {m:"pathlib",cum:"~1.1 ms",by:"constants.py:6",used:"always",st:"keep",w:.28},
+  {m:"typing",cum:"~1.7 ms",by:"config.py:23, session.py:17",used:"always",st:"keep",w:.43},
+];
+const RENDER = [
+  {f:"border_separator_dim",file:"borders.py:181",pct:18.4,calls:"2",n:"per-column paint; _dim_for_col 320×/render"},
+  {f:"TokenRate.update",file:"tokens.py:143",pct:15.7,calls:"1",n:"reads, parses & rewrites the rate log every render"},
+  {f:"_dim_for_col",file:"borders.py:175",pct:11.2,calls:"320",n:"min(abs(col-e) for e in elbow_cols) per column"},
+  {f:"TokenRate.history",file:"tokens.py:178",pct:9.2,calls:"1",n:"re-reads + re-parses the same rate log"},
+  {f:"TokenRate.recently_active",file:"tokens.py:218",pct:9.2,calls:"1",n:"re-reads + re-parses the same rate log (3rd time)"},
+  {f:"Config.load",file:"config.py:238",pct:8.9,calls:"1",n:"re-parses os.environ + re-reads yas.toml (REN-3)"},
+  {f:"_visible_width",file:"text.py:76",pct:7.2,calls:"16",n:"_ANSI_RE.sub + per-char _is_wide genexpr"},
+  {f:"grad_at",file:"gradient.py:178",pct:5.3,calls:"615",n:"per-column ANSI build"},
+];
+const RECS = [
+  {n:"IMP-1",t:"Defer subprocess in text.py and git.py",done:true,save:"~2.7 ms",effort:"low",risk:"done",
+   d:"Moved import subprocess into terminal_width() (behind a $TMUX_PANE guard) and into git's _dirty(). Non-tmux renders never import it; tmux pays it at runtime where the width probe needs it.",code:null},
+  {n:"IMP-2",t:"Replace shutil with os.get_terminal_size",done:true,save:"~2.2 ms",effort:"low",risk:"done",
+   d:"Dropped the bz2/lzma/zlib pull shutil drags in. os was already imported.",
+   code:`<span class="c"># text.py</span>\ntry:\n    w = os.get_terminal_size().columns\nexcept OSError:\n    w = 0`},
+  {n:"IMP-3",t:"Defer tomllib into _load_toml",done:true,save:"~1.9 ms*",effort:"low",risk:"done",
+   d:"*Saved when no yas.toml exists. Imported locally only after the file read succeeds. Required IMP-3b to actually land.",
+   code:`<span class="c"># config.py — inside _load_toml, after read succeeds</span>\ntry:\n    import tomllib\nexcept ImportError:        <span class="c"># Python 3.10</span>\n    return {}, None`},
+  {n:"IMP-3b",t:"Make TokenRate.WINDOW lazy (kill import-time Config.load)",done:true,save:"1 full Config.load off startup",effort:"low",risk:"done",
+   d:"TokenRate.WINDOW = _token_window() ran a full Config.load() (and tomllib, with a yas.toml) at import. Now None + resolved on first use via @functools.cache. Found during re-profiling — not in the original report.",
+   code:`<span class="c"># tokens.py</span>\n@functools.cache\ndef _token_window() -> float:\n    from yas.config import Config\n    return Config.load().token_window\n\nclass TokenRate:\n    WINDOW: float | None = None   <span class="c"># resolve lazily</span>`},
+  {n:"REN-1",t:"Read the token-rate log once, parse once",done:false,win:"high",save:"~33% → ~11% of render",effort:"low",risk:"safe",
+   d:"update/history/recently_active each independently read_text().splitlines() + per-line .split() on the same file. Parse once into a shared list. Biggest remaining render win.",code:null},
+  {n:"REN-3",t:"Memoise Config.load() for the process lifetime",done:false,win:"med",save:"~9% of render",effort:"low",risk:"safe",
+   d:"config.py:238 re-reads yas.toml + rebuilds from os.environ each call; config can't change mid-process. render() and main() both call it.",code:null},
+  {n:"REN-4",t:"Hoist _dim_for_col out of the inner column loop",done:false,win:"med",save:"caps up to 18% (grows with width)",effort:"med",risk:"contained",
+   d:"borders.py:175, 320×/render. elbow_cols is fixed per border; precompute a width-length dim array once per call.",code:null},
+  {n:"IMP-4",t:"Eliminate dataclasses (structural)",done:false,win:"moot",save:"~5.5 ms on 3.13, ~0 on 3.15",effort:"high",risk:"low value",
+   d:"3.15's dataclasses now lazy-loads inspect, so the big chain is gone. Only worth it if you must support 3.13. Otherwise skip.",code:null},
+];
+
+const bd=document.getElementById('breakdown'), lg=document.getElementById('legend');
+const tot=PHASES.reduce((a,p)=>a+p.ms,0);
+if(bd&&lg) PHASES.forEach(p=>{
+  const s=document.createElement('div');
+  s.className='seg'; s.style.flexBasis=(p.ms/tot*100)+'%'; s.style.background=p.c;
+  s.title=`${p.l}: ~${p.ms} ms (${Math.round(p.ms/tot*100)}%) — ${p.d}`;
+  s.textContent=p.ms>=5?`${p.l} · ${p.ms}ms`:`${p.ms}`;
+  bd.appendChild(s);
+  const li=document.createElement('span');
+  li.innerHTML=`<i style="background:${p.c}"></i>${p.l} · <b style="color:var(--fg)">${p.ms} ms</b>`;
+  lg.appendChild(li);
+});
+
+const it=document.getElementById('imp-table');
+const bcls={always:'b-no',conditional:'b-cond'};
+const scls={removed:['b-done','✓ removed'],deferred:['b-done','✓ deferred'],moot:['b-moot','moot on 3.15'],keep:['b-no','required']};
+if(it) IMPORTS.forEach(r=>{
+  const s=scls[r.st];
+  it.innerHTML+=`<tr>
+    <td><span class="mono">${r.m}</span></td>
+    <td class="barcell"><span class="b" style="width:${r.w*100}%"></span><span>${r.cum}</span></td>
+    <td><span class="fileref">${r.by}</span></td>
+    <td><span class="badge ${bcls[r.used]}">${r.used}</span></td>
+    <td><span class="badge ${s[0]}">${s[1]}</span></td></tr>`;
+});
+
+const rt=document.getElementById('ren-table'), mx=Math.max(...RENDER.map(r=>r.pct));
+if(rt) RENDER.forEach(r=>{
+  rt.innerHTML+=`<tr>
+    <td><span class="mono">${r.f}</span><br><span class="fileref">${r.file}</span></td>
+    <td class="barcell num"><span class="b" style="width:${r.pct/mx*100}%"></span><span>${r.pct}%</span></td>
+    <td class="num">${r.calls}</td>
+    <td style="color:var(--muted)">${r.n}</td></tr>`;
+});
+
+const rc=document.getElementById('recs');
+const ecls={low:'b-low','low-med':'b-med',med:'b-med',high:'b-high'};
+if(rc) RECS.forEach(r=>{
+  const cls = r.done ? 'done' : (r.win==='high'?'win-high':(r.win==='med'?'win-med':''));
+  const statusBadge = r.done
+    ? `<span class="badge b-done">✓ done</span>`
+    : `<span class="badge ${r.win==='moot'?'b-moot':'b-yes'}">save ${r.save}</span>`;
+  const effortBadge = r.done ? '' : `<span class="badge ${ecls[r.effort]||'b-no'}">effort: ${r.effort}</span>`;
+  rc.innerHTML+=`<div class="rec ${cls}">
+    <div class="rh">
+      <span class="rn">${r.n}</span>
+      <span class="rt">${r.t}</span>
+      <span class="badges">${statusBadge}${effortBadge}<span class="badge b-no">${r.risk}</span></span>
+    </div>
+    <div class="rd">${r.d}</div>
+    ${r.code?`<pre>${r.code}</pre>`:''}
+  </div>`;
+});
+
+document.getElementById('tabs').addEventListener('click',e=>{
+  const b=e.target.closest('.tab'); if(!b)return;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t===b));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='p-'+b.dataset.p));
+});
+</script>
+</body>
+</html>

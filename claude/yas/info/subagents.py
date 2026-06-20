@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -181,25 +180,78 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
 
 
-@dataclass
 class RunningSubagent:
-    agent_type: str
-    description: str
-    billed_in: int
-    output: int
-    first_timestamp: float  # epoch seconds; baseline for live duration
-    model:         str                   = ''
-    cache_read_in: int                   = 0
-    total_input:   int                   = 0
-    last_activity: tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
-    end_ts:        float                 = 0.0  # end_turn ts, else terminal-text ts; Done iff > 0
-    mtime:         float                 = 0.0  # transcript last-modified time (st_mtime)
-    agent_id:      str                   = ''   # transcript filename stem; matches run-JSON agentId (workflow cohort)
+    __slots__ = (
+        'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
+        'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
+        'mtime', 'agent_id',
+    )
+
+    def __init__(
+        self,
+        agent_type:      str,
+        description:     str,
+        billed_in:       int,
+        output:          int,
+        first_timestamp: float,  # epoch seconds; baseline for live duration
+        model:           str = '',
+        cache_read_in:   int = 0,
+        total_input:     int = 0,
+        last_activity:   tuple[str, str, dict[str, object]] | None = None,
+        end_ts:          float = 0.0,  # end_turn ts, else terminal-text ts; Done iff > 0
+        mtime:           float = 0.0,  # transcript last-modified time (st_mtime)
+        agent_id:        str = '',     # transcript filename stem; matches run-JSON agentId (workflow cohort)
+    ) -> None:
+        self.agent_type      = agent_type
+        self.description      = description
+        self.billed_in        = billed_in
+        self.output           = output
+        self.first_timestamp  = first_timestamp
+        self.model            = model
+        self.cache_read_in    = cache_read_in
+        self.total_input      = total_input
+        self.last_activity    = last_activity if last_activity is not None else ('', '', {})
+        self.end_ts           = end_ts
+        self.mtime            = mtime
+        self.agent_id         = agent_id
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningSubagent):
+            return NotImplemented
+        return self._key() == other._key()
+
+    def _key(self) -> tuple[object, ...]:
+        return (
+            self.agent_type, self.description, self.billed_in, self.output,
+            self.first_timestamp, self.model, self.cache_read_in, self.total_input,
+            self.last_activity, self.end_ts, self.mtime, self.agent_id,
+        )
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return (f'RunningSubagent(agent_type={self.agent_type!r}, description={self.description!r}, '
+                f'billed_in={self.billed_in}, output={self.output}, first_timestamp={self.first_timestamp}, '
+                f'model={self.model!r}, cache_read_in={self.cache_read_in}, total_input={self.total_input}, '
+                f'last_activity={self.last_activity!r}, end_ts={self.end_ts}, mtime={self.mtime}, '
+                f'agent_id={self.agent_id!r})')
 
 
-@dataclass
 class RunningSubagents:
-    subagents: list[RunningSubagent] = field(default_factory=list)
+    __slots__ = ('subagents',)
+
+    def __init__(self, subagents: list[RunningSubagent] | None = None) -> None:
+        self.subagents = subagents if subagents is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningSubagents):
+            return NotImplemented
+        return self.subagents == other.subagents
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return f'RunningSubagents(subagents={self.subagents!r})'
 
     # Cohort grace: seconds after the last end_ts before a fully-Done section retires
     COHORT_GRACE_SECONDS = 20

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from yas.constants import (
     PILL_BL,
     PILL_BOT,
@@ -13,13 +11,22 @@ from yas.constants import (
 from yas.render.gradient import pill_gradient_fg
 
 
-@dataclass
 class Pill:
-    start:  int = -1
-    end:    int = -1
-    anchor: tuple[int, int, int] = (0, 0, 0)
-    shift:  tuple[int, int, int] = (0, 0, 0)
-    pct:    int = 0
+    __slots__ = ('start', 'end', 'anchor', 'shift', 'pct')
+
+    def __init__(
+        self,
+        start:  int = -1,
+        end:    int = -1,
+        anchor: tuple[int, int, int] = (0, 0, 0),
+        shift:  tuple[int, int, int] = (0, 0, 0),
+        pct:    int = 0,
+    ) -> None:
+        self.start  = start
+        self.end    = end
+        self.anchor = anchor
+        self.shift  = shift
+        self.pct    = pct
 
     @property
     def active(self) -> bool:

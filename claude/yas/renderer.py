@@ -315,8 +315,8 @@ class Renderer:
     def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, labels: tuple[tuple[str, int], ...] = ()) -> str:
         return self.border.border_top(width, session_id, downs, fill, pill, labels)
 
-    def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
-        return self.border.border_bottom(width, ups, fill)
+    def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0, timing: str = '') -> str:
+        return self.border.border_bottom(width, ups, fill, timing)
 
     def border_separator(self, width: int, ups: tuple[int, ...] = (), downs: tuple[int, ...] = (), fill: float = 1.0, labels: tuple[tuple[str, int], ...] = ()) -> str:
         return self.border.border_separator(width, ups, downs, fill, labels)

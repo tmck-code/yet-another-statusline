@@ -77,6 +77,35 @@ def test_border_bottom_ups_markers(r: borders.BorderRenderer) -> None:
     assert stripped[9] == '┴'
 
 
+@pytest.mark.parametrize('w', [40, 55, 80, 130])
+def test_border_bottom_timing_width_preserved(r: borders.BorderRenderer, w: int) -> None:
+    # The run-time overlay never changes the visible width of the border.
+    assert _visible_width(r.border_bottom(w, timing='47.2ms')) == w
+
+
+def test_border_bottom_timing_right_aligned(r: borders.BorderRenderer) -> None:
+    out = r.border_bottom(width=40, timing='47.2ms')
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 40
+    # `…47.2ms──╯`: text ends two fill cells before the corner (index w-1).
+    assert stripped[-1] == '╯'
+    assert stripped[-3:-1] == '──'
+    assert stripped[-9:-3] == '47.2ms'
+
+
+def test_border_bottom_timing_only_overlays_fill(r: borders.BorderRenderer) -> None:
+    # An elbow falling under the overlay region is preserved, not overwritten.
+    out = r.border_bottom(width=40, ups=(36,), timing='47.2ms')
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 40
+    assert stripped[35] == '┴'  # column 36 (1-based) → index 35
+
+
+def test_border_bottom_no_timing_unchanged(r: borders.BorderRenderer) -> None:
+    # Default (no timing) is byte-identical to the bare bottom border.
+    assert r.border_bottom(width=60) == r.border_bottom(width=60, timing='')
+
+
 def test_border_separator_downs_marker(r: borders.BorderRenderer) -> None:
     out = r.border_separator(width=20, downs=(7,))
     stripped = strip_ansi(out)

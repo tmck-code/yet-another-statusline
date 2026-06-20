@@ -21,6 +21,9 @@
 #                      #   labels into the border/separator rows above each value
 #                      #   (clear/session, 5h/remain/used, input/cache/output, …).
 #                      #   env: YAS_LABELS
+# show_render_time = false  # bool; annotate the bottom-right border with the previous
+#                           #   run's wall-clock render time (e.g. …47.2ms──╯). Blank on
+#                           #   a session's first render. env: YAS_SHOW_RENDER_TIME
 
 # [tokens]
 # soft_limit = 150000   # int > 0; tokens; context-fill bar / % threshold. Raise for 1M-context models.

@@ -47,10 +47,11 @@ job).
 
 ## Implement the task loop
 
-Work `tasks.md` in dependency order. After each task is genuinely done **and its
-gate passes**, flip its `- [ ]` to `- [x]` in `tasks.md` immediately — don't batch
-the ticks. The tasks are written with exact file/line/function detail; follow them
-literally, and if a task's instruction contradicts the code reality, pause and
+Work `tasks.md` in dependency order. Mark each subtask as soon as it's complete —
+it helps with tracking progress. After each task or subtask is genuinely done **and
+its gate passes**, flip its `- [ ]` to `- [x]` in `tasks.md` immediately — don't
+batch the ticks. The tasks are written with exact file/line/function detail; follow
+them literally, and if a task's instruction contradicts the code reality, pause and
 report rather than guessing.
 
 ## Non-negotiable gates (from the skill)

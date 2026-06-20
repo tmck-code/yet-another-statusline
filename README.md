@@ -2,7 +2,7 @@
 
 🌈 Check out the official landing page here: [YAS! Yet Another Statusline](https://tmck-code.github.io/pages/yas.html)
 
-<img width="1685" height="320" alt="image" src="https://github.com/user-attachments/assets/516cb692-3318-4552-b813-e3e34ca96858" />
+<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
@@ -22,15 +22,26 @@ claude plugin install yas@yet-another-statusline
 claude -p "/yas:init"
 ```
 
+If you need to install non-interactively (e.g. in CI/docker)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | YAS_NO_TTY=1 bash
+# install with specific python version e.g. 3.15
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | YAS_NO_TTY=1 YAS_PYTHON=3.15 bash
+```
+
+### Reconfigure later — `/yas:config`
+
+Run `/yas:config` any time to re-run the wizard against the already-installed
+plugin — switch theme/glyph mode, toggle labels, change the soft limit, or move
+to Python **3.15**. It re-wires `settings.json` without re-registering the
+marketplace or reinstalling the plugin.
+
 ## Demo
 
 A dummy session to demonstrate the layout:
 
 <img width="3084" height="1250" alt="yas-0 2 5" src="https://github.com/user-attachments/assets/94d318c7-d7b4-4ad0-a06c-90f303d7f9a7" />
-
-## Layout Reference
-
-<img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
 ## Widths
 
@@ -71,6 +82,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `context_state` | `YAS_CONTEXT_STATE` | — | `[context].state` | `false` |
 | `context_labels` | `YAS_CONTEXT_LABELS` | — | `[context].labels` | `Smart,Coasting,Foggy,Cooked,Dumb` |
 | `context_thresholds` | `YAS_CONTEXT_THRESHOLDS` | — | `[context].thresholds` | `25,50,70,90` |
+| `show_render_time` | `YAS_SHOW_RENDER_TIME` | — | `[layout].show_render_time` | `false` |
 
 - Valid `theme` values (14 built-in themes):
   - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
@@ -81,6 +93,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 - Valid `glyph_mode` values: `nerdfont` (default; full fidelity, needs a Nerd Font), `ascii` (every non-ASCII glyph → width-1 ASCII; maximum compatibility), `unicode` (only Nerd Font PUA icons → non-PUA Unicode; keeps box/block/arrow glyphs), `github` (GitHub-paste-safe: folds every glyph a browser renders double-wide — the box-drawing frame, block/sparkline ramp, and EAW-ambiguous punctuation/icons — to a width-1, EAW-narrow/ASCII stand-in, so a render stays column-aligned when pasted into a GitHub markdown code block). All modes preserve column geometry. An unknown value falls back to `nerdfont`.
 - `single_width` is an orthogonal boolean that folds double-width dynamic content (wide emoji, CJK in branch names/paths) to width-1; it may be combined with any `glyph_mode`. The statusline's own glyphs are already width-1, so column geometry is preserved.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
+- `show_render_time`, when `true`, annotates the bottom-right border with the previous run's wall-clock render time (e.g. `…47.2ms──╯`). Off by default; each run shows the prior run's timing, so it is blank on a session's first render.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
 
