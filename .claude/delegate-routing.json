@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "tool": "Bash",
+      "match": "\\b(pytest|make\\s+test|make\\s+demo|ruff\\s+check)\\b|uv run pytest",
+      "agent": "verifier",
+      "hint": "the test/lint/demo gates belong in the verifier subagent, not the main thread (CLAUDE.md) — and if it reports a failure, hand the fix to yas-editor/spec-implementer and re-verify rather than debugging inline"
+    },
+    {
+      "tool": "Edit",
+      "match": "claude/(yas|mon).*\\.py$|claude/statusline_command\\.py$",
+      "agent": "yas-editor",
+      "hint": "renderer/layout/glyph edits belong in the yas-editor subagent (CLAUDE.md)"
+    },
+    {
+      "tool": "Write",
+      "match": "claude/(yas|mon).*\\.py$|claude/statusline_command\\.py$",
+      "agent": "yas-editor",
+      "hint": "renderer/layout/glyph edits belong in the yas-editor subagent (CLAUDE.md)"
+    }
+  ]
+}

@@ -63,3 +63,12 @@ The agents that exist for this (see `.claude/agents/`):
 For renderer/layout/glyph work, the relevant invariants live in the
 **`tmck-code-statusline`** skill — the usual failure class is column-width math
 around invisible PUA glyphs, caught by the demo gate rather than pytest.
+
+## Delegation nudge (table-driven)
+
+The "run gates via `verifier`, edit the renderer via `yas-editor`" routing is
+enforced by a global `PreToolUse` hook (`~/.claude/hooks/nudge-delegate.py`) that
+reads `.claude/delegate-routing.json` in this repo. That table maps gate commands
+→ `verifier` and `claude/{yas,mon}/**` edits → `yas-editor`; the project table
+overrides the user-level default. (This replaces the old
+`.claude/hooks/nudge-delegate-tests.py`.)
