@@ -78,8 +78,8 @@ def test_index_never_exceeds_labels() -> None:
 # Config knobs
 # ---------------------------------------------------------------------------
 
-def test_defaults_off_and_canonical_labels() -> None:
-    cfg = config.Config.load(env={})
+def test_defaults_off_and_canonical_labels(tmp_path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
     assert cfg.context_state is False
     assert cfg.context_labels == DEFAULT_CONTEXT_LABELS
     assert cfg.context_thresholds == DEFAULT_CONTEXT_THRESHOLDS
@@ -96,22 +96,22 @@ def test_env_enables_and_overrides() -> None:
     assert cfg.context_thresholds == (10, 20, 30, 40)
 
 
-def test_empty_env_falls_back() -> None:
-    cfg = config.Config.load(env={'YAS_CONTEXT_STATE': '', 'YAS_CONTEXT_LABELS': ''})
+def test_empty_env_falls_back(tmp_path) -> None:
+    cfg = config.Config.load(env={'YAS_CONTEXT_STATE': '', 'YAS_CONTEXT_LABELS': ''}, config_dir=tmp_path)
     assert cfg.context_state is False
     assert cfg.context_labels == DEFAULT_CONTEXT_LABELS
 
 
-def test_bad_labels_fall_back_silently_from_env() -> None:
+def test_bad_labels_fall_back_silently_from_env(tmp_path) -> None:
     # Wrong count → default; env rejections are debug-only (not in the error row).
-    cfg = config.Config.load(env={'YAS_CONTEXT_LABELS': 'only,three,here'})
+    cfg = config.Config.load(env={'YAS_CONTEXT_LABELS': 'only,three,here'}, config_dir=tmp_path)
     assert cfg.context_labels == DEFAULT_CONTEXT_LABELS
     assert 'context_labels' not in cfg.errors
 
 
 @pytest.mark.parametrize('bad', ['1,2,3', '1,2,3,4,5', '40,30,20,10', '0,1,2,3', '10,20,30,100'])
-def test_bad_thresholds_fall_back(bad: str) -> None:
-    cfg = config.Config.load(env={'YAS_CONTEXT_THRESHOLDS': bad})
+def test_bad_thresholds_fall_back(bad: str, tmp_path) -> None:
+    cfg = config.Config.load(env={'YAS_CONTEXT_THRESHOLDS': bad}, config_dir=tmp_path)
     assert cfg.context_thresholds == DEFAULT_CONTEXT_THRESHOLDS
 
 
