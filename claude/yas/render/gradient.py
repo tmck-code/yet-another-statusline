@@ -1,6 +1,7 @@
 """Gradient, sparkline, and colour-math helpers for the statusline."""
 
 from __future__ import annotations
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 def rainbow_step() -> int:
+    override = os.environ.get('YAS_RAINBOW_STEP')
+    if override is not None:
+        return int(override) % len(RAINBOW_PALETTE)
     return int(time.time()) % len(RAINBOW_PALETTE)
 
 
