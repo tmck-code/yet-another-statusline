@@ -4,7 +4,7 @@
 
 <img width="1834" height="979" alt="image" src="https://github.com/user-attachments/assets/9c3137b4-dd01-478e-b3bb-6b9d39570104" />
 
-_Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
+_Most common form is displaying the first few rows, which include the loaded plugins & skills. Extra sections appear below them as needed_
 
 ## Install/Update
 
