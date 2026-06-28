@@ -83,7 +83,17 @@ class BarChars:
 
 RESET  = '\033[0m'
 BOLD   = '\033[1m'
+FAINT  = '\033[2m'
 ITALIC = '\033[3m'
+
+# Tools excluded from the per-tool tool_use counts row: todo/UI-plumbing tools,
+# not "work". `Task` is deliberately NOT in this set — it represents a subagent
+# delegation and is a meaningful main-column entry.
+META_EXCLUDE_TOOLS = frozenset({'TodoWrite', 'ExitPlanMode', 'AskUserQuestion'})
+
+# Plain-ASCII caption for the tool-counts separator. The label overlay applies
+# superscript() at render time, so no raw superscript glyphs live in source.
+TOOL_COUNTS_LABEL = 'tools main/sub'
 
 CLR_GREY_DIM   = '\033[38;5;244m'
 CLR_GREY_DARK  = '\033[38;5;238m'

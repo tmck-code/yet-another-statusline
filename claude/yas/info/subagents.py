@@ -219,7 +219,7 @@ class RunningSubagent:
     __slots__ = (
         'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
-        'mtime', 'agent_id',
+        'mtime', 'agent_id', 'jsonl_path',
     )
 
     def __init__(
@@ -236,6 +236,7 @@ class RunningSubagent:
         end_ts:          float = 0.0,  # end_turn ts, else terminal-text ts; Done iff > 0
         mtime:           float = 0.0,  # transcript last-modified time (st_mtime)
         agent_id:        str = '',     # transcript filename stem; matches run-JSON agentId (workflow cohort)
+        jsonl_path:      str = '',     # absolute path to this agent's transcript (for tool-count rescan)
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -249,6 +250,7 @@ class RunningSubagent:
         self.end_ts           = end_ts
         self.mtime            = mtime
         self.agent_id         = agent_id
+        self.jsonl_path       = jsonl_path
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RunningSubagent):
@@ -260,6 +262,7 @@ class RunningSubagent:
             self.agent_type, self.description, self.billed_in, self.output,
             self.first_timestamp, self.model, self.cache_read_in, self.total_input,
             self.last_activity, self.end_ts, self.mtime, self.agent_id,
+            self.jsonl_path,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -269,7 +272,7 @@ class RunningSubagent:
                 f'billed_in={self.billed_in}, output={self.output}, first_timestamp={self.first_timestamp}, '
                 f'model={self.model!r}, cache_read_in={self.cache_read_in}, total_input={self.total_input}, '
                 f'last_activity={self.last_activity!r}, end_ts={self.end_ts}, mtime={self.mtime}, '
-                f'agent_id={self.agent_id!r})')
+                f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r})')
 
 
 class RunningSubagents:
@@ -347,6 +350,7 @@ class RunningSubagents:
                     last_activity   = last_activity,
                     end_ts          = end_ts,
                     mtime           = mtime,
+                    jsonl_path      = str(jsonl),
                 ))
         except OSError:
             pass
