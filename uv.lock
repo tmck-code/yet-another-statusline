@@ -421,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "yet-another-statusline"
-version = "0.4.0"
+version = "0.4.1"
 source = { virtual = "." }
 dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
