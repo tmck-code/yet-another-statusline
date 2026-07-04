@@ -28,6 +28,8 @@
 # [tokens]
 # soft_limit = 150000   # int > 0; tokens; context-fill bar / % threshold. Raise for 1M-context models.
 # token_window = 60     # number > 0; seconds; rolling window for the token throughput (t/m) rate
+# five_hour_rate_window = 300  # number > 0; seconds; lookback window for the 5-hour burn-rate
+#                              #   depletion estimate. env: YAS_FIVE_HOUR_RATE_WINDOW
 #
 # Per-model soft_limit overrides. `match` is a case-insensitive plain substring
 # (no glob/regex) tested against the model id and display name. The LONGEST

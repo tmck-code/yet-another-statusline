@@ -28,6 +28,7 @@ from yas.constants import (
     DEFAULT_MAX_WIDTH,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
+    DEFAULT_FIVE_HOUR_RATE_WINDOW,
     DEFAULT_THEME,
     DEFAULT_SHOW_DAY_STATS,
 )
@@ -338,7 +339,7 @@ def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
 class Config:
     __slots__ = (
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
-        'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
+        'token_window', 'five_hour_rate_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
         'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
         'show_render_time', 'soft_limit_models', 'errors', 'debug_lines',
     )
@@ -349,6 +350,7 @@ class Config:
     labels:             bool
     soft_limit:         int
     token_window:       float
+    five_hour_rate_window: float
     theme:              str
     bg_shift:           str
     glyph_mode:         str
@@ -370,6 +372,7 @@ class Config:
         labels:             bool = DEFAULT_LABELS,
         soft_limit:         int = DEFAULT_SOFT_LIMIT,
         token_window:       float = DEFAULT_TOKEN_WINDOW,
+        five_hour_rate_window: float = DEFAULT_FIVE_HOUR_RATE_WINDOW,
         theme:              str = DEFAULT_THEME,
         bg_shift:           str = 'warm',
         glyph_mode:         str = 'nerdfont',
@@ -390,6 +393,7 @@ class Config:
         s(self, 'labels', labels)
         s(self, 'soft_limit', soft_limit)
         s(self, 'token_window', token_window)
+        s(self, 'five_hour_rate_window', five_hour_rate_window)
         s(self, 'theme', theme)
         s(self, 'bg_shift', bg_shift)
         s(self, 'glyph_mode', glyph_mode)
@@ -412,7 +416,8 @@ class Config:
     def __repr__(self) -> str:
         return (f'Config(max_width={self.max_width}, full_width={self.full_width}, '
                 f'justify={self.justify}, labels={self.labels}, soft_limit={self.soft_limit}, '
-                f'token_window={self.token_window}, theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
+                f'token_window={self.token_window}, five_hour_rate_window={self.five_hour_rate_window}, '
+                f'theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
                 f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
                 f'show_day_stats={self.show_day_stats}, context_state={self.context_state}, '
                 f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
@@ -474,6 +479,10 @@ class Config:
             'token_window',
             _env_sources(env, 'YAS_TOKEN_WINDOW', 'STATUSLINE_TOKEN_WINDOW') + toml_src(tokens, 'token_window'),
             _parse_pos_float, DEFAULT_TOKEN_WINDOW, errors, debug)
+        five_hour_rate_window = _resolve(
+            'five_hour_rate_window',
+            _env_sources(env, 'YAS_FIVE_HOUR_RATE_WINDOW', 'STATUSLINE_FIVE_HOUR_RATE_WINDOW') + toml_src(tokens, 'five_hour_rate_window'),
+            _parse_pos_float, DEFAULT_FIVE_HOUR_RATE_WINDOW, errors, debug)
         theme = _resolve(
             'theme',
             cli_src('theme')
@@ -537,6 +546,7 @@ class Config:
             labels=labels,
             soft_limit=soft_limit,
             token_window=token_window,
+            five_hour_rate_window=five_hour_rate_window,
             theme=theme,
             bg_shift=bg_shift,
             glyph_mode=glyph_mode,

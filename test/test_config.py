@@ -59,6 +59,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.full_width is False
     assert cfg.soft_limit == 150_000
     assert cfg.token_window == 60.0
+    assert cfg.five_hour_rate_window == 300.0
     assert cfg.theme == 'claude-dark'
     assert cfg.bg_shift == 'warm'
     assert cfg.glyph_mode == 'nerdfont'
@@ -83,6 +84,47 @@ def test_canonical_token_window_beats_legacy_alias(tmp_path: Path) -> None:
         config_dir=tmp_path,
     )
     assert cfg.token_window == 45.0
+
+
+# five_hour_rate_window knob
+
+def test_five_hour_rate_window_default(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.five_hour_rate_window == 300.0
+
+
+def test_five_hour_rate_window_env_override(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_FIVE_HOUR_RATE_WINDOW': '120'}, config_dir=tmp_path)
+    assert cfg.five_hour_rate_window == 120.0
+
+
+def test_five_hour_rate_window_legacy_alias_used_alone(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'STATUSLINE_FIVE_HOUR_RATE_WINDOW': '90'}, config_dir=tmp_path)
+    assert cfg.five_hour_rate_window == 90.0
+
+
+def test_five_hour_rate_window_canonical_beats_legacy_alias(tmp_path: Path) -> None:
+    cfg = config.Config.load(
+        env={'YAS_FIVE_HOUR_RATE_WINDOW': '120', 'STATUSLINE_FIVE_HOUR_RATE_WINDOW': '90'},
+        config_dir=tmp_path,
+    )
+    assert cfg.five_hour_rate_window == 120.0
+
+
+@requires_tomllib
+def test_five_hour_rate_window_toml_source(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[tokens]\nfive_hour_rate_window = 240\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.five_hour_rate_window == 240.0
+
+
+def test_five_hour_rate_window_invalid_falls_back_and_other_knobs_unaffected(tmp_path: Path) -> None:
+    cfg = config.Config.load(
+        env={'YAS_FIVE_HOUR_RATE_WINDOW': '-5', 'YAS_MAX_WIDTH': '160'},
+        config_dir=tmp_path,
+    )
+    assert cfg.five_hour_rate_window == 300.0
+    assert cfg.max_width == 160
 
 
 def test_legacy_theme_alias_used_alone(tmp_path: Path) -> None:

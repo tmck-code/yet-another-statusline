@@ -75,6 +75,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `full_width` | `YAS_FULL_WIDTH` | `[layout].full_width` | `false` | — |
 | `soft_limit` | `YAS_SOFT_LIMIT` | `[tokens].soft_limit` | `150000` | — |
 | `token_window` | `YAS_TOKEN_WINDOW` | `[tokens].token_window` | `60` | `STATUSLINE_TOKEN_WINDOW` |
+| `five_hour_rate_window` | `YAS_FIVE_HOUR_RATE_WINDOW` | `[tokens].five_hour_rate_window` | `300` | `STATUSLINE_FIVE_HOUR_RATE_WINDOW` |
 | `theme` | `YAS_THEME` (also `--theme` CLI) | `[appearance].theme` | `claude-dark` | `CLAUDE_STATUSLINE_THEME` |
 | `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | `[appearance].bg_shift` | `warm` | — |
 | `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | `[appearance.glyphs].mode` | `nerdfont` | — |
@@ -140,6 +141,7 @@ max_width = 140
 [tokens]
 soft_limit = 150000
 token_window = 60
+five_hour_rate_window = 300
 
 [appearance]
 theme = "claude-dark"

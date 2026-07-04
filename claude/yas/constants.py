@@ -12,6 +12,10 @@ MIN_WIDTH    = 40
 DEFAULT_MAX_WIDTH    = 140
 DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
+DEFAULT_FIVE_HOUR_RATE_WINDOW = 300.0
+# Minimum sample-span guard (seconds) for the 5-hour burn-rate estimate — a
+# correctness floor, not a user-facing knob.
+DT_FLOOR = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 DEFAULT_JUSTIFY        = False

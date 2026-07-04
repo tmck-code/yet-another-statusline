@@ -13,7 +13,7 @@ from yas.renderer import Renderer
 from yas.session import SessionInfo, _as_str
 from yas.render.text import terminal_width, apply_glyphs
 from yas.themes import CLAUDE_DARK, THEMES, Theme
-from yas.tokens import RenderTiming, TickRecord, TokenLog, TokenRate, compute_day_cost
+from yas.tokens import RenderTiming, TickRecord, TokenLog, TokenRate, FiveHourRate, compute_day_cost
 from yas.info.transcript import TranscriptUsage
 
 
@@ -22,7 +22,9 @@ def record_tick(session: SessionInfo, usage: TranscriptUsage) -> TickRecord:
     token_log = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
     tok_rate  = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     day_cost  = compute_day_cost(session.model, token_log)
-    return TickRecord(token_log=token_log, day_cost=day_cost, tok_rate=tok_rate)
+    five_hour = session.rate_limits.five_hour
+    five_h_rate = FiveHourRate.update(five_hour.resets_at, five_hour.used_percentage)
+    return TickRecord(token_log=token_log, day_cost=day_cost, tok_rate=tok_rate, five_h_rate=five_h_rate)
 
 
 def resolve_theme(cli_name: str | None) -> Theme:

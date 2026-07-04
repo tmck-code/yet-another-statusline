@@ -25,6 +25,18 @@ def burndown_delta(
     return used_pct - ideal_pct
 
 
+def deplete_minutes(used_pct: float, rate_per_min: float | None) -> float | None:
+    """Minutes until the 5-hour bucket hits 100% at the given instantaneous rate.
+
+    Distinct from `burndown_delta` (a pace-vs-ideal deviation) — this is a pure
+    projection from a %/min rate. Returns None when the rate is unavailable or
+    non-positive (no depletion estimate).
+    """
+    if not rate_per_min or rate_per_min <= 0:
+        return None
+    return (100 - used_pct) / rate_per_min
+
+
 def subagent_avg_tpm(
     total_input: int,
     output: int,

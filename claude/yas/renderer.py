@@ -96,7 +96,7 @@ from yas.render.gradient import (
 )
 from yas.context_state import context_state
 from yas.info.git import GitInfo
-from yas.render.metrics import burndown_delta, subagent_share
+from yas.render.metrics import burndown_delta, deplete_minutes, subagent_share
 from yas.render.pill import Pill
 from yas.render.tasks_view import fmt_duration, select_window, total_elapsed
 from yas.session import ContextWindow, RateBucket, RateLimits
@@ -540,7 +540,7 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + ELLIPSIS, rate_pct)
 
-    def _rate_helpers(self, rate_limits: RateLimits, gap_5h: int = 1, gap_7d: int = 1) -> tuple[str, str]:
+    def _rate_helpers(self, rate_limits: RateLimits, gap_5h: int = 1, gap_7d: int = 1, five_h_rate: float | None = None) -> tuple[str, str]:
         """Build the 5h and (optional) 7d limit sub-sections.
 
         ``gap_5h`` / ``gap_7d`` set the inter-stat separator width within each
@@ -548,7 +548,7 @@ class Renderer:
         section slack as breathing room rather than only outer padding.
         """
         c_helper  = rainbow_at(rainbow_step(), 9)
-        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour, gap_5h)}{self.R}'
+        helper_5h = f'{c_helper}{BOLD}{ICON_LIMIT_5H}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour, gap_5h, five_h_rate=five_h_rate)}{self.R}'
         helper_7d = ''
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
@@ -564,7 +564,7 @@ class Renderer:
             helper_7d = f'{c_helper}{BOLD}{ICON_LIMIT_7D}{self.R}  {seven_clr}{seven_pct_str}%{self.R}{seven_trend_part}'
         return helper_5h, helper_7d
 
-    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, str, int]:
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False, five_h_rate: float | None = None) -> tuple[str, str, str, int]:
         model_clr  = self.model_colour(model_name)
         pct        = self._model_bg_pct(effort_level)
         lead_glyph = GLYPH_BURN_FAST if fast_mode else GLYPH_MODEL_LIGHT
@@ -595,7 +595,7 @@ class Renderer:
 
         right_w = _visible_width(right_text)
 
-        helper_5h, helper_7d = self._rate_helpers(rate_limits)
+        helper_5h, helper_7d = self._rate_helpers(rate_limits, five_h_rate=five_h_rate)
 
         return helper_5h, helper_7d, right_text, right_w
 
@@ -1564,7 +1564,7 @@ class Renderer:
         sign  = '-' if delta < 0 else '+'
         return f'{colour}{glyph} {sign}{abs_delta:.1f}%{self.R}'
 
-    def helper(self, five_hour: RateBucket, gap: int = 1) -> str:
+    def helper(self, five_hour: RateBucket, gap: int = 1, five_h_rate: float | None = None) -> str:
         # ``gap`` is the inter-stat separator width (countdown↔pct, pct↔trend).
         # It widens to give the justified top row breathing room; the glyph→stat
         # spacing lives in the caller and is unaffected.
@@ -1585,7 +1585,16 @@ class Renderer:
             total_s   = int(delta.total_seconds())
             h, rem    = divmod(total_s, 3600)
             m         = rem // 60
-            countdown = f'(-{h}:{m:02d})'
+            remain_min  = total_s / 60
+            deplete_min = deplete_minutes(float(five_hour.used_percentage or 0), five_h_rate)
+            if deplete_min is not None and deplete_min < remain_min:
+                dtot = int(deplete_min * 60)
+                dh, drem = divmod(dtot, 3600)
+                dm = drem // 60
+                warn = self.fill_colour(100.0)
+                countdown = f'(-{h}:{m:02d}{warn}/-{dh}:{dm:02d}{self.COMMIT})'
+            else:
+                countdown = f'(-{h}:{m:02d})'
             trend = self.burndown_trend(
                 float(five_hour.used_percentage or 0),
                 five_hour.resets_at,

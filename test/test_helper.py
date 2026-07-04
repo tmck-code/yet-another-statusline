@@ -278,6 +278,68 @@ def test_helper_gap_defaults_to_one() -> None:
         r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=1)
 
 
+# ---------------------------------------------------------------------------
+# 5-hour burn-rate depletion countdown (five_h_rate parameter)
+# ---------------------------------------------------------------------------
+
+class TestHelperDepletionCountdown:
+    _FIXED = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fixed = self._FIXED
+
+        class _FakeDatetime(datetime):
+            @classmethod
+            def now(cls, tz: tzinfo | None = None) -> datetime:  # type: ignore[override]
+                return fixed.astimezone(tz) if tz else fixed
+
+        monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
+        monkeypatch.setattr(renderer.time, 'time', lambda: fixed.timestamp())
+
+    def test_combined_form_when_depletion_sooner_than_reset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch)
+        # Reset in 11 minutes; a rate that depletes in 4 minutes.
+        future_ts = int(self._FIXED.timestamp()) + 11 * 60
+        r = Renderer()
+        bucket = RateBucket(used_percentage=50.0, resets_at=future_ts)
+        # deplete_minutes(50, rate) = 4  =>  rate = 50/4 = 12.5 %/min
+        out = strip_ansi(r.helper(bucket, five_h_rate=12.5))
+        assert '(-0:11/-0:04)' in out
+
+    def test_warn_colour_wraps_only_depletion_segment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch)
+        future_ts = int(self._FIXED.timestamp()) + 11 * 60
+        r = Renderer()
+        bucket = RateBucket(used_percentage=50.0, resets_at=future_ts)
+        raw = r.helper(bucket, five_h_rate=12.5)
+        warn = r.fill_colour(100.0)
+        # The depletion segment carries the warn colour, immediately reset to
+        # COMMIT before the closing paren.
+        assert f'{warn}/-0:04{r.COMMIT})' in raw
+        # The reset-countdown portion + opening paren stay in COMMIT (no warn
+        # colour precedes it).
+        assert raw.startswith(f'{r.COMMIT}(-0:11{warn}')
+
+    def test_collapses_when_depletion_not_sooner_than_reset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch)
+        # Reset in 11 min; rate implies depletion in 20 min (not sooner).
+        future_ts = int(self._FIXED.timestamp()) + 11 * 60
+        r = Renderer()
+        bucket = RateBucket(used_percentage=50.0, resets_at=future_ts)
+        out = strip_ansi(r.helper(bucket, five_h_rate=2.5))  # (100-50)/2.5 = 20 min
+        assert out.startswith('(-0:11)')
+        assert '/-' not in out
+
+    def test_collapses_when_no_rate_supplied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch)
+        future_ts = int(self._FIXED.timestamp()) + 11 * 60
+        r = Renderer()
+        bucket = RateBucket(used_percentage=50.0, resets_at=future_ts)
+        out = strip_ansi(r.helper(bucket))  # five_h_rate defaults to None
+        assert out.startswith('(-0:11)')
+        assert '/-' not in out
+
+
 def test_rate_helpers_gap_widens_seven_day(monkeypatch: pytest.MonkeyPatch) -> None:
     from datetime import datetime, timezone
     fixed_now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)

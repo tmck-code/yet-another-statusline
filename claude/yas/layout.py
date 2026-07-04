@@ -424,6 +424,7 @@ def build_wide(
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
         fast_mode=session.fast_mode,
+        five_h_rate=tick.five_h_rate,
     )
     line_tokens, vsep_cols, _mark_col, tokens_min_w = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
@@ -542,7 +543,7 @@ def build_wide(
             h7_left  = (h7_outer + 2) // 2
             h7_right = h7_outer - h7_left
         if gap_5h != 1 or gap_7d != 1:
-            helper_5h, helper_7d = r._rate_helpers(session.rate_limits, gap_5h, gap_7d)
+            helper_5h, helper_7d = r._rate_helpers(session.rate_limits, gap_5h, gap_7d, five_h_rate=tick.five_h_rate)
         if _has_cache:
             cache_extra = _extras[_idx]
             _idx += 1

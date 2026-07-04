@@ -11,7 +11,7 @@ import functools
 import time
 from typing import Any, TYPE_CHECKING
 
-from yas.constants import CLAUDE_DIR
+from yas.constants import CLAUDE_DIR, DT_FLOOR
 from yas.session import Model
 
 if TYPE_CHECKING:
@@ -24,12 +24,19 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 class TickRecord:
-    __slots__ = ('token_log', 'day_cost', 'tok_rate')
+    __slots__ = ('token_log', 'day_cost', 'tok_rate', 'five_h_rate')
 
-    def __init__(self, token_log: 'TokenLog', day_cost: float, tok_rate: int) -> None:
-        self.token_log = token_log
-        self.day_cost  = day_cost
-        self.tok_rate  = tok_rate
+    def __init__(
+        self,
+        token_log: 'TokenLog',
+        day_cost: float,
+        tok_rate: int,
+        five_h_rate: float | None = None,
+    ) -> None:
+        self.token_log   = token_log
+        self.day_cost    = day_cost
+        self.tok_rate    = tok_rate
+        self.five_h_rate = five_h_rate
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +273,68 @@ class TokenRate:
         ti0, to0 = samples[0][1], samples[0][2]
         ti1, to1 = samples[-1][1], samples[-1][2]
         return ti1 > ti0, to1 > to0
+
+
+# ---------------------------------------------------------------------------
+# FiveHourRate
+# ---------------------------------------------------------------------------
+
+@functools.cache
+def _five_hour_rate_window() -> float:
+    from yas.config import Config
+    return Config.load().five_hour_rate_window
+
+
+class FiveHourRate:
+    """Instantaneous burn-rate sampler for the account-wide 5-hour bucket.
+
+    Mirrors TokenRate, but the series is global (not keyed by session_id) since
+    `RateBucket.used_percentage` is account-wide and shared across sessions.
+    Samples are filtered to the current `resets_at` so a window rollover starts
+    a fresh series and discards stale samples from the expired window.
+    """
+
+    WINDOW: float | None = None
+    KEEP = 600.0  # >= the max lookback so an in-window sample is never pruned
+
+    @classmethod
+    def update(cls, resets_at: int, used_pct: float) -> float | None:
+        if not resets_at:
+            return None
+        log = CLAUDE_DIR / 'statusline-5h-rate.log'
+        now = time.time()
+        rows: list[tuple[float, int, float]] = []
+        if log.exists():
+            for ln in log.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    ts = float(parts[0])
+                    ra = int(parts[1])
+                    up = float(parts[2])
+                except ValueError:
+                    continue
+                if now - ts > cls.KEEP:
+                    continue
+                rows.append((ts, ra, up))
+        rows.append((now, resets_at, used_pct))
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text('\n'.join(f'{ts:.3f} {ra} {up}' for ts, ra, up in rows) + '\n')
+        except OSError:
+            pass
+        window  = cls.WINDOW if cls.WINDOW is not None else _five_hour_rate_window()
+        samples = [(ts, up) for ts, ra, up in rows if ra == resets_at and now - ts <= window]
+        if len(samples) < 2:
+            return None
+        samples.sort()
+        t_first, used_first = samples[0]
+        t_last, used_last   = samples[-1]
+        if (t_last - t_first) < DT_FLOOR:
+            return None
+        rate = (used_last - used_first) / ((t_last - t_first) / 60)
+        return rate if rate > 0 else None
 
 
 # ---------------------------------------------------------------------------

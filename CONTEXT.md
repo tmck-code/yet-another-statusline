@@ -180,6 +180,13 @@ _Avoid_: "scroll window" (nothing scrolls — the slice is recomputed each rende
 **Five-Hour Limit**:
 The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `ICON_LIMIT_5H (nf-md-timer_outline, 󰔛) (-H:MM) <pct>%` — reset countdown at the front in `(-H:MM)` form (seconds dropped, leading minus, single-digit hour), usage percentage to one decimal place (e.g. `58.0%`), omitted when there is no reset window. 5-hour and 7-day segments are separated by ` ┆ ` (dotted vertical, U+2506).
 
+**Depletion Countdown**:
+A second, danger-coloured countdown appended inside the **Five-Hour Limit**'s existing parenthesis group when the account is projected to exhaust the 5-hour allowance *before* the window resets: `(-H:MM/-DH:DMM)` (e.g. `(-0:11/-0:04)` = resets in 11 minutes, but depletes in 4 at the current burn rate). Driven by the **Five-Hour Burn Rate** — an instantaneous `Δused% / Δt` estimate over a short lookback, computed in `record_tick`/`FiveHourRate` (`tokens.py`) and passed to `Renderer.helper` as `five_h_rate`. Shown only when a rate is available AND projected depletion is sooner than the reset; the reset-countdown portion and enclosing parens stay in the commit colour, and only the `/-DH:DMM` segment is painted in the near-100% fill (warn) colour, reset back to commit before the closing paren. Wide layout only — medium/narrow render the reset countdown alone, byte-identical to before this feature.
+_Avoid_: conflating this with the **Burndown Trend** (a pace-vs-ideal deviation, `used% - ideal%`) — the **Depletion Countdown** is a projected time-to-exhaustion from an instantaneous rate, not a deviation signal.
+
+**Five-Hour Burn Rate**:
+The instantaneous percent-per-minute rate driving the **Depletion Countdown**, computed first-vs-last (`(used_last - used_first) / Δt_minutes`) over samples in the `five_hour_rate_window` lookback (default 300s). Sampled once per wide render in `FiveHourRate.update` (`tokens.py`), which appends `(ts, resets_at, used_pct)` to a **global** log (`statusline-5h-rate.log`, not keyed by session id, since `used_percentage` is account-wide) under `CLAUDE_DIR`. Samples are scoped to the current `resets_at` — a window rollover discards the prior series. Unavailable (no depletion shown) when fewer than two in-window samples exist, their span is below `DT_FLOOR` (60s), or the rate is not strictly positive.
+
 **Seven-Day Limit**:
 The weekly quota in `rate_limits.seven_day`. Rendered in the wide layout model row as `ICON_LIMIT_7D (nf-md-calendar_week_begin, 󰨴) <pct>%` with usage percentage to one decimal place (e.g. `49.0%`) and an optional **Burndown Trend** suffix.
 
@@ -194,7 +201,7 @@ Suppressed when: `resets_at == 0` (no window), window expired, or within warmup 
 ### Configuration
 
 **Config**:
-The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, `justify`, `labels` (**Section Labels**), plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
+The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `five_hour_rate_window` (the **Five-Hour Burn Rate** lookback), `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, `justify`, `labels` (**Section Labels**), plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
 _Avoid_: "settings" (overloaded with Claude Code's `settings.json`, which is unrelated — `Config` reads `yas.toml` and `YAS_*` env vars).
 
 **Glyph Mode**:
