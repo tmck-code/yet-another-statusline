@@ -15,8 +15,9 @@ def _make_git_dir(base: Path, branch: str = 'main', commit: str = 'abcdef1234567
     gitdir.mkdir(parents=True, exist_ok=True)
     (gitdir / 'HEAD').write_text(f'ref: refs/heads/{branch}\n')
     refs_heads = gitdir / 'refs' / 'heads'
-    refs_heads.mkdir(parents=True, exist_ok=True)
-    (refs_heads / branch).write_text(commit + '\n')
+    ref_file = refs_heads / branch
+    ref_file.parent.mkdir(parents=True, exist_ok=True)
+    ref_file.write_text(commit + '\n')
     return gitdir
 
 
@@ -43,11 +44,33 @@ def test_find_repo_no_git_returns_empty(tmp_path: Path) -> None:
 
 
 def test_read_head_ref_branch(tmp_path: Path) -> None:
-    """_read_head parses ref: HEAD and returns branch + 9-char commit."""
+    """_read_head parses ref: HEAD and returns branch + 9-char commit.
+
+    Slash-free branch name: guards the no-regression path (no embedded `/`
+    to preserve or strip) alongside the slashed-branch tests below.
+    """
     gitdir = _make_git_dir(tmp_path, branch='main', commit='abcdef1234567890')
     branch, commit = git.GitInfo._read_head(str(gitdir))
     assert branch == 'main'
     assert commit == 'abcdef123'  # first 9 chars
+
+
+
+def test_read_head_slashed_branch(tmp_path: Path) -> None:
+    """_read_head preserves a single embedded `/` in the branch name
+    instead of truncating to the final path segment."""
+    gitdir = _make_git_dir(tmp_path, branch='feat/123', commit='abcdef1234567890')
+    branch, commit = git.GitInfo._read_head(str(gitdir))
+    assert branch == 'feat/123'
+    assert commit == 'abcdef123'  # first 9 chars
+
+
+
+def test_read_head_multi_slash_branch(tmp_path: Path) -> None:
+    """_read_head preserves multiple embedded `/` separators in full."""
+    gitdir = _make_git_dir(tmp_path, branch='a/b/c', commit='abcdef1234567890')
+    branch, commit = git.GitInfo._read_head(str(gitdir))
+    assert branch == 'a/b/c'
 
 
 

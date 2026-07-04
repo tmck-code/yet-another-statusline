@@ -75,7 +75,11 @@ class GitInfo:
             return '', ''
         branch = ''
         if head.startswith('ref:'):
-            branch = head.rsplit('/', 1)[-1]
+            target = head[4:].strip()
+            if target.startswith('refs/heads/'):
+                branch = target[len('refs/heads/'):]
+            else:
+                branch = target.rsplit('/', 1)[-1]
         elif head:
             branch = f'd:{head[:7]}'
         # .git/HEAD is repo-supplied (attacker-controlled for a cloned repo);
