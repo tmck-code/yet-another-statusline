@@ -100,6 +100,8 @@ CLR_PEACH      = '\033[38;5;216m'
 CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
+CLR_ROSE       = '\033[38;5;211m'
+CLR_TEAL_VIOLET = '\033[38;5;80m'
 
 # Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
 # chat round-trips never lose the bytes. Render only in a Nerd-Font-capable

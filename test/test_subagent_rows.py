@@ -112,6 +112,17 @@ def test_two_line_cluster_share_tok_model_order() -> None:
     assert plain.index('%') < plain.index(tok) < plain.index('sonnet')
 
 
+@pytest.mark.parametrize('model, word', [
+    ('claude-fable-5', 'fable'),
+    ('claude-mythos-5', 'mythos'),
+])
+def test_two_line_cluster_shows_new_model_family(model: str, word: str) -> None:
+    sub = _make_sub(total_input=12345, output=678, model=model)
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 136, session_inout=si)
+    assert word in strip_ansi(line1)
+
+
 def test_two_line_no_tpm_field() -> None:
     sub = _make_sub(first_timestamp=time.time() - 60, total_input=3000, output=600)
     si  = (sub.total_input + sub.output) * 2
@@ -371,6 +382,16 @@ def test_one_line_keeps_type_model_verb() -> None:
     assert 'general-purpose' in out
     assert 'sonnet' in out
     assert 'Bash' in out
+
+
+@pytest.mark.parametrize('model, word', [
+    ('claude-fable-5', 'fable'),
+    ('claude-mythos-5', 'mythos'),
+])
+def test_one_line_shows_new_model_family(model: str, word: str) -> None:
+    sub = _make_sub(model=model, last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    assert word in out
 
 
 def test_one_line_running_keeps_marker() -> None:

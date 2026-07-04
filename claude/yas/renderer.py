@@ -36,7 +36,9 @@ from yas.constants import (
     CLR_PEACH,
     CLR_PINK,
     CLR_PURPLE,
+    CLR_ROSE,
     CLR_SKY_BLUE,
+    CLR_TEAL_VIOLET,
     CLR_WARN,
     CLR_WHITE_BRT,
     CLR_YELLOW,
@@ -214,6 +216,8 @@ class Renderer:
         self.OPUS        = t.models['opus'].label
         self.SONNET      = t.models['sonnet'].label
         self.HAIKU       = t.models['haiku'].label
+        self.FABLE       = t.models['fable'].label
+        self.MYTHOS      = t.models['mythos'].label
         self.safe        = t.safe
         self.warn        = t.warn
         self.alert       = t.alert
@@ -277,6 +281,8 @@ class Renderer:
     OPUS      = CLR_YELLOW
     SONNET    = CLR_GREEN_OK
     HAIKU     = CLR_SKY_BLUE
+    FABLE     = CLR_ROSE
+    MYTHOS    = CLR_TEAL_VIOLET
 
     # --- Gradient delegations (backward compat) ---
     # GRAD_STOPS / GREY_RGB / SPARK_STOPS now live on the GradientEngine
@@ -706,7 +712,7 @@ class Renderer:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
 
-        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
+        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'fable'/'mythos'/'other'
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
 

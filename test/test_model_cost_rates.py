@@ -14,6 +14,14 @@ class TestModelCostRates:
         m = Model(id='claude-sonnet-4-6')
         assert m.cost_rates == (3.00, 15.00)
 
+    def test_fable_rates(self) -> None:
+        m = Model(id='claude-fable-5')
+        assert m.cost_rates == (10.00, 50.00)
+
+    def test_mythos_rates(self) -> None:
+        m = Model(id='claude-mythos-5')
+        assert m.cost_rates == (10.00, 50.00)
+
     def test_unknown_model_default_rates(self) -> None:
         m = Model(id='gpt-5')
         assert m.cost_rates == (3.00, 15.00)
@@ -39,3 +47,11 @@ class TestModelCostRates:
     def test_case_insensitive_haiku(self) -> None:
         m = Model(id='', display_name='HAIKU 4.5')
         assert m.cost_rates == (0.80, 4.00)
+
+    def test_case_insensitive_fable(self) -> None:
+        m = Model(id='', display_name='FABLE 5')
+        assert m.cost_rates == (10.00, 50.00)
+
+    def test_case_insensitive_mythos(self) -> None:
+        m = Model(id='', display_name='MYTHOS 5')
+        assert m.cost_rates == (10.00, 50.00)
