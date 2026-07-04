@@ -55,6 +55,22 @@ def test_model_right_section_pill_active_wraps_with_caps() -> None:
     assert w == _visible_width(right)
 
 
+def test_model_right_section_pill_inactive_fable() -> None:
+    r = Renderer()
+    _h5h, _h7d, right, w = r.model_right_section('Fable 5', '', RateLimits())
+    stripped = strip_ansi(right)
+    assert 'Fable 5' in stripped
+    assert w == _visible_width(right)
+
+
+def test_model_right_section_pill_inactive_mythos() -> None:
+    r = Renderer()
+    _h5h, _h7d, right, w = r.model_right_section('Mythos 5', '', RateLimits())
+    stripped = strip_ansi(right)
+    assert 'Mythos 5' in stripped
+    assert w == _visible_width(right)
+
+
 def test_model_right_section_compact_respects_max_width() -> None:
     r = Renderer()
     _rate, right, w = r.model_right_section_compact('A' * 100, RateLimits(), max_right_width=20)

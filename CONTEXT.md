@@ -62,7 +62,7 @@ The elapsed wall-clock time since the most recent `/clear` in the current transc
 _Avoid_: "since-clear timer" (verbose) or "clear elapsed" (confusing with **Session Timer**). The **Clear Timer** is the canonical term.
 
 **Anchor**:
-The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
+The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, Fable, Mythos, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
 
 **Shift**:
 The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's **Anchor**. Each theme provides both a warm and a cool **Shift** table; `--bg-shift {warm,cool}` selects which is used. `warm` is the default.

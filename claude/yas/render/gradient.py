@@ -47,6 +47,8 @@ def model_key(name: str) -> str:
     if 'opus'   in m: return 'opus'
     if 'sonnet' in m: return 'sonnet'
     if 'haiku'  in m: return 'haiku'
+    if 'fable'  in m: return 'fable'
+    if 'mythos' in m: return 'mythos'
     return 'other'
 
 

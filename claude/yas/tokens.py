@@ -44,6 +44,10 @@ class TokenAccounting:
             return 15.00, 75.00
         if 'haiku' in m:
             return 0.80, 4.00
+        if 'fable' in m:
+            return 10.00, 50.00
+        if 'mythos' in m:
+            return 10.00, 50.00
         return 3.00, 15.00
 
     @staticmethod
