@@ -517,6 +517,79 @@ elif op == "set-statusline":
     }
     sys.stdout.write(json.dumps(data, indent=2))
 
+elif op == "wire":
+    # wire FILE STATUSLINE_CMD HOOK_CMD
+    #   set .statusLine AND upsert the YAS UserPromptSubmit hook in ONE write, so
+    #   both mutations share a single backup/validate/restore. Foreign hooks (e.g.
+    #   a user's docker-skill-nudge.py) are preserved; the YAS entry is matched by
+    #   the "yas-prompt-hook.py" substring and replaced (idempotent / stale-path).
+    #   Double-fire note: a plugin-enabled user also gets the hook via hooks.json,
+    #   firing it twice per prompt — harmless (identical last-write-wins timestamp).
+    data = load(sys.argv[2])
+    if not isinstance(data, dict):
+        data = {}
+    data["statusLine"] = {
+        "async": True,
+        "command": sys.argv[3],
+        "refreshInterval": 1,
+        "type": "command",
+        "padding": 1,
+    }
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    ups = hooks.get("UserPromptSubmit")
+    if not isinstance(ups, list):
+        ups = []
+    def _is_yas(entry):
+        if not isinstance(entry, dict):
+            return False
+        return any(
+            isinstance(h, dict) and "yas-prompt-hook.py" in str(h.get("command", ""))
+            for h in entry.get("hooks", []) or []
+        )
+    ups = [e for e in ups if not _is_yas(e)]
+    ups.append({"matcher": "", "hooks": [{"type": "command", "command": sys.argv[4]}]})
+    hooks["UserPromptSubmit"] = ups
+    data["hooks"] = hooks
+    sys.stdout.write(json.dumps(data, indent=2))
+
+elif op == "get-hook":
+    # get-hook FILE   print the current YAS hook command (empty if absent)
+    data = load(sys.argv[2])
+    out = ""
+    if isinstance(data, dict):
+        hooks = data.get("hooks") or {}
+        for entry in (hooks.get("UserPromptSubmit") or []):
+            if isinstance(entry, dict):
+                for h in entry.get("hooks", []) or []:
+                    if isinstance(h, dict) and "yas-prompt-hook.py" in str(h.get("command", "")):
+                        out = str(h.get("command", ""))
+    sys.stdout.write(out + ("\n" if out else ""))
+
+elif op == "del-hook":
+    # del-hook FILE   remove the YAS UserPromptSubmit hook; print serialized JSON.
+    #   Foreign hooks survive; empty UserPromptSubmit / hooks collapse away.
+    data = load(sys.argv[2])
+    if isinstance(data, dict):
+        hooks = data.get("hooks")
+        if isinstance(hooks, dict) and isinstance(hooks.get("UserPromptSubmit"), list):
+            def _is_yas(entry):
+                if not isinstance(entry, dict):
+                    return False
+                return any(
+                    isinstance(h, dict) and "yas-prompt-hook.py" in str(h.get("command", ""))
+                    for h in entry.get("hooks", []) or []
+                )
+            ups = [e for e in hooks["UserPromptSubmit"] if not _is_yas(e)]
+            if ups:
+                hooks["UserPromptSubmit"] = ups
+            else:
+                hooks.pop("UserPromptSubmit", None)
+            if not hooks:
+                data.pop("hooks", None)
+    sys.stdout.write(json.dumps(data, indent=2))
+
 elif op == "del-key":
     # del-key FILE KEY   remove top-level KEY, print serialized JSON
     data = load(sys.argv[2])
@@ -800,6 +873,7 @@ do_wire() {
     fi
 
     SCRIPT="$PLUGIN_ROOT/claude/statusline_command.py"
+    HOOK_SCRIPT="$PLUGIN_ROOT/hooks/yas-prompt-hook.py"
     printf '%b  Plugin root: %s%b\n' "$C_DIM" "$PLUGIN_ROOT" "$C_RESET"
 
     # Legacy cleanup
@@ -830,12 +904,16 @@ do_wire() {
         run_wizard
     fi
 
-    # Exact-match skip
-    local NEW_CMD OLD_CMD
+    # Exact-match skip — require BOTH the statusLine command AND the prompt hook
+    # to already be current before we skip, otherwise an upgrade that only moved
+    # the hook path (or a first-time hook wire) would be silently missed.
+    local NEW_CMD OLD_CMD NEW_HOOK_CMD OLD_HOOK_CMD
     NEW_CMD="\"$PYTHON_BIN\" \"$SCRIPT\""
+    NEW_HOOK_CMD="\"$PYTHON_BIN\" \"$HOOK_SCRIPT\""
     OLD_CMD=$(json_py get-key "$SETTINGS" statusLine.command 2>/dev/null || printf '')
-    if [ "$OLD_CMD" = "$NEW_CMD" ]; then
-        ok "  statusLine already set to current version — skipping."
+    OLD_HOOK_CMD=$(json_py get-hook "$SETTINGS" 2>/dev/null || printf '')
+    if [ "$OLD_CMD" = "$NEW_CMD" ] && [ "$OLD_HOOK_CMD" = "$NEW_HOOK_CMD" ]; then
+        ok "  statusLine + prompt hook already current — skipping."
         printf '%b  Config dir: %s%b\n' "$C_DIM" "$CLAUDE_CONFIG_DIR" "$C_RESET"
         ok "  Done. Reload Claude Code to activate the statusline."
         return 0
@@ -844,6 +922,7 @@ do_wire() {
     # dry-run wiring
     if [ "$DRY_RUN" = "1" ]; then
         printf '%b  Would wire statusLine.command → %s%b\n' "$C_DIM" "$NEW_CMD" "$C_RESET"
+        printf '%b  Would wire UserPromptSubmit hook → %s%b\n' "$C_DIM" "$NEW_HOOK_CMD" "$C_RESET"
         exit 0
     fi
 
@@ -859,7 +938,7 @@ do_wire() {
     fi
 
     local _result
-    if ! _result=$(json_py set-statusline "$SETTINGS" "$NEW_CMD") || [ -z "$_result" ]; then
+    if ! _result=$(json_py wire "$SETTINGS" "$NEW_CMD" "$NEW_HOOK_CMD") || [ -z "$_result" ]; then
         fail "! JSON merge failed — settings.json unchanged"; exit 1
     fi
 
@@ -875,7 +954,9 @@ do_wire() {
     fi
 
     [ -n "$OLD_CMD" ] && [ "$OLD_CMD" != "$NEW_CMD" ] && printf '%b  Replaced stale path: %s%b\n' "$C_DIM" "$OLD_CMD" "$C_RESET"
+    [ -n "$OLD_HOOK_CMD" ] && [ "$OLD_HOOK_CMD" != "$NEW_HOOK_CMD" ] && printf '%b  Replaced stale hook path: %s%b\n' "$C_DIM" "$OLD_HOOK_CMD" "$C_RESET"
     printf '%b  statusLine set → %s%b\n' "$C_GREEN" "$NEW_CMD" "$C_RESET"
+    printf '%b  prompt hook set → %s%b\n' "$C_GREEN" "$NEW_HOOK_CMD" "$C_RESET"
     printf '%b  Config dir: %s%b\n' "$C_DIM" "$CLAUDE_CONFIG_DIR" "$C_RESET"
     ok "  Done. Reload Claude Code to activate the statusline."
 }
@@ -899,26 +980,40 @@ do_uninstall() {
         fi
     done
 
-    # Remove statusLine key from settings.json
+    # Remove statusLine key AND the YAS prompt hook from settings.json. Symmetric
+    # with do_wire: the hook is matched by the "yas-prompt-hook.py" substring so
+    # foreign UserPromptSubmit hooks (e.g. a user's docker-skill-nudge.py) survive,
+    # and empty UserPromptSubmit / hooks containers collapse away (see del-hook).
     if [ ! -f "$SETTINGS" ]; then
         step "  settings.json not found — nothing to unwire."
     else
-        local HAS_KEY
+        local HAS_KEY HAS_HOOK
         HAS_KEY=$(json_py has-key "$SETTINGS" statusLine 2>/dev/null) || HAS_KEY="false"
-        if [ "$HAS_KEY" != "true" ]; then
+        HAS_HOOK=$(json_py get-hook "$SETTINGS" 2>/dev/null || printf '')
+        if [ "$HAS_KEY" != "true" ] && [ -z "$HAS_HOOK" ]; then
             step "  statusLine not present in settings.json — nothing to unwire."
         elif [ "$DRY_RUN" = "1" ]; then
-            printf '%b  Would remove statusLine from %s%b\n' "$C_DIM" "$SETTINGS" "$C_RESET"
+            [ "$HAS_KEY" = "true" ] && printf '%b  Would remove statusLine from %s%b\n' "$C_DIM" "$SETTINGS" "$C_RESET"
+            [ -n "$HAS_HOOK" ] && printf '%b  Would remove prompt hook from %s%b\n' "$C_DIM" "$SETTINGS" "$C_RESET"
         else
             local BAK
             BAK="${SETTINGS}.bak-yas-$(date -u +%Y%m%dT%H%M%SZ)"
             cp "$SETTINGS" "$BAK"
             printf '%b  Backed up → %s%b\n' "$C_DIM" "$(basename "$BAK")" "$C_RESET"
 
-            local _result
+            # Two ops, one atomic swap. del-key/del-hook each read a file path, so
+            # stage the intermediate JSON through a temp file, then mv the final
+            # result over settings.json exactly once (backup already taken above).
+            local _result _stage
             if ! _result=$(json_py del-key "$SETTINGS" statusLine) || [ -z "$_result" ]; then
                 fail "! JSON edit failed — settings.json unchanged"; exit 1
             fi
+            _stage=$(mktemp "${SETTINGS}.XXXXXXXXXX")
+            printf '%s\n' "$_result" > "$_stage" || { rm -f "$_stage"; fail "! write failed — settings.json unchanged"; exit 1; }
+            if ! _result=$(json_py del-hook "$_stage") || [ -z "$_result" ]; then
+                rm -f "$_stage"; fail "! JSON edit failed — settings.json unchanged"; exit 1
+            fi
+            rm -f "$_stage"
 
             local _tmp
             _tmp=$(mktemp "${SETTINGS}.XXXXXXXXXX")
@@ -930,7 +1025,8 @@ do_uninstall() {
                 cp "$BAK" "$SETTINGS"
                 exit 1
             fi
-            ok "  Removed statusLine from settings.json"
+            [ "$HAS_KEY" = "true" ] && ok "  Removed statusLine from settings.json"
+            [ -n "$HAS_HOOK" ] && ok "  Removed prompt hook from settings.json"
         fi
     fi
 

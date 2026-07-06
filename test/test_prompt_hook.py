@@ -8,6 +8,8 @@ Covers:
 import importlib.util
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +17,40 @@ from pathlib import Path
 import pytest
 
 from yas.info.subagents import read_last_prompt_ts
+
+_INSTALL_SH = Path(__file__).resolve().parent.parent / 'ops' / 'install.sh'
+
+
+def _json_py_body() -> str:
+    '''Extract the json_py python heredoc from ops/install.sh.
+
+    Testing the real op body (rather than a re-implementation) proves the exact
+    code the installer runs, so a divergence in the shipped heredoc is caught.
+    '''
+    src = _INSTALL_SH.read_text()
+    match = re.search(r"<<'PY'\n(.*?)\nPY\n", src, re.S)
+    assert match, 'json_py heredoc not found in install.sh'
+    return match.group(1)
+
+
+def _run_json_py(op: str, path: Path, *rest: str) -> str:
+    '''Invoke a json_py op as a subprocess against the real heredoc body.'''
+    proc = subprocess.run(
+        [sys.executable, '-', op, str(path), *rest],
+        input          = _json_py_body(),
+        capture_output = True,
+        text           = True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+_STATUSLINE_CMD = '"python3" "/plugin/claude/statusline_command.py"'
+_HOOK_CMD = '"python3" "/plugin/hooks/yas-prompt-hook.py"'
+_FOREIGN = {
+    'matcher': '',
+    'hooks': [{'type': 'command', 'command': '"python3" "/x/docker-skill-nudge.py"'}],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -210,3 +246,159 @@ def test_hook_missing_session_id_does_not_crash(tmp_path: Path) -> None:
             os.environ[k] = v
 
     assert not state.exists()
+
+
+# ---------------------------------------------------------------------------
+# Installer json_py ops: wire / get-hook / del-hook
+# ---------------------------------------------------------------------------
+
+class TestInstallerHookOps:
+    '''The install.sh json_py wire/get-hook/del-hook ops that manage the
+    UserPromptSubmit hook alongside statusLine, exercised via the real heredoc.'''
+
+    def test_wire_on_empty_sets_statusline_and_hook(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text('{}')
+
+        # run
+        result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # expected
+        expected = {
+            'statusLine': {
+                'async': True,
+                'command': _STATUSLINE_CMD,
+                'refreshInterval': 1,
+                'type': 'command',
+                'padding': 1,
+            },
+            'hooks': {
+                'UserPromptSubmit': [
+                    {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+                ],
+            },
+        }
+
+        # assert
+        assert result == expected
+
+    def test_wire_is_idempotent(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text('{}')
+        settings.write_text(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # run
+        result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # expected
+        expected = [
+            {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+        ]
+
+        # assert
+        assert result['hooks']['UserPromptSubmit'] == expected
+
+    def test_wire_preserves_foreign_hooks(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text(json.dumps({'hooks': {'UserPromptSubmit': [_FOREIGN]}}))
+
+        # run
+        result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # expected
+        expected = [
+            _FOREIGN,
+            {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+        ]
+
+        # assert
+        assert result['hooks']['UserPromptSubmit'] == expected
+
+    def test_wire_replaces_stale_path(self, tmp_path):
+        # setup
+        stale = {
+            'matcher': '',
+            'hooks': [{'type': 'command', 'command': '"python3" "/old/0.2.0/hooks/yas-prompt-hook.py"'}],
+        }
+        settings = tmp_path / 'settings.json'
+        settings.write_text(json.dumps({'hooks': {'UserPromptSubmit': [stale]}}))
+
+        # run
+        result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # expected
+        expected = [
+            {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+        ]
+
+        # assert
+        assert result['hooks']['UserPromptSubmit'] == expected
+
+    def test_get_hook_returns_current_command(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
+
+        # run
+        result = _run_json_py('get-hook', settings).strip()
+
+        # expected
+        expected = _HOOK_CMD
+
+        # assert
+        assert result == expected
+
+    def test_get_hook_empty_when_absent(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text('{}')
+
+        # run
+        result = _run_json_py('get-hook', settings)
+
+        # expected
+        expected = ''
+
+        # assert
+        assert result == expected
+
+    def test_del_hook_removes_only_yas_and_collapses(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text(json.dumps({
+            'theme': 'dark',
+            'hooks': {'UserPromptSubmit': [
+                {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+            ]},
+        }))
+
+        # run
+        result = json.loads(_run_json_py('del-hook', settings))
+
+        # expected — sole YAS entry gone, empty UserPromptSubmit/hooks collapse away
+        expected = {'theme': 'dark'}
+
+        # assert
+        assert result == expected
+
+    def test_del_hook_preserves_foreign_hooks(self, tmp_path):
+        # setup
+        settings = tmp_path / 'settings.json'
+        settings.write_text(json.dumps({
+            'hooks': {'UserPromptSubmit': [
+                _FOREIGN,
+                {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
+            ]},
+        }))
+
+        # run
+        result = json.loads(_run_json_py('del-hook', settings))
+
+        # expected
+        expected = {'hooks': {'UserPromptSubmit': [_FOREIGN]}}
+
+        # assert
+        assert result == expected

@@ -14,6 +14,12 @@ Requires Python 3.10+, and a [Nerd Font](https://www.nerdfonts.com/font-download
 curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | bash
 ```
 
+Alongside `statusLine.command`, the installer also wires a `UserPromptSubmit`
+hook (`yas-prompt-hook.py`) that records per-session prompt timestamps, enabling
+**accurate turn-scoped subagent display**. It is upserted idempotently — foreign
+hooks are preserved, stale paths are rewritten on upgrade — and removed on
+uninstall.
+
 Or install manually:
 
 ```bash
@@ -265,6 +271,23 @@ Wire `statusLine.command` in `~/.claude/settings.json` to point at the checkout:
 > **Note:** if you also have the plugin installed, `claude plugin install` will overwrite
 > `statusLine.command` back to the plugin cache path. Either uninstall the plugin or bump
 > the version in `.claude-plugin/plugin.json` before reinstalling to keep your local path.
+
+For accurate turn-scoped subagent display, also wire the `UserPromptSubmit` hook
+(`hooks/yas-prompt-hook.py`) so per-session prompt timestamps are recorded:
+```json
+"hooks": {
+  "UserPromptSubmit": [
+    { "matcher": "", "hooks": [
+      { "type": "command", "command": "python3 \"/path/to/yet-another-statusline/hooks/yas-prompt-hook.py\"" }
+    ] }
+  ]
+}
+```
+
+> The `curl … | bash` installer wires this hook for you (upserted idempotently —
+> foreign hooks preserved, stale paths rewritten on upgrade — and removed on
+> uninstall); it is only a manual step for a git-clone install. Without it, the
+> statusline falls back to a time-window heuristic for which subagents to show.
 
 
 This prompts before setting `core.hooksPath`. CI runs the same checks on every push, so the hook is fast local feedback rather than the gate.
