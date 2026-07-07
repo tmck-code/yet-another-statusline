@@ -390,6 +390,52 @@ def test_shared_id_usage_counted_exactly_once(tmp_home: Path) -> None:
     assert sub.end_ts > 0
 
 
+def test_end_ts_cleared_when_agent_resumes_after_end_turn(tmp_home: Path) -> None:
+    # A warm agent ends its turn, then is handed a follow-up (SendMessage) and
+    # starts working again: the old end_turn no longer marks it Done, otherwise
+    # the cohort's clean-retire would hide an actively working agent. Its last
+    # line is a pending tool_use, so no post-loop fallback fires either.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-resumed-working',
+        jsonl_lines=[
+            _assistant_line_full('m1', 'end_turn', timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'first task done'}]),
+            _assistant_line_full('m2', None,       timestamp='2026-05-22T18:30:00.000Z', output_tokens=4,
+                                 content=[{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts == 0.0
+
+
+def test_resumed_agent_done_again_via_terminal_text(tmp_home: Path) -> None:
+    # The resumed agent finishes its follow-up with a terminal text report and
+    # no new end_turn: the stale end_ts is cleared by the resume, then the
+    # terminal-text fallback marks it Done again at the LATER timestamp.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-resumed-done',
+        jsonl_lines=[
+            _assistant_line_full('m1', 'end_turn', timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'first task done'}]),
+            _assistant_line_full('m2', None,       timestamp='2026-05-22T18:30:00.000Z', output_tokens=7,
+                                 content=[{'type': 'text', 'text': 'follow-up report'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # 2026-05-22T18:30:00Z → epoch ≈ 1779474600 (not the 18:00 end_turn)
+    assert 1779474599 < sub.end_ts < 1779474601
+
+
 def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
