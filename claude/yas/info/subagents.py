@@ -66,6 +66,15 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     last_has_text             = False
     last_ts                   = 0.0
     last_content: list[str]   = []  # content from the final terminal-state line
+    # Activity is scoped to the FINAL message: block memory accumulates across
+    # the streamed writes of one message id and resets when the id changes, so
+    # a message's later tool_use/text writes are observed — its first streamed
+    # write is usually the thinking block, and computing activity only behind
+    # the dedup would leave every streamed agent stuck on "(thinking)".
+    cur_mid  = ''
+    cur_tool: dict | None = None
+    cur_text: dict | None = None
+    cur_has_content = False
     try:
         with jsonl.open('r', errors='ignore') as fh:
             for ln in fh:
@@ -108,7 +117,23 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     last_content = cont
                 except (ValueError, TypeError, AttributeError):
                     pass
-                if not mid or mid in seen:
+                if not mid:
+                    continue
+                if mid != cur_mid:
+                    cur_mid  = mid
+                    cur_tool = None
+                    cur_text = None
+                    cur_has_content = False
+                for item in (msg.get('content') or []):
+                    if not isinstance(item, dict):
+                        continue
+                    cur_has_content = True
+                    kind = item.get('type', '')
+                    if kind == 'tool_use':
+                        cur_tool = item
+                    elif kind == 'text':
+                        cur_text = item
+                if mid in seen:
                     continue
                 seen.add(mid)
                 if not model:
@@ -119,40 +144,30 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                 billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
                 cache_read_in += u.get('cache_read_input_tokens', 0) or 0
                 output        += u.get('output_tokens', 0) or 0
-                content = msg.get('content') or []
-                if content:
-                    # Prefer the last tool_use block anywhere in the message;
-                    # a trailing text narration must not mask an actual tool
-                    # call (Claude often emits [text, tool_use, text]).  Only
-                    # when no tool_use exists do we fall back to the first
-                    # non-empty line of the last text block, then thinking.
-                    last_tool = None
-                    last_text = None
-                    for item in content:
-                        kind = item.get('type', '')
-                        if kind == 'tool_use':
-                            last_tool = item
-                        elif kind == 'text':
-                            last_text = item
-                    if last_tool is not None:
-                        raw_inp = last_tool.get('input') or {}
-                        inp = {
-                            k: _sanitize(v) if isinstance(v, str) else v
-                            for k, v in raw_inp.items()
-                        } if isinstance(raw_inp, dict) else {}
-                        last_activity = ('tool_use', _sanitize(last_tool.get('name', '') or ''), inp)
-                    elif last_text is not None:
-                        snippet = ''
-                        for line in str(last_text.get('text', '') or '').splitlines():
-                            stripped = line.strip()
-                            if stripped:
-                                snippet = _sanitize(stripped)
-                                break
-                        last_activity = ('text', snippet, {})
-                    else:
-                        last_activity = ('thinking', '', {})
     except OSError:
         pass
+    # Activity reflects the final message. Prefer its last tool_use block —
+    # a trailing text narration must not mask an actual tool call (Claude
+    # often emits [text, tool_use, text]) — then the first non-empty line of
+    # its last text block, then thinking. The priority applies across the
+    # id's streamed writes exactly as it does within a whole-message array.
+    if cur_tool is not None:
+        raw_inp = cur_tool.get('input') or {}
+        inp = {
+            k: _sanitize(v) if isinstance(v, str) else v
+            for k, v in raw_inp.items()
+        } if isinstance(raw_inp, dict) else {}
+        last_activity = ('tool_use', _sanitize(cur_tool.get('name', '') or ''), inp)
+    elif cur_text is not None:
+        snippet = ''
+        for line in str(cur_text.get('text', '') or '').splitlines():
+            stripped = line.strip()
+            if stripped:
+                snippet = _sanitize(stripped)
+                break
+        last_activity = ('text', snippet, {})
+    elif cur_has_content:
+        last_activity = ('thinking', '', {})
     # Terminal-text Done fallback. Some sidechain (sub-agent) transcripts
     # never emit stop_reason: "end_turn" — every assistant line is either
     # "tool_use" or null, including the final result message. A finished

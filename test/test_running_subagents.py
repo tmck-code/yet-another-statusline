@@ -390,6 +390,33 @@ def test_shared_id_usage_counted_exactly_once(tmp_home: Path) -> None:
     assert sub.end_ts > 0
 
 
+def test_streamed_trailing_text_does_not_mask_tool_use(tmp_home: Path) -> None:
+    # One content block per streamed write, same message id: the activity
+    # snippet must observe the message's later writes, not just its first
+    # (usually the thinking block), and the message-scoped priority
+    # (tool_use > text > thinking) must hold across the writes — a trailing
+    # text narration must not mask the tool_use before it, exactly as within
+    # a single whole-message content array.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-streamed-activity',
+        jsonl_lines=[
+            _assistant_line_full('m1', None, output_tokens=5,
+                                 content=[{'type': 'thinking', 'thinking': 'planning'}]),
+            _assistant_line_full('m1', None, output_tokens=5,
+                                 content=[{'type': 'tool_use', 'name': 'Edit', 'input': {'file_path': '/x.py'}}]),
+            _assistant_line_full('m1', None, output_tokens=9,
+                                 content=[{'type': 'text', 'text': 'edited'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.last_activity == ('tool_use', 'Edit', {'file_path': '/x.py'})
+
+
 def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
