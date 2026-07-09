@@ -50,9 +50,12 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     Never raises; an unreadable transcript yields zeroes.
     """
     seen: set[str] = set()
-    billed_in    = 0
-    cache_read_in = 0
-    output       = 0
+    # Usage is keyed by message id with last-line-wins: streaming re-writes
+    # the same id as it appends content blocks, and the usage counters GROW
+    # across those writes — the final one carries the message's real totals.
+    # Accumulating only the first write (behind the dedup) freezes usage at
+    # the first partial snapshot and undercounts output tokens.
+    usage_by_id: dict[str, tuple[int, int, int]] = {}
     first_ts     = 0.0
     end_ts       = 0.0
     model        = ''
@@ -108,17 +111,21 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     last_content = cont
                 except (ValueError, TypeError, AttributeError):
                     pass
-                if not mid or mid in seen:
+                if not mid:
+                    continue
+                u = msg.get('usage') or {}
+                usage_by_id[mid] = (
+                    (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0),
+                    u.get('cache_read_input_tokens', 0) or 0,
+                    u.get('output_tokens', 0) or 0,
+                )
+                if mid in seen:
                     continue
                 seen.add(mid)
                 if not model:
                     m = msg.get('model') or ''
                     if m:
                         model = m
-                u = msg.get('usage') or {}
-                billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
-                cache_read_in += u.get('cache_read_input_tokens', 0) or 0
-                output        += u.get('output_tokens', 0) or 0
                 content = msg.get('content') or []
                 if content:
                     # Prefer the last tool_use block anywhere in the message;
@@ -153,6 +160,9 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                         last_activity = ('thinking', '', {})
     except OSError:
         pass
+    billed_in     = sum(billed for billed, _, _ in usage_by_id.values())
+    cache_read_in = sum(cached for _, cached, _ in usage_by_id.values())
+    output        = sum(out for _, _, out in usage_by_id.values())
     # Terminal-text Done fallback. Some sidechain (sub-agent) transcripts
     # never emit stop_reason: "end_turn" — every assistant line is either
     # "tool_use" or null, including the final result message. A finished

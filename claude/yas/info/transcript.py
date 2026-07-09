@@ -55,8 +55,12 @@ class TranscriptUsage:
         p = Path(transcript_path)
         if not p.is_file():
             return cls()
-        seen: set[str] = set()
-        ti = cc = cr = to = 0
+        # Usage is keyed by message id with last-line-wins: streaming re-writes
+        # the same id as it appends content blocks, and the usage counters GROW
+        # across those writes — the final one carries the message's real totals.
+        # A first-write dedup freezes usage at the first partial snapshot and
+        # undercounts output tokens.
+        usage_by_id: dict[str, tuple[int, int, int, int]] = {}
         _cache_anchor_ts: str  = ''
         _cache_1h:        bool = False
         try:
@@ -70,14 +74,15 @@ class TranscriptUsage:
                         continue
                     msg = d.get('message') or {}
                     mid = msg.get('id')
-                    if not mid or mid in seen:
+                    if not mid:
                         continue
-                    seen.add(mid)
                     u = msg.get('usage') or {}
-                    ti += u.get('input_tokens', 0) or 0
-                    cc += u.get('cache_creation_input_tokens', 0) or 0
-                    cr += u.get('cache_read_input_tokens', 0) or 0
-                    to += u.get('output_tokens', 0) or 0
+                    usage_by_id[mid] = (
+                        u.get('input_tokens', 0) or 0,
+                        u.get('cache_creation_input_tokens', 0) or 0,
+                        u.get('cache_read_input_tokens', 0) or 0,
+                        u.get('output_tokens', 0) or 0,
+                    )
                     if (u.get('cache_read_input_tokens', 0) or 0) > 0 or \
                             (u.get('cache_creation_input_tokens', 0) or 0) > 0:
                         _cache_anchor_ts = d.get('timestamp', '') or ''
@@ -87,6 +92,10 @@ class TranscriptUsage:
                         )
         except OSError:
             return cls()
+        ti = sum(vals[0] for vals in usage_by_id.values())
+        cc = sum(vals[1] for vals in usage_by_id.values())
+        cr = sum(vals[2] for vals in usage_by_id.values())
+        to = sum(vals[3] for vals in usage_by_id.values())
         cache_anchor_epoch = 0.0
         if _cache_anchor_ts:
             try:

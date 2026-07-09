@@ -390,6 +390,36 @@ def test_shared_id_usage_counted_exactly_once(tmp_home: Path) -> None:
     assert sub.end_ts > 0
 
 
+def test_streamed_usage_last_line_wins(tmp_home: Path) -> None:
+    # On real transcripts the partial and final writes of a streamed message do
+    # NOT carry identical usage: the counters grow across the writes and the
+    # final one holds the message's real totals. The counters must take the
+    # last write's snapshot — not freeze at the first partial (out=2 here) and
+    # not sum the snapshots (out=305).
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-usage-grows',
+        jsonl_lines=[
+            _assistant_line_full('m1', None,       input_tokens=26, output_tokens=2,
+                                 timestamp='2026-05-22T17:59:00.000Z',
+                                 content=[{'type': 'thinking', 'thinking': 'hmm'}]),
+            _assistant_line_full('m1', None,       input_tokens=26, output_tokens=2,
+                                 content=[{'type': 'text', 'text': 'Checking the tests.'}]),
+            _assistant_line_full('m1', 'end_turn', input_tokens=26, output_tokens=301,
+                                 timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'All done.'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.billed_in == 26
+    assert sub.output    == 301
+    assert sub.end_ts > 0
+
+
 def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
