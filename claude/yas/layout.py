@@ -18,12 +18,13 @@ from yas.constants import (
     RESET,
     SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
+    TWO_COL_SUBAGENT_WIDTH,
     TWO_COL_WF_WIDTH,
     WORKFLOW_AGENT_CAP,
     WORKFLOW_RUN_CAP,
 )
 from yas.info import SessionView, _fmt_elapsed_clock
-from yas.info.subagents import read_last_prompt_ts
+from yas.info.subagents import RunningSubagent, read_last_prompt_ts
 from yas.render.pill import Pill
 from yas.renderer import Renderer
 from yas.render.text import _visible_width, _token_offsets
@@ -215,14 +216,19 @@ def build_workflow_rows(
             out.append(RowSpec('content', content=left_only(r.workflow_header(run, half_w))))
             agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
             hidden_agents = run.agent_count - len(agents)
-            # Pair agents sequentially in first_timestamp order. An odd trailing
-            # agent renders in the left column with a blank right half so it
-            # stays inside the L/R section and the divider stays unbroken.
-            for i in range(0, len(agents), 2):
-                left = r.subagent_row(agents[i], half_w, twoline=False, session_inout=0)
+            # Pair agents column-major: left column is agents[:ceil(n/2)] (most
+            # recent, chronological), right column is the rest, paired by row
+            # index. An odd trailing agent renders in the left column with a
+            # blank right half so it stays inside the L/R section and the
+            # divider stays unbroken.
+            left_count   = (len(agents) + 1) // 2  # ceil: left column gets the extra agent
+            left_agents  = agents[:left_count]
+            right_agents = agents[left_count:]
+            for i in range(len(left_agents)):
+                left = r.subagent_row(left_agents[i], half_w, twoline=False, session_inout=0)
                 left = f'{left}{" " * max(0, half_w - _visible_width(left))}'
-                if i + 1 < len(agents):
-                    right = r.subagent_row(agents[i + 1], half_w, twoline=False, session_inout=0)
+                if i < len(right_agents):
+                    right = r.subagent_row(right_agents[i], half_w, twoline=False, session_inout=0)
                     right = f'{right}{" " * max(0, half_w - _visible_width(right))}'
                     out.append(RowSpec('content', content=f'{left}{divider}{right}'))
                 else:
@@ -441,6 +447,12 @@ def build_wide(
     tokens_fits = width >= max(tokens_min_w, TOKENS_COST_MIN_WIDTH)
 
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+    # border_line pads to width - 3 ('│ ' + content + '│') but never truncates;
+    # a long plugin list would overflow the box, so clip it here.
+    plugins_avail = width - 3
+    if _visible_width(plugins_line) > plugins_avail:
+        cut = _ansi_byte_offset(plugins_line, plugins_avail - 1)
+        plugins_line = f'{plugins_line[:cut]}{ELLIPSIS}{RESET}'
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
@@ -895,10 +907,31 @@ def build_wide(
         if visible_subs:
             sub_labels: list[tuple[str, int]] = [('subagents', 3)] if view.cfg.labels else []
             rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=sub_labels))
-            for sub in visible_subs:
-                for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
-                                           stats_col=100 if width >= 125 else None).split('\n'):
-                    rows.append(RowSpec('content', content=line))
+            two_col = width >= TWO_COL_SUBAGENT_WIDTH and len(visible_subs) >= 2
+            if two_col:
+                inner     = width - 4
+                half_w    = (inner - 5) // 2
+                div_color = r.grad_at(workflow_divider_col(width) - 1, width, fill=fill)
+                divider   = f'  {div_color}{GLYPH_WF_DIVIDER}{RESET}  '
+                left_count = (len(visible_subs) + 1) // 2  # ceil: left column gets the extra agent
+                left       = visible_subs[:left_count]
+                right      = visible_subs[left_count:]
+
+                def cell(sub: RunningSubagent) -> str:
+                    line = r.subagent_row(sub, half_w, twoline=False, session_inout=session_inout)
+                    return f'{line}{" " * max(0, half_w - _visible_width(line))}'
+
+                for i in range(len(left)):
+                    left_cell = cell(left[i])
+                    if i < len(right):
+                        rows.append(RowSpec('content', content=f'{left_cell}{divider}{cell(right[i])}'))
+                    else:
+                        rows.append(RowSpec('content', content=f'{left_cell}{divider}'))
+            else:
+                for sub in visible_subs:
+                    for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
+                                               stats_col=100 if width >= 125 else None).split('\n'):
+                        rows.append(RowSpec('content', content=line))
             pending_ups = ()
 
     # Workflow cohort: each visible run as a header / per-agent rows / summary

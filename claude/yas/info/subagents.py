@@ -50,9 +50,12 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     Never raises; an unreadable transcript yields zeroes.
     """
     seen: set[str] = set()
-    billed_in    = 0
-    cache_read_in = 0
-    output       = 0
+    # Usage is keyed by message id with last-line-wins: streaming re-writes
+    # the same id as it appends content blocks, and the usage counters GROW
+    # across those writes — the final one carries the message's real totals.
+    # Accumulating only the first write (behind the dedup) freezes usage at
+    # the first partial snapshot and undercounts output tokens.
+    usage_by_id: dict[str, tuple[int, int, int]] = {}
     first_ts     = 0.0
     end_ts       = 0.0
     model        = ''
@@ -72,8 +75,8 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     # write is usually the thinking block, and computing activity only behind
     # the dedup would leave every streamed agent stuck on "(thinking)".
     cur_mid  = ''
-    cur_tool: dict | None = None
-    cur_text: dict | None = None
+    cur_tool: dict[str, object] | None = None
+    cur_text: dict[str, object] | None = None
     cur_has_content = False
     try:
         with jsonl.open('r', errors='ignore') as fh:
@@ -119,6 +122,17 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     pass
                 if not mid:
                     continue
+                # Update usage_by_id with last-line-wins: streamed usage counters
+                # grow across an id's writes; the final write carries real totals.
+                u = msg.get('usage') or {}
+                usage_by_id[mid] = (
+                    (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0),
+                    u.get('cache_read_input_tokens', 0) or 0,
+                    u.get('output_tokens', 0) or 0,
+                )
+                # Activity is message-scoped: accumulate across streamed writes of the
+                # same message id so later tool_use/text blocks (after the thinking
+                # block) are observed with the usual tool_use > text > thinking priority.
                 if mid != cur_mid:
                     cur_mid  = mid
                     cur_tool = None
@@ -140,12 +154,11 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     m = msg.get('model') or ''
                     if m:
                         model = m
-                u = msg.get('usage') or {}
-                billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
-                cache_read_in += u.get('cache_read_input_tokens', 0) or 0
-                output        += u.get('output_tokens', 0) or 0
     except OSError:
         pass
+    billed_in     = sum(billed for billed, _, _ in usage_by_id.values())
+    cache_read_in = sum(cached for _, cached, _ in usage_by_id.values())
+    output        = sum(out for _, _, out in usage_by_id.values())
     # Activity reflects the final message. Prefer its last tool_use block —
     # a trailing text narration must not mask an actual tool call (Claude
     # often emits [text, tool_use, text]) — then the first non-empty line of
@@ -157,7 +170,7 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
             k: _sanitize(v) if isinstance(v, str) else v
             for k, v in raw_inp.items()
         } if isinstance(raw_inp, dict) else {}
-        last_activity = ('tool_use', _sanitize(cur_tool.get('name', '') or ''), inp)
+        last_activity = ('tool_use', _sanitize(str(cur_tool.get('name', '') or '')), inp)
     elif cur_text is not None:
         snippet = ''
         for line in str(cur_text.get('text', '') or '').splitlines():

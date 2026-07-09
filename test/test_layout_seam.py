@@ -712,6 +712,44 @@ def test_workflow_two_column_pairing_threshold() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Plugins row truncation (#91 — long plugin list overflowed the box)
+# ---------------------------------------------------------------------------
+
+def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plugin list far wider than the box is clipped to the inner content
+    width with a trailing ellipsis instead of overflowing past the right
+    border — every rendered row stays exactly box-wide."""
+    from helper import strip_ansi
+    from yas.constants import ELLIPSIS
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+    plugins = ','.join(f'plugin-{i:02d}' for i in range(40))  # ~440 visible cols
+    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: plugins))
+
+    width = 140
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    for ln in lines:
+        assert _visible_width(ln) == width, f'row overflows the box: {_visible_width(ln)} != {width}'
+    plugins_lines = [ln for ln in lines if 'plugin-00' in ln]
+    assert plugins_lines, 'plugins row should render'
+    assert ELLIPSIS in plugins_lines[0], 'clipped plugins row should end with an ellipsis'
+
+
+def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plugin list that fits the box renders in full, with no ellipsis."""
+    from helper import strip_ansi
+    from yas.constants import ELLIPSIS
+    _silence_dynamic(monkeypatch)
+    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: 'foo,bar'))
+
+    spec = layout.build_wide(_view(), _tick(), 140, _r)
+    plugins_lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r) if 'foo,bar' in strip_ansi(ln)]
+    assert plugins_lines, 'plugins row should render'
+    assert ELLIPSIS not in plugins_lines[0]
+
+
+# ---------------------------------------------------------------------------
 # Task 6.4 — cache_section sub-hour and over-hour format
 # ---------------------------------------------------------------------------
 
