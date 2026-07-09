@@ -549,6 +549,45 @@ class TestWorkflowLayout:
         assert any('agent-0' in t for t in agent_rows)
         assert any('agent-2' in t for t in agent_rows)
 
+    def test_two_col_workflow_column_major_ordering(self, strip_ansi):
+        # setup: 5 distinguishable agents at width 120 (== TWO_COL_WF_WIDTH),
+        # mirrors test_two_col_subagent_column_major_ordering in
+        # test_layout_subagent_rows.py — the workflow cohort now fills
+        # column-major too, matching the plain subagent cohort.
+        now  = time.time()
+        view = _view()
+        run  = RunningWorkflow(
+            run_id = 'wf_x', name = 'wf_x', phase = '',
+            agents = [
+                _make_workflow_subagent(f'a{i}', agent_type=f'agent-{i}', first_timestamp=now + i, mtime=now)
+                for i in range(1, 6)
+            ],
+        )
+        self._inject(view, [run])
+
+        # run
+        rows = layout.build_workflow_rows(view, 120, _r, per_agent=True)
+        texts = [strip_ansi(row.content) for row in rows]
+        # strip the header (first) and summary (last) rows
+        agent_rows = texts[1:-1]
+
+        # expected: ceil(5/2) == 3 paired rows; left column top-to-bottom is
+        # agent-1,2,3 and right column top-to-bottom is agent-4,5 — row0 pairs
+        # agent-1(left)/agent-4(right), NOT agent-1(left)/agent-2(right).
+        assert len(agent_rows) == 3
+        row0, row1, row2 = agent_rows
+
+        assert 'agent-1' in row0 and 'agent-4' in row0
+        assert 'agent-2' not in row0 and 'agent-5' not in row0
+
+        assert 'agent-2' in row1 and 'agent-5' in row1
+        assert 'agent-1' not in row1 and 'agent-4' not in row1
+
+        # odd trailing row: left-only agent-3, no right agent.
+        assert 'agent-3' in row2
+        for other in ('agent-1', 'agent-2', 'agent-4', 'agent-5'):
+            assert other not in row2
+
     def test_agent_cap_caps_rows_and_reports_hidden(self, strip_ansi):
         # setup: 9 agents, cap is 6 -> 3 hidden
         now  = time.time()

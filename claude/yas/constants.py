@@ -28,6 +28,12 @@ MEDIUM_WIDTH = 80
 # Below this the agents stack single-column. Set under DEFAULT_MAX_WIDTH=140 so
 # the two-column layout is actually reachable in a default-config wide terminal.
 TWO_COL_WF_WIDTH = 120
+# Box width at/above which the wide layout's plain subagent cohort (the
+# fallback single-column stack, not the checklist/subagents side-by-side
+# split) pairs agents into two side-by-side columns, filled column-major.
+# Set under DEFAULT_MAX_WIDTH=140 so the two-column layout is actually
+# reachable in a default-config wide terminal.
+TWO_COL_SUBAGENT_WIDTH = 120
 # Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
 # the row cannot hold both columns at full size plus the rate/spark leader, so
 # build_wide drops it for the compact context line instead of overflowing the
