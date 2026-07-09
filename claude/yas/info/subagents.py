@@ -103,13 +103,20 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                 # stop_reason: null, a final write with end_turn); the dedup
                 # below must not let an already-seen id suppress this capture.
                 # Last-write-wins: a later end_turn overwrites an earlier
-                # end_ts; non-terminal lines never touch end_ts.
+                # end_ts, and a later NON-terminal line clears it — a subagent
+                # can be resumed after its turn ends (SendMessage to a warm
+                # agent), and the stale end_ts would render a working agent as
+                # Done. Done therefore means the transcript currently ENDS in
+                # an ended turn; a resumed agent that finishes again goes Done
+                # at the later time via a new end_turn or a post-loop fallback.
                 try:
                     stop   = msg.get('stop_reason')
                     ts_raw = d.get('timestamp', '')
                     line_ts = _parse_iso_to_epoch(ts_raw) if ts_raw else 0.0
                     if stop == 'end_turn' and line_ts:
                         end_ts = line_ts
+                    elif stop != 'end_turn':
+                        end_ts = 0.0
                     # Record this line's shape for the post-loop fallback.
                     # Runs pre-dedup so the final full write of a streamed
                     # message is always observed even if its id was seen.
