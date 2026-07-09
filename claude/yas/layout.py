@@ -216,14 +216,19 @@ def build_workflow_rows(
             out.append(RowSpec('content', content=left_only(r.workflow_header(run, half_w))))
             agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
             hidden_agents = run.agent_count - len(agents)
-            # Pair agents sequentially in first_timestamp order. An odd trailing
-            # agent renders in the left column with a blank right half so it
-            # stays inside the L/R section and the divider stays unbroken.
-            for i in range(0, len(agents), 2):
-                left = r.subagent_row(agents[i], half_w, twoline=False, session_inout=0)
+            # Pair agents column-major: left column is agents[:ceil(n/2)] (most
+            # recent, chronological), right column is the rest, paired by row
+            # index. An odd trailing agent renders in the left column with a
+            # blank right half so it stays inside the L/R section and the
+            # divider stays unbroken.
+            left_count   = (len(agents) + 1) // 2  # ceil: left column gets the extra agent
+            left_agents  = agents[:left_count]
+            right_agents = agents[left_count:]
+            for i in range(len(left_agents)):
+                left = r.subagent_row(left_agents[i], half_w, twoline=False, session_inout=0)
                 left = f'{left}{" " * max(0, half_w - _visible_width(left))}'
-                if i + 1 < len(agents):
-                    right = r.subagent_row(agents[i + 1], half_w, twoline=False, session_inout=0)
+                if i < len(right_agents):
+                    right = r.subagent_row(right_agents[i], half_w, twoline=False, session_inout=0)
                     right = f'{right}{" " * max(0, half_w - _visible_width(right))}'
                     out.append(RowSpec('content', content=f'{left}{divider}{right}'))
                 else:

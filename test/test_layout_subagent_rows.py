@@ -193,8 +193,9 @@ def test_two_col_subagent_column_major_ordering(monkeypatch: pytest.MonkeyPatch)
     """5 visible subagents at width 120 fill column-major: left column top-to-
     bottom is agents 1,2,3 and right column top-to-bottom is agents 4,5 — the
     first row pairs agent1(left)/agent4(right), NOT agent1(left)/agent2(right).
-    This distinguishes column-major fill from the workflow block's row-major
-    fill. The trailing odd agent (agent3) renders left-only with a trailing
+    The workflow cohort's two-column block fills the same way (see
+    test_two_col_workflow_column_major_ordering in test_workflow_cohort.py).
+    The trailing odd agent (agent3) renders left-only with a trailing
     divider and a blank right cell."""
     subs = [_make_sub(f'agent{i}') for i in range(1, 6)]  # 5 agents, distinct types
     _inject(monkeypatch, subs)
