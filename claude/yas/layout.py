@@ -447,6 +447,12 @@ def build_wide(
     tokens_fits = width >= max(tokens_min_w, TOKENS_COST_MIN_WIDTH)
 
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+    # border_line pads to width - 3 ('│ ' + content + '│') but never truncates;
+    # a long plugin list would overflow the box, so clip it here.
+    plugins_avail = width - 3
+    if _visible_width(plugins_line) > plugins_avail:
+        cut = _ansi_byte_offset(plugins_line, plugins_avail - 1)
+        plugins_line = f'{plugins_line[:cut]}{ELLIPSIS}{RESET}'
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
