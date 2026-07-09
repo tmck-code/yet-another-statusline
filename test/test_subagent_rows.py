@@ -656,7 +656,7 @@ def test_two_line_activity_caps_at_100_when_huge() -> None:
 
 # I. build_wide integration --------------------------------------------------
 
-def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent]) -> str:
+def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent], width: int = 120) -> str:
     monkeypatch.setattr(
         subagents_mod.RunningSubagents, 'from_session',
         classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)),
@@ -664,7 +664,7 @@ def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[RunningSubagent]) -
     session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
     view    = SessionView(session, Config())
     tick    = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
-    spec    = layout.build_wide(view, tick, 120, _r)
+    spec    = layout.build_wide(view, tick, width, _r)
     return '\n'.join(layout.render_layout(spec, _r))
 
 
@@ -675,15 +675,18 @@ def test_build_wide_no_subagents(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_build_wide_two_subagents_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    # width 119 stays below TWO_COL_SUBAGENT_WIDTH (120), so this still
+    # exercises the single-column twoline=True stacked rendering; see
+    # test_layout_subagent_rows.py for the width>=120 paired-column layout.
     sub_a = _make_sub(agent_type='alpha-agent', description='do alpha thing')
     sub_b = _make_sub(agent_type='beta-agent', description='do beta thing')
-    out   = strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b]))
+    out   = strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b], width=119))
     assert 'alpha-agent' in out
     assert 'beta-agent' in out
     # wide is two-line: subagent rows carry no run-state marker
     assert '▶' not in out
     # the subagent identity lines drop the t/m and ↑output fields
-    sub_lines = [ln for ln in strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b])).split('\n')
+    sub_lines = [ln for ln in strip_ansi(_render_wide(monkeypatch, [sub_a, sub_b], width=119)).split('\n')
                  if 'alpha-agent' in ln or 'beta-agent' in ln]
     assert sub_lines
     for ln in sub_lines:
