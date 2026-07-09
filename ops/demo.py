@@ -969,6 +969,21 @@ SCENARIOS: list[ScenarioConfig] = [
         seven_day_pct      = 20.0,
         subagent_mtime_age = 40.0,
     ),
+    ScenarioConfig(
+        name        = 'cohort-two-column',
+        context_pct = 0.40,
+        subagents   = [
+            ('explore',         'Map the token-tracking call sites',        2_100,   180, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
+            ('general-purpose', 'Refactor the sparkline bucket algorithm',  5_600,   720, ('Edit', {'file_path': 'claude/statusline_command.py', 'old_string': 'x', 'new_string': 'y'})),
+            ('claude',          'Draft the border-math cleanup',            3_800,   540, ('Read', {'file_path': 'claude/statusline_command.py'})),
+            ('reviewer',        'Audit the gradient elbow math',            4_400,   610, ('Read', {'file_path': 'claude/yas/renderer.py'})),
+            # Text-only latest message -> replying snippet alongside the cohort.
+            ('narrator',        'Narrate the layout refactor plan',         2_400,   320, ('text', 'Walking the border helpers before touching elbows')),
+            ('tester',          'Run the layout regression suite',          6_100, 1_180, ('Bash', {'command': 'uv run pytest -q test/test_layout_seam.py'})),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+    ),
 ]
 
 
