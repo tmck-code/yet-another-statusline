@@ -677,12 +677,14 @@ def test_workflow_two_column_pairing_threshold() -> None:
         # strip the header (first) and summary (last) rows
         return rows[1:-1]
 
-    # width 120 (== TWO_COL_WF_WIDTH): the two agents share a single paired
-    # content row. The block carries no internal separators — the divider ``┊``
-    # is embedded in every row and the bracketing ┬/┴ are threaded by build_wide.
+    # width 120 (== TWO_COL_WF_WIDTH): the two agents share paired content
+    # rows. With twoline=True each agent emits 2 lines, so one pair produces
+    # 2 content rows. The block carries no internal separators — the divider
+    # ``┊`` is embedded in every row and the bracketing ┬/┴ are threaded by
+    # build_wide.
     rows = agent_rows(120)
     assert all(row.kind == 'content' for row in rows)
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert 'agent-0' in rows[0].content and 'agent-1' in rows[0].content
     # Every row of the block (header, paired agents, summary) embeds the divider
     # at the shared column so the bar stays straight top-to-bottom.

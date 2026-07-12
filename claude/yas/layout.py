@@ -238,14 +238,15 @@ def build_workflow_rows(
             right_agents = agents[left_count:]
             mfw          = _cohort_model_field_w(agents)
             for i in range(len(left_agents)):
-                left = r.subagent_row(left_agents[i], half_w, twoline=False, session_inout=0, model_field_w=mfw)
-                left = f'{left}{" " * max(0, half_w - _visible_width(left))}'
+                left_raw = r.subagent_row(left_agents[i], half_w, twoline=True, session_inout=0, model_field_w=mfw)
+                left_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in left_raw.split('\n')]
                 if i < len(right_agents):
-                    right = r.subagent_row(right_agents[i], half_w, twoline=False, session_inout=0, model_field_w=mfw)
-                    right = f'{right}{" " * max(0, half_w - _visible_width(right))}'
-                    out.append(RowSpec('content', content=f'{left}{divider}{right}'))
+                    right_raw = r.subagent_row(right_agents[i], half_w, twoline=True, session_inout=0, model_field_w=mfw)
+                    right_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in right_raw.split('\n')]
                 else:
-                    out.append(RowSpec('content', content=f'{left}{divider}'))
+                    right_lines = [' ' * half_w] * len(left_lines)
+                for j in range(len(left_lines)):
+                    out.append(RowSpec('content', content=f'{left_lines[j]}{divider}{right_lines[j]}'))
             out.append(RowSpec('content', content=left_only(r.workflow_summary(run, half_w, hidden_agents=hidden_agents))))
         if hidden_runs > 0:
             out.append(RowSpec('content', content=left_only(f'{r.LABEL}+{hidden_runs} more workflows{r.R}')))
@@ -935,16 +936,19 @@ def build_wide(
                 right      = visible_subs[left_count:]
                 mfw        = _cohort_model_field_w(visible_subs)
 
-                def cell(sub: RunningSubagent) -> str:
-                    line = r.subagent_row(sub, half_w, twoline=False, session_inout=session_inout, model_field_w=mfw)
-                    return f'{line}{" " * max(0, half_w - _visible_width(line))}'
+                def cell_lines(sub: RunningSubagent) -> list[str]:
+                    raw = r.subagent_row(sub, half_w, twoline=True, session_inout=session_inout, model_field_w=mfw)
+                    lines = raw.split('\n')
+                    return [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in lines]
 
                 for i in range(len(left)):
-                    left_cell = cell(left[i])
+                    left_lines = cell_lines(left[i])
                     if i < len(right):
-                        rows.append(RowSpec('content', content=f'{left_cell}{divider}{cell(right[i])}'))
+                        right_lines = cell_lines(right[i])
                     else:
-                        rows.append(RowSpec('content', content=f'{left_cell}{divider}'))
+                        right_lines = [' ' * half_w, ' ' * half_w]
+                    for j in range(len(left_lines)):
+                        rows.append(RowSpec('content', content=f'{left_lines[j]}{divider}{right_lines[j]}'))
             else:
                 mfw = _cohort_model_field_w(visible_subs)
                 for sub in visible_subs:
