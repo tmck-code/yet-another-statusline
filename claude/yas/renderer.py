@@ -1585,9 +1585,8 @@ class Renderer:
             total_s   = int(delta.total_seconds())
             h, rem    = divmod(total_s, 3600)
             m         = rem // 60
-            remain_min  = total_s / 60
             deplete_min = deplete_minutes(float(five_hour.used_percentage or 0), five_h_rate)
-            if deplete_min is not None and deplete_min < remain_min:
+            if deplete_min is not None:
                 dtot = int(deplete_min * 60)
                 dh, drem = divmod(dtot, 3600)
                 dm = drem // 60

@@ -320,15 +320,16 @@ class TestHelperDepletionCountdown:
         # colour precedes it).
         assert raw.startswith(f'{r.COMMIT}(-0:11{warn}')
 
-    def test_collapses_when_depletion_not_sooner_than_reset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_shows_when_depletion_later_than_reset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch(monkeypatch)
-        # Reset in 11 min; rate implies depletion in 20 min (not sooner).
+        # Reset in 11 min; rate implies depletion in 20 min (after the natural
+        # reset). The countdown still appends — any positive instantaneous
+        # rate projects a depletion estimate, regardless of the reset window.
         future_ts = int(self._FIXED.timestamp()) + 11 * 60
         r = Renderer()
         bucket = RateBucket(used_percentage=50.0, resets_at=future_ts)
         out = strip_ansi(r.helper(bucket, five_h_rate=2.5))  # (100-50)/2.5 = 20 min
-        assert out.startswith('(-0:11)')
-        assert '/-' not in out
+        assert '(-0:11/-0:20)' in out
 
     def test_collapses_when_no_rate_supplied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch(monkeypatch)
