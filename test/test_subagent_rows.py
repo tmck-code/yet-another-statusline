@@ -123,6 +123,26 @@ def test_two_line_cluster_shows_new_model_family(model: str, word: str) -> None:
     assert word in strip_ansi(line1)
 
 
+def test_two_line_shows_1m_variant_suffix() -> None:
+    # A subagent on the 1M-token context variant appends `[1m]` after the model
+    # bucket name; the wider label still fills flush to the content edge.
+    sub = _make_sub(total_input=12345, output=678, model='claude-opus-4-8[1m]')
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 136, session_inout=si)
+    assert 'opus[1m]' in strip_ansi(line1)
+    assert _visible_width(line1) == 136
+
+
+def test_two_line_no_suffix_for_non_1m_model() -> None:
+    # A plain (non-1m) subagent shows the bare bucket name, no variant suffix.
+    sub = _make_sub(total_input=12345, output=678, model='claude-opus-4-8')
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 136, session_inout=si)
+    plain = strip_ansi(line1)
+    assert 'opus' in plain
+    assert '[1m]' not in plain
+
+
 def test_two_line_no_tpm_field() -> None:
     sub = _make_sub(first_timestamp=time.time() - 60, total_input=3000, output=600)
     si  = (sub.total_input + sub.output) * 2
@@ -392,6 +412,23 @@ def test_one_line_shows_new_model_family(model: str, word: str) -> None:
     sub = _make_sub(model=model, last_activity=('tool_use', 'Bash', {}))
     out = strip_ansi(_one(sub))
     assert word in out
+
+
+def test_one_line_shows_1m_variant_suffix() -> None:
+    # The one-line collapse form also appends `[1m]` after the model bucket for
+    # the 1M-token context variant, and stays flush to the content edge.
+    content_width = 96
+    sub = _make_sub(model='claude-opus-4-8[1m]', last_activity=('tool_use', 'Bash', {}))
+    out = _one(sub, content_width)
+    assert 'opus[1m]' in strip_ansi(out)
+    assert _visible_width(out) == content_width
+
+
+def test_one_line_no_suffix_for_non_1m_model() -> None:
+    sub = _make_sub(model='claude-opus-4-8', last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    assert 'opus' in out
+    assert '[1m]' not in out
 
 
 def test_one_line_running_keeps_marker() -> None:

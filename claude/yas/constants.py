@@ -73,6 +73,12 @@ SEVEN_DAY_WARMUP_MINUTES = 30
 CACHE_TTL_SECONDS    = 300
 CACHE_TTL_1H_SECONDS = 3600
 
+# Context-window variant marker. A subagent running the 1M-token context variant
+# of its model carries this literal substring in its raw model id (e.g.
+# 'claude-opus-4-8[1m]'); the subagent label appends it after the model bucket
+# name ('opus[1m]'). Plain text, not an ANSI escape — _ANSI_RE never strips it.
+MODEL_VARIANT_1M = '[1m]'
+
 
 class BarChars:
     FILLED = '█'

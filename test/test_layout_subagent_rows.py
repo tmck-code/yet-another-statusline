@@ -10,7 +10,7 @@ import yas.session as session_mod
 import yas.info.subagents as subagents_mod
 from helper import strip_ansi
 from yas.config import Config
-from yas.constants import GLYPH_WF_DIVIDER
+from yas.constants import GLYPH_WF_DIVIDER, MIDDLE_DOT
 from yas.info import SessionView
 from yas.tokens import TickRecord, TokenLog
 
@@ -19,7 +19,8 @@ SESSION = (Path(__file__).parent.parent / 'ops'
            / 'session-info-example.json')
 
 
-def _make_sub(agent_type: str = 'Explore', first_timestamp: float | None = None) -> subagents_mod.RunningSubagent:
+def _make_sub(agent_type: str = 'Explore', first_timestamp: float | None = None,
+              model: str = 'claude-sonnet-4-6') -> subagents_mod.RunningSubagent:
     now = time.time()
     if first_timestamp is None:
         first_timestamp = now - 10
@@ -29,7 +30,7 @@ def _make_sub(agent_type: str = 'Explore', first_timestamp: float | None = None)
         billed_in       = 1000,
         output          = 100,
         first_timestamp = first_timestamp,
-        model           = 'claude-sonnet-4-6',
+        model           = model,
         cache_read_in   = 0,
         total_input     = 1000,
         last_activity   = ('tool_use', 'Bash', {'command': 'pytest'}),
@@ -144,6 +145,55 @@ def test_three_subagents_medium_produces_six_rows(monkeypatch: pytest.MonkeyPatc
     spec = layout.build_medium(_view(), 120, _r)
     sub_rows = _subagent_block_rows(spec, ('alpha', 'beta', 'gamma'))
     assert len(sub_rows) == 6
+
+
+# 4.4.6 — the 1M context-window variant marker surfaces through build_wide
+def test_1m_variant_suffix_renders_in_wide_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A subagent on the 1M-token context variant surfaces an `[1m]` suffix after
+    # its model bucket in the full layout; a plain subagent shows no suffix.
+    variant = _make_sub('opus-worker',   model='claude-opus-4-8[1m]')
+    plain   = _make_sub('sonnet-worker', model='claude-sonnet-4-6')
+    _inject(monkeypatch, [variant, plain])
+    spec = layout.build_wide(_view(), _tick(), 110, _r)
+    text = '\n'.join(
+        strip_ansi(row.content) for row in spec.rows if row.kind == 'content'
+    )
+    assert 'opus[1m]' in text     # variant subagent carries the suffix
+    assert 'sonnet[1m]' not in text  # plain subagent does not
+
+
+# 4.4.7 — a MIXED cohort ('opus[1m]' beside plain 'sonnet') shares one model
+# column: every row rjusts its model label to the cohort-wide max width, so the
+# model field's LEFT edge lines up across rows (the whole point of threading
+# `model_field_w` through the cohort). Without the shared width the 8-col
+# 'opus[1m]' field and the 6-col 'sonnet' field start 2 columns apart.
+def test_mixed_cohort_model_field_shares_left_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    variant = _make_sub('opus-worker',   model='claude-opus-4-8[1m]')
+    plain   = _make_sub('sonnet-worker', model='claude-sonnet-4-6')
+    _inject(monkeypatch, [variant, plain])
+    # width 110 → twoline identity rows; the model field is the rightmost cluster
+    # segment, flush to the content edge and preceded by a MIDDLE_DOT separator.
+    spec = layout.build_wide(_view(), _tick(), 110, _r)
+
+    # The two line-1 identity rows (continuation rows start with the `└` elbow).
+    identity = [
+        strip_ansi(row.content) for row in spec.rows
+        if row.kind == 'content'
+        and not strip_ansi(row.content).lstrip().startswith('└')
+        and ('opus-worker' in strip_ansi(row.content) or 'sonnet-worker' in strip_ansi(row.content))
+    ]
+    assert len(identity) == 2
+
+    # The model field begins one column after the final MIDDLE_DOT separator
+    # (`· ` + rjust'd label). A shared field width puts that left edge at the
+    # same column for both rows.
+    field_lefts = [line.rfind(MIDDLE_DOT) + 2 for line in identity]
+    assert field_lefts[0] == field_lefts[1]
+
+    # And both fields end flush at the same content edge, so equal left edge ⇒
+    # equal field width (the field of the longer 'opus[1m]' label = 8 cols).
+    field_widths = {len(line) - fl for line, fl in zip(identity, field_lefts)}
+    assert field_widths == {8}
 
 
 # ---------------------------------------------------------------------------
