@@ -571,22 +571,23 @@ class TestWorkflowLayout:
         # strip the header (first) and summary (last) rows
         agent_rows = texts[1:-1]
 
-        # expected: ceil(5/2) == 3 paired rows; left column top-to-bottom is
-        # agent-1,2,3 and right column top-to-bottom is agent-4,5 — row0 pairs
-        # agent-1(left)/agent-4(right), NOT agent-1(left)/agent-2(right).
-        assert len(agent_rows) == 3
-        row0, row1, row2 = agent_rows
+        # expected: ceil(5/2) == 3 paired agents; each agent produces 2 lines
+        # (twoline=True), so 3 pairs × 2 lines = 6 rows. Left column
+        # top-to-bottom is agent-1,2,3 and right column is agent-4,5 — the
+        # first line of each pair carries the agent name.
+        assert len(agent_rows) == 6
+        # Line 0 of pair 0: agent-1 (left) / agent-4 (right)
+        assert 'agent-1' in agent_rows[0] and 'agent-4' in agent_rows[0]
+        assert 'agent-2' not in agent_rows[0] and 'agent-5' not in agent_rows[0]
 
-        assert 'agent-1' in row0 and 'agent-4' in row0
-        assert 'agent-2' not in row0 and 'agent-5' not in row0
+        # Line 0 of pair 1: agent-2 (left) / agent-5 (right)
+        assert 'agent-2' in agent_rows[2] and 'agent-5' in agent_rows[2]
+        assert 'agent-1' not in agent_rows[2] and 'agent-4' not in agent_rows[2]
 
-        assert 'agent-2' in row1 and 'agent-5' in row1
-        assert 'agent-1' not in row1 and 'agent-4' not in row1
-
-        # odd trailing row: left-only agent-3, no right agent.
-        assert 'agent-3' in row2
+        # Line 0 of pair 2: odd trailing agent-3, left-only.
+        assert 'agent-3' in agent_rows[4]
         for other in ('agent-1', 'agent-2', 'agent-4', 'agent-5'):
-            assert other not in row2
+            assert other not in agent_rows[4]
 
     def test_agent_cap_caps_rows_and_reports_hidden(self, strip_ansi):
         # setup: 9 agents, cap is 6 -> 3 hidden
