@@ -139,6 +139,18 @@ def test_zero_state_omits_row_and_separator(monkeypatch: pytest.MonkeyPatch) -> 
     assert kinds[-1] == 'bottom_border'
 
 
+def test_row_hidden_when_show_tool_uses_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    _silence_dynamic(monkeypatch)
+    view = _view(Config(show_tool_uses=False))
+    view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2), 'Aread': (8, 1)})
+    spec = layout.build_wide(view, _tick(), 160, _r)
+    kinds = [r.kind for r in spec.rows]
+    assert 'Zbash' not in _content_texts(spec)
+    # No dynamic section precedes it -> no seam, box closes with the bottom border.
+    assert 'separator_seam' not in kinds
+    assert kinds[-1] == 'bottom_border'
+
+
 def test_row_absent_in_narrow_and_medium(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
     counts = ToolCounts({'Zbash': (5, 2)})

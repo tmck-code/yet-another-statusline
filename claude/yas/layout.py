@@ -844,7 +844,7 @@ def build_wide(
     # Zero-state (no counted tool uses since /clear): omit both rows, leave
     # pending_ups intact so the next section inherits the tokens vseps' ┴.
     tc = view.tool_counts
-    if tc.counts:
+    if view.cfg.show_tool_uses and tc.counts:
         tc_labels: list[tuple[str, int]] = [(TOOL_COUNTS_LABEL, 3)] if view.cfg.labels else []
         rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=tc_labels))
         rows.append(RowSpec('content', content=r.tool_counts_row(tc.counts, width, fill=fill)))

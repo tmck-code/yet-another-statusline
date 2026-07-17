@@ -83,6 +83,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `context_labels` | `YAS_CONTEXT_LABELS` | — | `[context].labels` | `Smart,Coasting,Foggy,Cooked,Dumb` |
 | `context_thresholds` | `YAS_CONTEXT_THRESHOLDS` | — | `[context].thresholds` | `25,50,70,90` |
 | `show_render_time` | `YAS_SHOW_RENDER_TIME` | — | `[layout].show_render_time` | `false` |
+| `show_tool_uses` | `YAS_SHOW_TOOL_USES` | — | `[layout].show_tool_uses` | `true` |
 
 - Valid `theme` values (14 built-in themes):
   - **Dark:** `claude-dark`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `one-dark`, `solarized-dark`, `tokyo-night`, `palenight`
@@ -94,6 +95,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 - `single_width` is an orthogonal boolean that folds double-width dynamic content (wide emoji, CJK in branch names/paths) to width-1; it may be combined with any `glyph_mode`. The statusline's own glyphs are already width-1, so column geometry is preserved.
 - `full_width`, when `true`, makes the box fill the terminal and ignore `max_width`.
 - `show_render_time`, when `true`, annotates the bottom-right border with the previous run's wall-clock render time (e.g. `…47.2ms──╯`). Off by default; each run shows the prior run's timing, so it is blank on a session's first render.
+- `show_tool_uses`, when `true` (the default), adds a wide-layout-only row under the tokens/cost band listing per-tool `tool_use` counts as `Name main/sub` (main session calls vs. summed subagent calls), sorted by combined total. Set to `false` to hide the row.
 - The `--theme NAME` / `--bg-shift DIR` CLI flags also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - The legacy `~/.claude/statusline-theme` file (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
 
