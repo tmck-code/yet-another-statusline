@@ -77,6 +77,7 @@ from yas.constants import (
     ICON_LIMIT_5H,
     ICON_LIMIT_7D,
     ICON_TOK_RATE,
+    MODEL_VARIANT_1M,
     PILL_LEFT,
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
@@ -174,6 +175,21 @@ def _ctx_fill_ratio(ctx: ContextWindow, soft_limit: int) -> tuple[float, float]:
     fill_ratio = min(_ctx_used_tokens(ctx) / soft_limit, 1.0)
     pct_soft   = fill_ratio * 100.0
     return fill_ratio, pct_soft
+
+
+def subagent_model_label(model: str) -> str:
+    """Display label for a subagent's model in the cohort rows.
+
+    The colour-bucket name (`model_key`) plus the 1M context-window variant
+    marker when the raw id carries it ('opus[1m]'). The colour bucket
+    (`model_key` / `model_colour`) is unchanged — only the shown text widens.
+    Callers rjust this to a cohort-wide field width so a mixed cohort shares a
+    common left edge.
+    """
+    label = model_key(model)
+    if MODEL_VARIANT_1M in model.lower():
+        label = f'{label}{MODEL_VARIANT_1M}'
+    return label
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +767,7 @@ class Renderer:
         twoline: bool = False,
         session_inout: int = 0,
         stats_col: int | None = None,
+        model_field_w: int = 6,
     ) -> str:
         now     = time.time()
         is_done = sub.end_ts > 0
@@ -760,7 +777,10 @@ class Renderer:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
 
-        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'fable'/'mythos'/'other'
+        # Display label ('opus'/'sonnet'/… plus a '[1m]' 1M-variant marker). The
+        # field is rjust'd to `model_field_w` — the cohort-wide max label width
+        # supplied by the builder — so mixed cohorts share a common left edge.
+        short_model = subagent_model_label(sub.model)
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
 
@@ -782,7 +802,7 @@ class Renderer:
             share     = subagent_share(sub.total_input + sub.output, session_inout)
             share_str = f'{share * 100:.1f}%' if share is not None else ''
             tok_field = fmt_tok(sub.total_input).rjust(5)
-            model_str = short_model.rjust(6)
+            model_str = short_model.rjust(model_field_w)
 
             if is_done:
                 front_c = f'{self.CTX_DIM}{dur_s}{self.R} {self.CTX_DIM}{type_text}{self.R}'
@@ -908,7 +928,7 @@ class Renderer:
         # right cluster so it forms a vertical column with the tokens and
         # duration (also right-justified) down stacked rows. Reading order:
         # `{model:>6}  {hourglass} {tok:>5}  {dur:>5}`. Model dims when Done.
-        model_field = short_model.rjust(6)
+        model_field = short_model.rjust(model_field_w)
         model_n_clr = self.CTX_DIM if is_done else model_clr
         tok_n       = fmt_tok(sub.total_input).rjust(6)
         right_n = (

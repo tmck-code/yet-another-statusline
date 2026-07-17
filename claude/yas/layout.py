@@ -27,7 +27,7 @@ from yas.constants import (
 from yas.info import SessionView, _fmt_elapsed_clock
 from yas.info.subagents import RunningSubagent, read_last_prompt_ts
 from yas.render.pill import Pill
-from yas.renderer import Renderer
+from yas.renderer import Renderer, subagent_model_label
 from yas.render.text import _visible_width, _token_offsets
 from yas.tokens import TickRecord
 
@@ -38,6 +38,18 @@ _DIRTY_CHARS = frozenset('•*-' + GLYPH_RENAMED)
 
 # The branch-separator glyph used in path_git / path_git_compact.
 _BRANCH_SEP = '∈'   # U+2208 ELEMENT OF (plain Unicode, not PUA)
+
+
+def _cohort_model_field_w(subs: list[RunningSubagent]) -> int:
+    """Shared model-field width for a cohort of subagent rows rendered together.
+
+    The max visible width of any subagent's model label, floored at 6 so a
+    single-model cohort matches the historical `.rjust(6)`. Threaded into
+    `subagent_row(model_field_w=…)` so every row right-justifies its model to
+    the same width and the labels share a common left edge — otherwise a wide
+    label ('opus[1m]'=8) grows only its own row and misaligns the column.
+    """
+    return max([6, *(_visible_width(subagent_model_label(s.model)) for s in subs)])
 
 
 def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
@@ -225,11 +237,12 @@ def build_workflow_rows(
             left_count   = (len(agents) + 1) // 2  # ceil: left column gets the extra agent
             left_agents  = agents[:left_count]
             right_agents = agents[left_count:]
+            mfw          = _cohort_model_field_w(agents)
             for i in range(len(left_agents)):
-                left_raw = r.subagent_row(left_agents[i], half_w, twoline=True, session_inout=0)
+                left_raw = r.subagent_row(left_agents[i], half_w, twoline=True, session_inout=0, model_field_w=mfw)
                 left_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in left_raw.split('\n')]
                 if i < len(right_agents):
-                    right_raw = r.subagent_row(right_agents[i], half_w, twoline=True, session_inout=0)
+                    right_raw = r.subagent_row(right_agents[i], half_w, twoline=True, session_inout=0, model_field_w=mfw)
                     right_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in right_raw.split('\n')]
                 else:
                     right_lines = [' ' * half_w] * len(left_lines)
@@ -246,8 +259,9 @@ def build_workflow_rows(
         if per_agent:
             agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
             hidden_agents = run.agent_count - len(agents)
+            mfw           = _cohort_model_field_w(agents)
             for sub in agents:
-                for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=0).split('\n'):
+                for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=0, model_field_w=mfw).split('\n'):
                     out.append(RowSpec('content', content=line))
         out.append(RowSpec('content', content=r.workflow_summary(run, inner, hidden_agents=hidden_agents)))
     if hidden_runs > 0:
@@ -306,9 +320,10 @@ def build_narrow(
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
+        mfw = _cohort_model_field_w(visible_subs)
         for sub in visible_subs:
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                       stats_col=100 if width >= 125 else None).split('\n'):
+                                       stats_col=100 if width >= 125 else None, model_field_w=mfw).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -381,9 +396,10 @@ def build_medium(
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
+        mfw = _cohort_model_field_w(visible_subs)
         for sub in visible_subs:
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                       stats_col=100 if width >= 125 else None).split('\n'):
+                                       stats_col=100 if width >= 125 else None, model_field_w=mfw).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -894,9 +910,10 @@ def build_wide(
             divider_col  = 3 + left_w + 1  # 1-indexed visual column of the │
             left_lines   = r.task_row(tasks, left_w)
             right_lines: list[str] = []
+            mfw          = _cohort_model_field_w(visible_subs)
             for sub in visible_subs:
                 right_lines.extend(
-                    r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout).split('\n')
+                    r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout, model_field_w=mfw).split('\n')
                 )
             div_color = r.grad_at(divider_col - 1, width, fill=fill)
             divider   = f'{div_color}{BOX_V}{RESET}'
@@ -930,9 +947,10 @@ def build_wide(
                 left_count = (len(visible_subs) + 1) // 2  # ceil: left column gets the extra agent
                 left       = visible_subs[:left_count]
                 right      = visible_subs[left_count:]
+                mfw        = _cohort_model_field_w(visible_subs)
 
                 def cell_lines(sub: RunningSubagent) -> list[str]:
-                    raw = r.subagent_row(sub, half_w, twoline=True, session_inout=session_inout)
+                    raw = r.subagent_row(sub, half_w, twoline=True, session_inout=session_inout, model_field_w=mfw)
                     lines = raw.split('\n')
                     return [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in lines]
 
@@ -945,9 +963,10 @@ def build_wide(
                     for j in range(len(left_lines)):
                         rows.append(RowSpec('content', content=f'{left_lines[j]}{divider}{right_lines[j]}'))
             else:
+                mfw = _cohort_model_field_w(visible_subs)
                 for sub in visible_subs:
                     for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
-                                               stats_col=100 if width >= 125 else None).split('\n'):
+                                               stats_col=100 if width >= 125 else None, model_field_w=mfw).split('\n'):
                         rows.append(RowSpec('content', content=line))
             pending_ups = ()
 
