@@ -3,7 +3,9 @@ from yas.constants import (
     CLR_ALERT,
     CLR_GREEN_OK,
     CLR_PURPLE,
+    CLR_ROSE,
     CLR_SKY_BLUE,
+    CLR_TEAL_VIOLET,
     CLR_WARN,
     CLR_YELLOW,
 )
@@ -62,6 +64,12 @@ class TestModelColour:
 
     def test_haiku_upper(self) -> None:
         assert _r.model_colour('HAIKU') == CLR_SKY_BLUE
+
+    def test_fable(self) -> None:
+        assert _r.model_colour('Fable 5') == CLR_ROSE
+
+    def test_mythos(self) -> None:
+        assert _r.model_colour('Mythos 5') == CLR_TEAL_VIOLET
 
     def test_unknown(self) -> None:
         assert _r.model_colour('gpt-5') == CLR_PURPLE

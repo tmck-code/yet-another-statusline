@@ -50,6 +50,19 @@ def test_duplicate_message_id_counted_once(tmp_path: Path) -> None:
     assert result.output_tokens == 20
 
 
+def test_streamed_message_usage_last_line_wins(tmp_path: Path) -> None:
+    """Writes sharing a message id carry growing usage; the final write's totals win."""
+    p = tmp_path / 'transcript.jsonl'
+    p.write_text(
+        _assistant_line('a', input_tokens=26, output_tokens=2) + '\n' +
+        _assistant_line('a', input_tokens=26, output_tokens=2) + '\n' +
+        _assistant_line('a', input_tokens=26, output_tokens=301) + '\n'
+    )
+    result = transcript.TranscriptUsage.from_transcript(str(p))
+    assert result.input_tokens == 26
+    assert result.output_tokens == 301
+
+
 def test_malformed_line_skipped(tmp_path: Path) -> None:
     """Malformed line interleaved with valid lines does not raise, valid line counted."""
     p = tmp_path / 'transcript.jsonl'

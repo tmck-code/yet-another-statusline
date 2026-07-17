@@ -549,6 +549,46 @@ class TestWorkflowLayout:
         assert any('agent-0' in t for t in agent_rows)
         assert any('agent-2' in t for t in agent_rows)
 
+    def test_two_col_workflow_column_major_ordering(self, strip_ansi):
+        # setup: 5 distinguishable agents at width 120 (== TWO_COL_WF_WIDTH),
+        # mirrors test_two_col_subagent_column_major_ordering in
+        # test_layout_subagent_rows.py — the workflow cohort now fills
+        # column-major too, matching the plain subagent cohort.
+        now  = time.time()
+        view = _view()
+        run  = RunningWorkflow(
+            run_id = 'wf_x', name = 'wf_x', phase = '',
+            agents = [
+                _make_workflow_subagent(f'a{i}', agent_type=f'agent-{i}', first_timestamp=now + i, mtime=now)
+                for i in range(1, 6)
+            ],
+        )
+        self._inject(view, [run])
+
+        # run
+        rows = layout.build_workflow_rows(view, 120, _r, per_agent=True)
+        texts = [strip_ansi(row.content) for row in rows]
+        # strip the header (first) and summary (last) rows
+        agent_rows = texts[1:-1]
+
+        # expected: ceil(5/2) == 3 paired agents; each agent produces 2 lines
+        # (twoline=True), so 3 pairs × 2 lines = 6 rows. Left column
+        # top-to-bottom is agent-1,2,3 and right column is agent-4,5 — the
+        # first line of each pair carries the agent name.
+        assert len(agent_rows) == 6
+        # Line 0 of pair 0: agent-1 (left) / agent-4 (right)
+        assert 'agent-1' in agent_rows[0] and 'agent-4' in agent_rows[0]
+        assert 'agent-2' not in agent_rows[0] and 'agent-5' not in agent_rows[0]
+
+        # Line 0 of pair 1: agent-2 (left) / agent-5 (right)
+        assert 'agent-2' in agent_rows[2] and 'agent-5' in agent_rows[2]
+        assert 'agent-1' not in agent_rows[2] and 'agent-4' not in agent_rows[2]
+
+        # Line 0 of pair 2: odd trailing agent-3, left-only.
+        assert 'agent-3' in agent_rows[4]
+        for other in ('agent-1', 'agent-2', 'agent-4', 'agent-5'):
+            assert other not in agent_rows[4]
+
     def test_agent_cap_caps_rows_and_reports_hidden(self, strip_ansi):
         # setup: 9 agents, cap is 6 -> 3 hidden
         now  = time.time()

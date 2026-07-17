@@ -55,9 +55,9 @@ def test_theme_has_every_slot_filled(theme_name: str) -> None:
 
 
 @pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))
-def test_theme_has_all_four_models(theme_name: str) -> None:
+def test_theme_has_all_model_buckets(theme_name: str) -> None:
     t = THEMES[theme_name]
-    assert set(t.models) == {'opus', 'sonnet', 'haiku', 'other'}
+    assert set(t.models) == {'opus', 'sonnet', 'haiku', 'fable', 'mythos', 'other'}
 
 
 @pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))

@@ -36,13 +36,16 @@ from yas.constants import (
     CLR_PEACH,
     CLR_PINK,
     CLR_PURPLE,
+    CLR_ROSE,
     CLR_SKY_BLUE,
+    CLR_TEAL_VIOLET,
     CLR_WARN,
     CLR_WHITE_BRT,
     CLR_YELLOW,
     CLR_YELLOW_BRT,
     DEFAULT_SOFT_LIMIT,
     ELLIPSIS,
+    FAINT,
     FIVE_HOUR_MINUTES,
     FIVE_HOUR_WARMUP_MINUTES,
     GLYPH_BURN_FAST,
@@ -214,6 +217,8 @@ class Renderer:
         self.OPUS        = t.models['opus'].label
         self.SONNET      = t.models['sonnet'].label
         self.HAIKU       = t.models['haiku'].label
+        self.FABLE       = t.models['fable'].label
+        self.MYTHOS      = t.models['mythos'].label
         self.safe        = t.safe
         self.warn        = t.warn
         self.alert       = t.alert
@@ -277,6 +282,8 @@ class Renderer:
     OPUS      = CLR_YELLOW
     SONNET    = CLR_GREEN_OK
     HAIKU     = CLR_SKY_BLUE
+    FABLE     = CLR_ROSE
+    MYTHOS    = CLR_TEAL_VIOLET
 
     # --- Gradient delegations (backward compat) ---
     # GRAD_STOPS / GREY_RGB / SPARK_STOPS now live on the GradientEngine
@@ -654,6 +661,53 @@ class Renderer:
             extras.append(f'{c_plugins}{BOLD}{GLYPH_PLUGINS}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
+    def tool_counts_row(self, counts: dict[str, tuple[int, int]], width: int, *, fill: float = 1.0) -> str:
+        """Greedy-filled per-tool ``Name main/sub`` counts as a full-width line.
+
+        Entries are ordered by combined ``(main + sub)`` total descending with an
+        alphabetical tie-break, painted ``main`` bright / ``/`` dim / ``sub`` faint,
+        and filled into the inner content width (``width - 4``) with a 3-space gap.
+        When tool TYPES remain unshown an overflow ``+k`` is appended (k = unshown
+        type count, never the call sum); the last fitted entry is dropped if needed
+        so the marker is never clipped. Returns a single line with no internal ``│``.
+        """
+        content_w = max(1, width - 4)
+        gap       = 3
+        items     = sorted(counts.items(), key=lambda kv: (-(kv[1][0] + kv[1][1]), kv[0]))
+        total     = len(items)
+        shown: list[tuple[str, int]] = []  # (colored, plain_width)
+        used = 0
+        for name, (main, sub) in items:
+            plain = f'{name} {main}/{sub}'
+            w     = _visible_width(plain)
+            add   = w + (gap if shown else 0)
+            if used + add > content_w:
+                break
+            colored = (
+                f'{self.white_brt}{name}{self.R} '
+                f'{self.TOK}{main}{self.R}'
+                f'{self.LABEL}/{self.R}'
+                f'{FAINT}{sub}{self.R}'
+            )
+            shown.append((colored, w))
+            used += add
+        parts = [c for c, _ in shown]
+        if len(shown) < total:
+            # Make room for the +k marker, dropping trailing entries as needed.
+            # Each drop turns a shown type into an unshown one, so k recomputes.
+            while True:
+                k     = total - len(shown)
+                mw    = _visible_width(f'+{k}')
+                extra = (gap + mw) if shown else mw
+                if used + extra <= content_w or not shown:
+                    break
+                _, w = shown.pop()
+                used -= w + (gap if shown else 0)
+            k     = total - len(shown)
+            parts = [c for c, _ in shown]
+            parts.append(f'{self.LABEL}+{k}{self.R}')
+        return (' ' * gap).join(parts)
+
     SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
     def subagent_activity(
@@ -706,7 +760,7 @@ class Renderer:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
 
-        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
+        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'fable'/'mythos'/'other'
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
 

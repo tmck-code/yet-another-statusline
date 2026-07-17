@@ -390,6 +390,109 @@ def test_shared_id_usage_counted_exactly_once(tmp_home: Path) -> None:
     assert sub.end_ts > 0
 
 
+def test_streamed_trailing_text_does_not_mask_tool_use(tmp_home: Path) -> None:
+    # One content block per streamed write, same message id: the activity
+    # snippet must observe the message's later writes, not just its first
+    # (usually the thinking block), and the message-scoped priority
+    # (tool_use > text > thinking) must hold across the writes — a trailing
+    # text narration must not mask the tool_use before it, exactly as within
+    # a single whole-message content array.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-streamed-activity',
+        jsonl_lines=[
+            _assistant_line_full('m1', None, output_tokens=5,
+                                 content=[{'type': 'thinking', 'thinking': 'planning'}]),
+            _assistant_line_full('m1', None, output_tokens=5,
+                                 content=[{'type': 'tool_use', 'name': 'Edit', 'input': {'file_path': '/x.py'}}]),
+            _assistant_line_full('m1', None, output_tokens=9,
+                                 content=[{'type': 'text', 'text': 'edited'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.last_activity == ('tool_use', 'Edit', {'file_path': '/x.py'})
+
+
+def test_streamed_usage_last_line_wins(tmp_home: Path) -> None:
+    # On real transcripts the partial and final writes of a streamed message do
+    # NOT carry identical usage: the counters grow across the writes and the
+    # final one holds the message's real totals. The counters must take the
+    # last write's snapshot — not freeze at the first partial (out=2 here) and
+    # not sum the snapshots (out=305).
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-usage-grows',
+        jsonl_lines=[
+            _assistant_line_full('m1', None,       input_tokens=26, output_tokens=2,
+                                 timestamp='2026-05-22T17:59:00.000Z',
+                                 content=[{'type': 'thinking', 'thinking': 'hmm'}]),
+            _assistant_line_full('m1', None,       input_tokens=26, output_tokens=2,
+                                 content=[{'type': 'text', 'text': 'Checking the tests.'}]),
+            _assistant_line_full('m1', 'end_turn', input_tokens=26, output_tokens=301,
+                                 timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'All done.'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.billed_in == 26
+    assert sub.output    == 301
+    assert sub.end_ts > 0
+
+
+def test_end_ts_cleared_when_agent_resumes_after_end_turn(tmp_home: Path) -> None:
+    # A warm agent ends its turn, then is handed a follow-up (SendMessage) and
+    # starts working again: the old end_turn no longer marks it Done, otherwise
+    # the cohort's clean-retire would hide an actively working agent. Its last
+    # line is a pending tool_use, so no post-loop fallback fires either.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-resumed-working',
+        jsonl_lines=[
+            _assistant_line_full('m1', 'end_turn', timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'first task done'}]),
+            _assistant_line_full('m2', None,       timestamp='2026-05-22T18:30:00.000Z', output_tokens=4,
+                                 content=[{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    assert sub.end_ts == 0.0
+
+
+def test_resumed_agent_done_again_via_terminal_text(tmp_home: Path) -> None:
+    # The resumed agent finishes its follow-up with a terminal text report and
+    # no new end_turn: the stale end_ts is cleared by the resume, then the
+    # terminal-text fallback marks it Done again at the LATER timestamp.
+    now = time.time()
+    sdir = _subagents_dir(tmp_home)
+    _write_agent(
+        sdir, 'agent-resumed-done',
+        jsonl_lines=[
+            _assistant_line_full('m1', 'end_turn', timestamp='2026-05-22T18:00:00.000Z',
+                                 content=[{'type': 'text', 'text': 'first task done'}]),
+            _assistant_line_full('m2', None,       timestamp='2026-05-22T18:30:00.000Z', output_tokens=7,
+                                 content=[{'type': 'text', 'text': 'follow-up report'}]),
+        ],
+        mtime=now,
+    )
+
+    result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
+    sub = result.subagents[0]
+    # 2026-05-22T18:30:00Z → epoch ≈ 1779474600 (not the 18:00 end_turn)
+    assert 1779474599 < sub.end_ts < 1779474601
+
+
 def test_end_ts_zero_when_no_end_turn(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)

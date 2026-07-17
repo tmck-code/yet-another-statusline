@@ -252,6 +252,18 @@ CLAUDE_DARK = Theme(
             cool_shift = (138, 111, 214),
             label      = fg256(183),
         ),
+        'fable':  ModelColors(
+            anchor     = (255, 105, 180),
+            warm_shift = (255,  70, 130),
+            cool_shift = (230, 140, 190),
+            label      = fg256(211),
+        ),
+        'mythos': ModelColors(
+            anchor     = ( 90, 200, 180),
+            warm_shift = ( 60, 180, 210),
+            cool_shift = (130, 110, 220),
+            label      = fg256(80),
+        ),
     },
 
     pill_fg_dark  = ( 15,  15,  15),
@@ -347,6 +359,18 @@ CLAUDE_LIGHT = Theme(
             warm_shift = (190, 130, 180),
             cool_shift = (115,  90, 170),
             label      = fg256(96),
+        ),
+        'fable':  ModelColors(
+            anchor     = (205,  90, 130),
+            warm_shift = (190,  70, 110),
+            cool_shift = (180, 100, 140),
+            label      = fg(160,  60,  90),
+        ),
+        'mythos': ModelColors(
+            anchor     = ( 70, 150, 150),
+            warm_shift = ( 60, 140, 160),
+            cool_shift = (100, 120, 180),
+            label      = fg( 50, 120, 130),
         ),
     },
 
@@ -444,6 +468,18 @@ DRACULA = Theme(
             cool_shift = (235, 129, 213),
             label      = fg(255, 121, 198),
         ),
+        'fable':  ModelColors(
+            anchor     = (255,  90, 120),
+            warm_shift = (255,  70,  90),
+            cool_shift = (255, 130, 150),
+            label      = fg(255,  90, 120),
+        ),
+        'mythos': ModelColors(
+            anchor     = (140, 120, 255),
+            warm_shift = (160, 110, 240),
+            cool_shift = (110, 140, 255),
+            label      = fg(140, 120, 255),
+        ),
     },
 
     pill_fg_dark  = ( 15,  15,  15),
@@ -538,6 +574,18 @@ GRUVBOX_DARK = Theme(
             warm_shift = (185,  79, 102),
             cool_shift = (145, 108, 135),
             label      = fg(177,  98, 134),
+        ),
+        'fable':  ModelColors(
+            anchor     = (214,  93, 101),
+            warm_shift = (220,  60,  60),
+            cool_shift = (190, 110, 120),
+            label      = fg(214,  93, 101),
+        ),
+        'mythos': ModelColors(
+            anchor     = (142, 108, 177),
+            warm_shift = (158,  90, 180),
+            cool_shift = (120, 120, 190),
+            label      = fg(142, 108, 177),
         ),
     },
 
@@ -634,6 +682,18 @@ GRUVBOX_LIGHT = Theme(
             cool_shift = (145, 108, 135),
             label      = fg(177,  98, 134),
         ),
+        'fable':  ModelColors(
+            anchor     = (214,  93, 101),
+            warm_shift = (220,  60,  60),
+            cool_shift = (190, 110, 120),
+            label      = fg(214,  93, 101),
+        ),
+        'mythos': ModelColors(
+            anchor     = (142, 108, 177),
+            warm_shift = (158,  90, 180),
+            cool_shift = (120, 120, 190),
+            label      = fg(142, 108, 177),
+        ),
     },
 
     pill_fg_dark  = ( 10,  10,  10),
@@ -728,6 +788,18 @@ NORD = Theme(
             warm_shift = (183, 128, 153),
             cool_shift = (165, 148, 179),
             label      = fg(180, 142, 173),
+        ),
+        'fable':  ModelColors(
+            anchor     = (191, 110, 130),
+            warm_shift = (200,  90, 110),
+            cool_shift = (180, 130, 150),
+            label      = fg(191, 110, 130),
+        ),
+        'mythos': ModelColors(
+            anchor     = (136, 170, 190),
+            warm_shift = (140, 180, 200),
+            cool_shift = (150, 150, 200),
+            label      = fg(140, 170, 195),
         ),
     },
 
@@ -824,6 +896,18 @@ ONE_DARK = Theme(
             cool_shift = (168, 136, 226),
             label      = fg(198, 120, 221),
         ),
+        'fable':  ModelColors(
+            anchor     = (224, 130, 145),
+            warm_shift = (230, 100, 120),
+            cool_shift = (210, 140, 160),
+            label      = fg(224, 130, 145),
+        ),
+        'mythos': ModelColors(
+            anchor     = (150, 130, 230),
+            warm_shift = (170, 120, 220),
+            cool_shift = (130, 150, 235),
+            label      = fg(150, 130, 230),
+        ),
     },
 
     pill_fg_dark  = ( 15,  15,  15),
@@ -918,6 +1002,18 @@ ONE_LIGHT = Theme(
             warm_shift = (210, 110, 185),
             cool_shift = (170, 120, 225),
             label      = fg(200, 100, 210),
+        ),
+        'fable':  ModelColors(
+            anchor     = (210, 100, 130),
+            warm_shift = (215,  80, 100),
+            cool_shift = (195, 120, 150),
+            label      = fg(210, 100, 130),
+        ),
+        'mythos': ModelColors(
+            anchor     = ( 90, 160, 170),
+            warm_shift = ( 80, 150, 190),
+            cool_shift = (110, 140, 200),
+            label      = fg( 90, 160, 170),
         ),
     },
 
@@ -1014,6 +1110,18 @@ SOLARIZED_DARK = Theme(
             cool_shift = (159,  80, 154),
             label      = fg(215,  65, 135),
         ),
+        'fable':  ModelColors(
+            anchor     = (220,  90,  90),
+            warm_shift = (210,  60,  70),
+            cool_shift = (200, 110, 110),
+            label      = fg(220,  90,  90),
+        ),
+        'mythos': ModelColors(
+            anchor     = (108, 113, 196),
+            warm_shift = ( 90, 120, 190),
+            cool_shift = (130, 110, 200),
+            label      = fg(108, 113, 196),
+        ),
     },
 
     pill_fg_dark  = ( 15,  15,  15),
@@ -1108,6 +1216,18 @@ SOLARIZED_LIGHT = Theme(
             warm_shift = (214,  53, 105),
             cool_shift = (159,  80, 154),
             label      = fg(215,  65, 135),
+        ),
+        'fable':  ModelColors(
+            anchor     = (220,  90,  90),
+            warm_shift = (210,  60,  70),
+            cool_shift = (200, 110, 110),
+            label      = fg(220,  90,  90),
+        ),
+        'mythos': ModelColors(
+            anchor     = (108, 113, 196),
+            warm_shift = ( 90, 120, 190),
+            cool_shift = (130, 110, 200),
+            label      = fg(108, 113, 196),
         ),
     },
 
@@ -1204,6 +1324,18 @@ TOKYO_NIGHT = Theme(
             cool_shift = (158, 148, 235),
             label      = fg(173, 142, 230),
         ),
+        'fable':  ModelColors(
+            anchor     = (247, 140, 160),
+            warm_shift = (255, 110, 140),
+            cool_shift = (230, 150, 170),
+            label      = fg(247, 140, 160),
+        ),
+        'mythos': ModelColors(
+            anchor     = (100, 190, 200),
+            warm_shift = ( 70, 180, 220),
+            cool_shift = (120, 170, 230),
+            label      = fg(100, 190, 200),
+        ),
     },
 
     pill_fg_dark  = ( 15,  15,  15),
@@ -1298,6 +1430,18 @@ PALENIGHT = Theme(
             warm_shift = (211, 136, 200),
             cool_shift = (178, 153, 240),
             label      = fg(199, 146, 234),
+        ),
+        'fable':  ModelColors(
+            anchor     = (255, 150, 170),
+            warm_shift = (255, 120, 140),
+            cool_shift = (240, 160, 180),
+            label      = fg(255, 150, 170),
+        ),
+        'mythos': ModelColors(
+            anchor     = (120, 200, 210),
+            warm_shift = (100, 190, 220),
+            cool_shift = (150, 180, 230),
+            label      = fg(120, 200, 210),
         ),
     },
 
@@ -1395,6 +1539,18 @@ CATPPUCCIN_LATTE = Theme(
             cool_shift = (173, 113, 216),
             label      = fg(234, 118, 203),
         ),
+        'fable':  ModelColors(
+            anchor     = (220,  90, 110),
+            warm_shift = (210,  60,  80),
+            cool_shift = (200, 110, 130),
+            label      = fg(220,  90, 110),
+        ),
+        'mythos': ModelColors(
+            anchor     = ( 90, 150, 190),
+            warm_shift = ( 70, 140, 200),
+            cool_shift = (120, 130, 210),
+            label      = fg( 90, 150, 190),
+        ),
     },
 
     pill_fg_dark  = ( 10,  10,  10),
@@ -1489,6 +1645,18 @@ CATPPUCCIN_MOCHA = Theme(
             warm_shift = (244, 178, 212),
             cool_shift = (213, 190, 237),
             label      = fg(245, 194, 231),
+        ),
+        'fable':  ModelColors(
+            anchor     = (240, 150, 170),
+            warm_shift = (235, 120, 150),
+            cool_shift = (230, 160, 180),
+            label      = fg(240, 150, 170),
+        ),
+        'mythos': ModelColors(
+            anchor     = (150, 190, 220),
+            warm_shift = (130, 180, 230),
+            cool_shift = (170, 170, 230),
+            label      = fg(150, 190, 220),
         ),
     },
 

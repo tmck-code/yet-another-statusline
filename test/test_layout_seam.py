@@ -677,12 +677,14 @@ def test_workflow_two_column_pairing_threshold() -> None:
         # strip the header (first) and summary (last) rows
         return rows[1:-1]
 
-    # width 120 (== TWO_COL_WF_WIDTH): the two agents share a single paired
-    # content row. The block carries no internal separators — the divider ``┊``
-    # is embedded in every row and the bracketing ┬/┴ are threaded by build_wide.
+    # width 120 (== TWO_COL_WF_WIDTH): the two agents share paired content
+    # rows. With twoline=True each agent emits 2 lines, so one pair produces
+    # 2 content rows. The block carries no internal separators — the divider
+    # ``┊`` is embedded in every row and the bracketing ┬/┴ are threaded by
+    # build_wide.
     rows = agent_rows(120)
     assert all(row.kind == 'content' for row in rows)
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert 'agent-0' in rows[0].content and 'agent-1' in rows[0].content
     # Every row of the block (header, paired agents, summary) embeds the divider
     # at the shared column so the bar stays straight top-to-bottom.
@@ -709,6 +711,44 @@ def test_workflow_two_column_pairing_threshold() -> None:
                    for row in stacked)
     assert any('agent-0' in row.content for row in stacked)
     assert any('agent-1' in row.content for row in stacked)
+
+
+# ---------------------------------------------------------------------------
+# Plugins row truncation (#91 — long plugin list overflowed the box)
+# ---------------------------------------------------------------------------
+
+def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plugin list far wider than the box is clipped to the inner content
+    width with a trailing ellipsis instead of overflowing past the right
+    border — every rendered row stays exactly box-wide."""
+    from helper import strip_ansi
+    from yas.constants import ELLIPSIS
+    from yas.render.text import _visible_width
+    _silence_dynamic(monkeypatch)
+    plugins = ','.join(f'plugin-{i:02d}' for i in range(40))  # ~440 visible cols
+    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: plugins))
+
+    width = 140
+    spec  = layout.build_wide(_view(), _tick(), width, _r)
+    lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    for ln in lines:
+        assert _visible_width(ln) == width, f'row overflows the box: {_visible_width(ln)} != {width}'
+    plugins_lines = [ln for ln in lines if 'plugin-00' in ln]
+    assert plugins_lines, 'plugins row should render'
+    assert ELLIPSIS in plugins_lines[0], 'clipped plugins row should end with an ellipsis'
+
+
+def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plugin list that fits the box renders in full, with no ellipsis."""
+    from helper import strip_ansi
+    from yas.constants import ELLIPSIS
+    _silence_dynamic(monkeypatch)
+    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: 'foo,bar'))
+
+    spec = layout.build_wide(_view(), _tick(), 140, _r)
+    plugins_lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r) if 'foo,bar' in strip_ansi(ln)]
+    assert plugins_lines, 'plugins row should render'
+    assert ELLIPSIS not in plugins_lines[0]
 
 
 # ---------------------------------------------------------------------------

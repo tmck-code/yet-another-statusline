@@ -50,9 +50,12 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     Never raises; an unreadable transcript yields zeroes.
     """
     seen: set[str] = set()
-    billed_in    = 0
-    cache_read_in = 0
-    output       = 0
+    # Usage is keyed by message id with last-line-wins: streaming re-writes
+    # the same id as it appends content blocks, and the usage counters GROW
+    # across those writes — the final one carries the message's real totals.
+    # Accumulating only the first write (behind the dedup) freezes usage at
+    # the first partial snapshot and undercounts output tokens.
+    usage_by_id: dict[str, tuple[int, int, int]] = {}
     first_ts     = 0.0
     end_ts       = 0.0
     model        = ''
@@ -66,6 +69,15 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     last_has_text             = False
     last_ts                   = 0.0
     last_content: list[str]   = []  # content from the final terminal-state line
+    # Activity is scoped to the FINAL message: block memory accumulates across
+    # the streamed writes of one message id and resets when the id changes, so
+    # a message's later tool_use/text writes are observed — its first streamed
+    # write is usually the thinking block, and computing activity only behind
+    # the dedup would leave every streamed agent stuck on "(thinking)".
+    cur_mid  = ''
+    cur_tool: dict[str, object] | None = None
+    cur_text: dict[str, object] | None = None
+    cur_has_content = False
     try:
         with jsonl.open('r', errors='ignore') as fh:
             for ln in fh:
@@ -91,13 +103,20 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                 # stop_reason: null, a final write with end_turn); the dedup
                 # below must not let an already-seen id suppress this capture.
                 # Last-write-wins: a later end_turn overwrites an earlier
-                # end_ts; non-terminal lines never touch end_ts.
+                # end_ts, and a later NON-terminal line clears it — a subagent
+                # can be resumed after its turn ends (SendMessage to a warm
+                # agent), and the stale end_ts would render a working agent as
+                # Done. Done therefore means the transcript currently ENDS in
+                # an ended turn; a resumed agent that finishes again goes Done
+                # at the later time via a new end_turn or a post-loop fallback.
                 try:
                     stop   = msg.get('stop_reason')
                     ts_raw = d.get('timestamp', '')
                     line_ts = _parse_iso_to_epoch(ts_raw) if ts_raw else 0.0
                     if stop == 'end_turn' and line_ts:
                         end_ts = line_ts
+                    elif stop != 'end_turn':
+                        end_ts = 0.0
                     # Record this line's shape for the post-loop fallback.
                     # Runs pre-dedup so the final full write of a streamed
                     # message is always observed even if its id was seen.
@@ -108,51 +127,67 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
                     last_content = cont
                 except (ValueError, TypeError, AttributeError):
                     pass
-                if not mid or mid in seen:
+                if not mid:
+                    continue
+                # Update usage_by_id with last-line-wins: streamed usage counters
+                # grow across an id's writes; the final write carries real totals.
+                u = msg.get('usage') or {}
+                usage_by_id[mid] = (
+                    (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0),
+                    u.get('cache_read_input_tokens', 0) or 0,
+                    u.get('output_tokens', 0) or 0,
+                )
+                # Activity is message-scoped: accumulate across streamed writes of the
+                # same message id so later tool_use/text blocks (after the thinking
+                # block) are observed with the usual tool_use > text > thinking priority.
+                if mid != cur_mid:
+                    cur_mid  = mid
+                    cur_tool = None
+                    cur_text = None
+                    cur_has_content = False
+                for item in (msg.get('content') or []):
+                    if not isinstance(item, dict):
+                        continue
+                    cur_has_content = True
+                    kind = item.get('type', '')
+                    if kind == 'tool_use':
+                        cur_tool = item
+                    elif kind == 'text':
+                        cur_text = item
+                if mid in seen:
                     continue
                 seen.add(mid)
                 if not model:
                     m = msg.get('model') or ''
                     if m:
                         model = m
-                u = msg.get('usage') or {}
-                billed_in     += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
-                cache_read_in += u.get('cache_read_input_tokens', 0) or 0
-                output        += u.get('output_tokens', 0) or 0
-                content = msg.get('content') or []
-                if content:
-                    # Prefer the last tool_use block anywhere in the message;
-                    # a trailing text narration must not mask an actual tool
-                    # call (Claude often emits [text, tool_use, text]).  Only
-                    # when no tool_use exists do we fall back to the first
-                    # non-empty line of the last text block, then thinking.
-                    last_tool = None
-                    last_text = None
-                    for item in content:
-                        kind = item.get('type', '')
-                        if kind == 'tool_use':
-                            last_tool = item
-                        elif kind == 'text':
-                            last_text = item
-                    if last_tool is not None:
-                        raw_inp = last_tool.get('input') or {}
-                        inp = {
-                            k: _sanitize(v) if isinstance(v, str) else v
-                            for k, v in raw_inp.items()
-                        } if isinstance(raw_inp, dict) else {}
-                        last_activity = ('tool_use', _sanitize(last_tool.get('name', '') or ''), inp)
-                    elif last_text is not None:
-                        snippet = ''
-                        for line in str(last_text.get('text', '') or '').splitlines():
-                            stripped = line.strip()
-                            if stripped:
-                                snippet = _sanitize(stripped)
-                                break
-                        last_activity = ('text', snippet, {})
-                    else:
-                        last_activity = ('thinking', '', {})
     except OSError:
         pass
+    billed_in     = sum(billed for billed, _, _ in usage_by_id.values())
+    cache_read_in = sum(cached for _, cached, _ in usage_by_id.values())
+    output        = sum(out for _, _, out in usage_by_id.values())
+    # Activity reflects the final message. Prefer its last tool_use block —
+    # a trailing text narration must not mask an actual tool call (Claude
+    # often emits [text, tool_use, text]) — then the first non-empty line of
+    # its last text block, then thinking. The priority applies across the
+    # id's streamed writes exactly as it does within a whole-message array.
+    if cur_tool is not None:
+        raw_inp = cur_tool.get('input') or {}
+        inp = {
+            k: _sanitize(v) if isinstance(v, str) else v
+            for k, v in raw_inp.items()
+        } if isinstance(raw_inp, dict) else {}
+        last_activity = ('tool_use', _sanitize(str(cur_tool.get('name', '') or '')), inp)
+    elif cur_text is not None:
+        snippet = ''
+        for line in str(cur_text.get('text', '') or '').splitlines():
+            stripped = line.strip()
+            if stripped:
+                snippet = _sanitize(stripped)
+                break
+        last_activity = ('text', snippet, {})
+    elif cur_has_content:
+        last_activity = ('thinking', '', {})
     # Terminal-text Done fallback. Some sidechain (sub-agent) transcripts
     # never emit stop_reason: "end_turn" — every assistant line is either
     # "tool_use" or null, including the final result message. A finished
@@ -184,7 +219,7 @@ class RunningSubagent:
     __slots__ = (
         'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
-        'mtime', 'agent_id',
+        'mtime', 'agent_id', 'jsonl_path',
     )
 
     def __init__(
@@ -201,6 +236,7 @@ class RunningSubagent:
         end_ts:          float = 0.0,  # end_turn ts, else terminal-text ts; Done iff > 0
         mtime:           float = 0.0,  # transcript last-modified time (st_mtime)
         agent_id:        str = '',     # transcript filename stem; matches run-JSON agentId (workflow cohort)
+        jsonl_path:      str = '',     # absolute path to this agent's transcript (for tool-count rescan)
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -214,6 +250,7 @@ class RunningSubagent:
         self.end_ts           = end_ts
         self.mtime            = mtime
         self.agent_id         = agent_id
+        self.jsonl_path       = jsonl_path
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RunningSubagent):
@@ -225,6 +262,7 @@ class RunningSubagent:
             self.agent_type, self.description, self.billed_in, self.output,
             self.first_timestamp, self.model, self.cache_read_in, self.total_input,
             self.last_activity, self.end_ts, self.mtime, self.agent_id,
+            self.jsonl_path,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -234,7 +272,7 @@ class RunningSubagent:
                 f'billed_in={self.billed_in}, output={self.output}, first_timestamp={self.first_timestamp}, '
                 f'model={self.model!r}, cache_read_in={self.cache_read_in}, total_input={self.total_input}, '
                 f'last_activity={self.last_activity!r}, end_ts={self.end_ts}, mtime={self.mtime}, '
-                f'agent_id={self.agent_id!r})')
+                f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r})')
 
 
 class RunningSubagents:
@@ -312,6 +350,7 @@ class RunningSubagents:
                     last_activity   = last_activity,
                     end_ts          = end_ts,
                     mtime           = mtime,
+                    jsonl_path      = str(jsonl),
                 ))
         except OSError:
             pass

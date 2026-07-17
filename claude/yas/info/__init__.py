@@ -20,6 +20,7 @@ from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
 from yas.tokens import compute_session_cost
 from yas.info.transcript import TranscriptUsage
+from yas.info.toolcounts import ToolCounts
 from yas.info.clear import read_clear_epoch
 
 
@@ -117,6 +118,20 @@ class SessionView:
     @cached_property
     def changes(self) -> list[tuple[str, int, int]]:
         return OpenSpec.from_cwd(self.session.cwd).changes
+
+    @cached_property
+    def tool_counts(self) -> ToolCounts:
+        """Per-tool (main, sub) tool_use counts since the last /clear.
+
+        Reopens the main transcript and each subagent transcript — no I/O beyond
+        the files already scanned this render. Lazy: a narrow/medium render that
+        never reads this never pays for the aggregation.
+        """
+        return ToolCounts.gather(
+            self.session.transcript_path,
+            self.subagents.subagents,
+            self.clear_epoch,
+        )
 
     # ------------------------------------------------------------------
     # Derived fields

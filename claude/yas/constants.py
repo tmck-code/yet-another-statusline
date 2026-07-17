@@ -14,6 +14,7 @@ DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
+DEFAULT_SHOW_TOOL_USES = False
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
 # Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so
@@ -28,6 +29,12 @@ MEDIUM_WIDTH = 80
 # Below this the agents stack single-column. Set under DEFAULT_MAX_WIDTH=140 so
 # the two-column layout is actually reachable in a default-config wide terminal.
 TWO_COL_WF_WIDTH = 120
+# Box width at/above which the wide layout's plain subagent cohort (the
+# fallback single-column stack, not the checklist/subagents side-by-side
+# split) pairs agents into two side-by-side columns, filled column-major.
+# Set under DEFAULT_MAX_WIDTH=140 so the two-column layout is actually
+# reachable in a default-config wide terminal.
+TWO_COL_SUBAGENT_WIDTH = 120
 # Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
 # the row cannot hold both columns at full size plus the rate/spark leader, so
 # build_wide drops it for the compact context line instead of overflowing the
@@ -77,7 +84,17 @@ class BarChars:
 
 RESET  = '\033[0m'
 BOLD   = '\033[1m'
+FAINT  = '\033[2m'
 ITALIC = '\033[3m'
+
+# Tools excluded from the per-tool tool_use counts row: todo/UI-plumbing tools,
+# not "work". `Task` is deliberately NOT in this set — it represents a subagent
+# delegation and is a meaningful main-column entry.
+META_EXCLUDE_TOOLS = frozenset({'TodoWrite', 'ExitPlanMode', 'AskUserQuestion'})
+
+# Plain-ASCII caption for the tool-counts separator. The label overlay applies
+# superscript() at render time, so no raw superscript glyphs live in source.
+TOOL_COUNTS_LABEL = 'tools main/sub'
 
 CLR_GREY_DIM   = '\033[38;5;244m'
 CLR_GREY_DARK  = '\033[38;5;238m'
@@ -100,6 +117,8 @@ CLR_PEACH      = '\033[38;5;216m'
 CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
+CLR_ROSE       = '\033[38;5;211m'
+CLR_TEAL_VIOLET = '\033[38;5;80m'
 
 # Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
 # chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
