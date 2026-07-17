@@ -65,7 +65,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.single_width is False
     assert cfg.show_day_stats is True
     assert cfg.show_render_time is False
-    assert cfg.show_tool_uses is True
+    assert cfg.show_tool_uses is False
     assert cfg.justify is False
     assert cfg.labels is False
     assert cfg.errors == ()
@@ -236,7 +236,7 @@ def test_toml_show_tool_uses_false(tmp_path: Path) -> None:
 def test_toml_show_tool_uses_must_be_real_bool(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = "yes"\n')
     cfg = config.Config.load(env={}, config_dir=tmp_path)
-    assert cfg.show_tool_uses is True  # rejected to default
+    assert cfg.show_tool_uses is False  # rejected to default
     assert 'show_tool_uses' in cfg.errors
 
 

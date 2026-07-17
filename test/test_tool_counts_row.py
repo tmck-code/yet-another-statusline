@@ -103,7 +103,7 @@ def test_helper_overflow_counts_types_not_calls() -> None:
 
 def test_row_present_in_wide(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
-    view = _view()
+    view = _view(Config(show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2), 'Aread': (8, 1)})
     spec = layout.build_wide(view, _tick(), 160, _r)
     texts = _content_texts(spec)
@@ -114,7 +114,7 @@ def test_row_present_in_wide(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_row_label_when_captions_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
-    view = _view(Config(labels=True))
+    view = _view(Config(labels=True, show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2)})
     spec = layout.build_wide(view, _tick(), 160, _r)
     # The separator above the tool content row carries the plain caption.
@@ -169,7 +169,7 @@ def test_row_absent_in_narrow_and_medium(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_row_directly_under_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tool row sits immediately after the tokens/cost content rows."""
     _silence_dynamic(monkeypatch)
-    view = _view()
+    view = _view(Config(show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2)})
     spec = layout.build_wide(view, _tick(), 160, _r)
     tok_idx = max(i for i, r in enumerate(spec.rows)
