@@ -69,20 +69,21 @@ aliases when both are set — the aliases keep working but are deprecated.
 
 ### Knobs
 
-| Knob | Env var | `yas.toml` key | Default | Legacy alias |
-|------|---------|----------------|---------|--------------|
-| `max_width` | `YAS_MAX_WIDTH` | `[layout].max_width` | `140` | — |
-| `full_width` | `YAS_FULL_WIDTH` | `[layout].full_width` | `false` | — |
-| `soft_limit` | `YAS_SOFT_LIMIT` | `[tokens].soft_limit` | `150000` | — |
-| `token_window` | `YAS_TOKEN_WINDOW` | `[tokens].token_window` | `60` | `STATUSLINE_TOKEN_WINDOW` |
-| `theme` | `YAS_THEME` (also `--theme` CLI) | `[appearance].theme` | `claude-dark` | `CLAUDE_STATUSLINE_THEME` |
-| `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | `[appearance].bg_shift` | `warm` | — |
-| `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | `[appearance.glyphs].mode` | `nerdfont` | — |
-| `single_width` | `YAS_GLYPH_SINGLE_WIDTH` (also `--glyph-single-width` CLI) | `[appearance.glyphs].single_width` | `false` | — |
-| `context_state` | `YAS_CONTEXT_STATE` | `[context].state` | `false` | — |
-| `context_labels` | `YAS_CONTEXT_LABELS` | `[context].labels` | `Smart,Coasting,Foggy,Cooked,Dumb` | — |
-| `context_thresholds` | `YAS_CONTEXT_THRESHOLDS` | `[context].thresholds` | `25,50,70,90` | — |
-| `show_render_time` | `YAS_SHOW_RENDER_TIME` | `[layout].show_render_time` | `false` | — |
+| Knob | Env var | Legacy alias | `yas.toml` key | Default |
+|------|---------|--------------|----------------|---------|
+| `max_width` | `YAS_MAX_WIDTH` | — | `[layout].max_width` | `140` |
+| `full_width` | `YAS_FULL_WIDTH` | — | `[layout].full_width` | `false` |
+| `soft_limit` | `YAS_SOFT_LIMIT` | — | `[tokens].soft_limit` | `150000` |
+| `token_window` | `YAS_TOKEN_WINDOW` | `STATUSLINE_TOKEN_WINDOW` | `[tokens].token_window` | `60` |
+| `theme` | `YAS_THEME` (also `--theme` CLI) | `CLAUDE_STATUSLINE_THEME` | `[appearance].theme` | `claude-dark` |
+| `bg_shift` | `YAS_BG_SHIFT` (also `--bg-shift` CLI) | — | `[appearance].bg_shift` | `warm` |
+| `glyph_mode` | `YAS_GLYPH_MODE` (also `--glyph-mode` CLI) | — | `[appearance.glyphs].mode` | `nerdfont` |
+| `single_width` | `YAS_GLYPH_SINGLE_WIDTH` (also `--glyph-single-width` CLI) | — | `[appearance.glyphs].single_width` | `false` |
+| `context_state` | `YAS_CONTEXT_STATE` | — | `[context].state` | `false` |
+| `context_labels` | `YAS_CONTEXT_LABELS` | — | `[context].labels` | `Smart,Coasting,Foggy,Cooked,Dumb` |
+| `context_thresholds` | `YAS_CONTEXT_THRESHOLDS` | — | `[context].thresholds` | `25,50,70,90` |
+| `show_render_time` | `YAS_SHOW_RENDER_TIME` | — | `[layout].show_render_time` | `false` |
+| `show_tool_uses` | `YAS_SHOW_TOOL_USES` | — | `[layout].show_tool_uses` | `true` |
 
 #### Valid values
 
@@ -101,6 +102,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 - **`single_width`** — orthogonal boolean that folds double-width dynamic content (wide emoji, CJK in branch names/paths) to width-1; combinable with any `glyph_mode`. The statusline's own glyphs are already width-1, so column geometry is preserved.
 - **`full_width`** — when `true`, makes the box fill the terminal and ignore `max_width`.
 - **`show_render_time`** — when `true`, annotates the bottom-right border with the previous run's wall-clock render time (e.g. `…47.2ms──╯`). Off by default; each run shows the prior run's timing, so it is blank on a session's first render.
+- **`show_tool_uses`** — when `true`, adds a row (wide layout only) under the tokens/cost band, listing per-tool `tool_use` counts.
 - **CLI flags** — `--theme NAME` / `--bg-shift DIR` also accept the `--theme=NAME` / `--bg-shift=DIR` form. Pass them in the `statusLine.command` of your `~/.claude/settings.json`.
 - **Legacy theme file** — `~/.claude/statusline-theme` (contents = a theme name) still works as the lowest-priority theme fallback, below `[appearance].theme`.
 

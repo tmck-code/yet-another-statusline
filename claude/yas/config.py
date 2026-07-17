@@ -30,6 +30,7 @@ from yas.constants import (
     DEFAULT_TOKEN_WINDOW,
     DEFAULT_THEME,
     DEFAULT_SHOW_DAY_STATS,
+    DEFAULT_SHOW_TOOL_USES,
 )
 from yas.themes import THEMES
 
@@ -340,7 +341,7 @@ class Config:
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
         'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
         'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
-        'show_render_time', 'soft_limit_models', 'errors', 'debug_lines',
+        'show_render_time', 'show_tool_uses', 'soft_limit_models', 'errors', 'debug_lines',
     )
 
     max_width:          int
@@ -358,6 +359,7 @@ class Config:
     context_labels:     tuple[str, ...]
     context_thresholds: tuple[int, ...]
     show_render_time:   bool
+    show_tool_uses:     bool
     soft_limit_models:  tuple[tuple[str, int], ...]
     errors:             tuple[str, ...]
     debug_lines:        tuple[str, ...]
@@ -379,6 +381,7 @@ class Config:
         context_labels:     tuple[str, ...] = DEFAULT_CONTEXT_LABELS,
         context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS,
         show_render_time:   bool = False,
+        show_tool_uses:     bool = DEFAULT_SHOW_TOOL_USES,
         soft_limit_models:  tuple[tuple[str, int], ...] = (),
         errors:             tuple[str, ...] = (),
         debug_lines:        tuple[str, ...] = (),
@@ -399,6 +402,7 @@ class Config:
         s(self, 'context_labels', context_labels)
         s(self, 'context_thresholds', context_thresholds)
         s(self, 'show_render_time', show_render_time)
+        s(self, 'show_tool_uses', show_tool_uses)
         s(self, 'soft_limit_models', soft_limit_models)
         s(self, 'errors', errors)
         s(self, 'debug_lines', debug_lines)
@@ -416,7 +420,7 @@ class Config:
                 f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
                 f'show_day_stats={self.show_day_stats}, context_state={self.context_state}, '
                 f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
-                f'show_render_time={self.show_render_time}, '
+                f'show_render_time={self.show_render_time}, show_tool_uses={self.show_tool_uses}, '
                 f'soft_limit_models={self.soft_limit_models!r}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
@@ -507,6 +511,10 @@ class Config:
             'show_render_time',
             _env_sources(env, 'YAS_SHOW_RENDER_TIME') + toml_src(layout, 'show_render_time'),
             _parse_bool, False, errors, debug)
+        show_tool_uses = _resolve(
+            'show_tool_uses',
+            _env_sources(env, 'YAS_SHOW_TOOL_USES') + toml_src(layout, 'show_tool_uses'),
+            _parse_bool, DEFAULT_SHOW_TOOL_USES, errors, debug)
         justify = _resolve(
             'justify',
             _env_sources(env, 'YAS_JUSTIFY') + toml_src(layout, 'justify'),
@@ -546,6 +554,7 @@ class Config:
             context_labels=context_labels,
             context_thresholds=context_thresholds,
             show_render_time=show_render_time,
+            show_tool_uses=show_tool_uses,
             soft_limit_models=tuple(soft_limit_models),
             errors=tuple(errors),
             debug_lines=tuple(debug),

@@ -65,6 +65,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.single_width is False
     assert cfg.show_day_stats is True
     assert cfg.show_render_time is False
+    assert cfg.show_tool_uses is False
     assert cfg.justify is False
     assert cfg.labels is False
     assert cfg.errors == ()
@@ -220,6 +221,42 @@ def test_env_show_render_time_zero_overrides_toml_true(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_render_time = true\n')
     cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': '0'}, config_dir=tmp_path)
     assert cfg.show_render_time is False
+
+
+# show_tool_uses (per-tool tool_use counts row, wide layout; on by default)
+
+@requires_tomllib
+def test_toml_show_tool_uses_false(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = false\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_tool_uses is False
+
+
+@requires_tomllib
+def test_toml_show_tool_uses_must_be_real_bool(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = "yes"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_tool_uses is False  # rejected to default
+    assert 'show_tool_uses' in cfg.errors
+
+
+def test_env_show_tool_uses_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'FALSE'):
+        cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': val}, config_dir=tmp_path)
+        assert cfg.show_tool_uses is False, f'expected False for YAS_SHOW_TOOL_USES={val!r}'
+
+
+def test_env_show_tool_uses_truthy_values(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'TRUE'):
+        cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': val}, config_dir=tmp_path)
+        assert cfg.show_tool_uses is True, f'expected True for YAS_SHOW_TOOL_USES={val!r}'
+
+
+@requires_tomllib
+def test_env_show_tool_uses_overrides_toml_false(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = false\n')
+    cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': '1'}, config_dir=tmp_path)
+    assert cfg.show_tool_uses is True
 
 
 # show_day_stats (seventh knob)

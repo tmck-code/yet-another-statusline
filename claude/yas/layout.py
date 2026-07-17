@@ -19,6 +19,7 @@ from yas.constants import (
     SUBAGENT_DISPLAY_CAP,
     TOKENS_COST_MIN_WIDTH,
     TWO_COL_SUBAGENT_WIDTH,
+    TOOL_COUNTS_LABEL,
     TWO_COL_WF_WIDTH,
     WORKFLOW_AGENT_CAP,
     WORKFLOW_RUN_CAP,
@@ -849,6 +850,18 @@ def build_wide(
             seam_pending = False
             return 'separator_seam'
         return normal
+
+    # Per-tool tool_use counts row (wide-only), directly under the tokens/cost
+    # rows. Full-width content with no internal │, so it threads no ┬/┴ of its
+    # own — the leading separator closes the tokens vseps via sep_kind/pending_ups.
+    # Zero-state (no counted tool uses since /clear): omit both rows, leave
+    # pending_ups intact so the next section inherits the tokens vseps' ┴.
+    tc = view.tool_counts
+    if view.cfg.show_tool_uses and tc.counts:
+        tc_labels: list[tuple[str, int]] = [(TOOL_COUNTS_LABEL, 3)] if view.cfg.labels else []
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=tc_labels))
+        rows.append(RowSpec('content', content=r.tool_counts_row(tc.counts, width, fill=fill)))
+        pending_ups = ()
 
     if plugins_line:
         # Single "skills + plugins" caption anchored at content start (col 3).

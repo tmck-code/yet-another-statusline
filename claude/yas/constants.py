@@ -14,6 +14,7 @@ DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
+DEFAULT_SHOW_TOOL_USES = False
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
 # Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so
@@ -83,7 +84,17 @@ class BarChars:
 
 RESET  = '\033[0m'
 BOLD   = '\033[1m'
+FAINT  = '\033[2m'
 ITALIC = '\033[3m'
+
+# Tools excluded from the per-tool tool_use counts row: todo/UI-plumbing tools,
+# not "work". `Task` is deliberately NOT in this set — it represents a subagent
+# delegation and is a meaningful main-column entry.
+META_EXCLUDE_TOOLS = frozenset({'TodoWrite', 'ExitPlanMode', 'AskUserQuestion'})
+
+# Plain-ASCII caption for the tool-counts separator. The label overlay applies
+# superscript() at render time, so no raw superscript glyphs live in source.
+TOOL_COUNTS_LABEL = 'tools main/sub'
 
 CLR_GREY_DIM   = '\033[38;5;244m'
 CLR_GREY_DARK  = '\033[38;5;238m'
