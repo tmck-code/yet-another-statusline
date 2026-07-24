@@ -390,6 +390,17 @@ WORKFLOW_RUN_CAP          = 2
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
 SUBAGENT_DISPLAY_CAP      = 6
 
+# Tree-single rows: the minimum visible description-column width to guarantee
+# where terminal width allows (p90 of mined real subagent titles is 45 chars —
+# see .scratch/session-analysis.md). Below this the description still
+# ellipsis-truncates; narrow terminals degrade gracefully instead of honouring
+# the guarantee (see layout.tree_columns).
+SUBAGENT_DESC_MIN_WIDTH        = 45
+# Constant gap (visible cols) between the stats/model cluster and the
+# activity snippet in tree-single rows, once the model label is padded to the
+# cohort's widest model width (see renderer.Renderer.subagent_row).
+SUBAGENT_STATS_ACTIVITY_GAP    = 2
+
 # Maximum lines to scan from the head of a transcript when searching for a
 # /clear marker. Keeps the lookup O(1) even on large transcripts.
 CLEAR_SCAN_MAX_LINES      = 30

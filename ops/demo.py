@@ -1000,6 +1000,121 @@ SCENARIOS: list[ScenarioConfig] = [
         seven_day_pct = 20.0,
         yas_toml    = '[layout]\nsubagent_tree = true\n',
     ),
+    # Five real-cohort tree-mode scenarios mined from production sessions (see
+    # .scratch/session-analysis.md) — genuine 6-11-agent fan-outs, not a
+    # synthetic mockup, to sanity-check the description/gap alignment (TASK
+    # A/B) against realistic titles, durations, and token magnitudes.
+    # SUBAGENT_DISPLAY_CAP caps each render to the 6 most-recently-started
+    # rows; entries are ordered oldest-first so the cap keeps the widest part
+    # of each cohort's fan-out.
+    ScenarioConfig(
+        name        = 'subagent-tree-cohort1',
+        context_pct = 0.45,
+        # Cohort 1 (PEAK=11): one spec-implementer fans out 10 general-purpose
+        # depth-2 workers, each owning one file/module ("per-file wave"). The
+        # real parent hash is unresolved on disk, so every child attaches to
+        # the cohort root per the orphan-attachment rule.
+        subagents   = [
+            ('spec-implementer', 'Implement decouple-sections-and-apply-defaults change', 168_100_000, 53_867, ('Bash', {'command': 'mv openspec/changes/decouple-sections-and-apply-defaults'})),
+            ('general-purpose',  'main.ts + migration (v6→v7)',                            4_900_000,  8_249, ('Write', {'file_path': 'report-A-main-migration.md'}), None, 1),
+            ('general-purpose',  'resolve.ts group/bar-range slots',                          9_000_000, 27_655, ('Write', {'file_path': 'report-B-resolve.md'}), None, 1),
+            ('general-purpose',  'seed.ts bar-span groups + riff seeding',                     2_000_000,  6_505, ('Write', {'file_path': 'report-C-seed.md'}), None, 1),
+            ('general-purpose',  'session.ts + presets.ts instance variant removal',           1_700_000, 10_304, ('Write', {'file_path': 'report-D-session-presets.md'}), None, 1),
+            ('general-purpose',  'group-lane.ts absolute bars + danger highlight',              5_000_000, 13_638, ('Write', {'file_path': 'report-E-group-lane.md'}), None, 1),
+            ('general-purpose',  'config-panel/index.ts + html/css',                           33_800_000, 34_706, ('Write', {'file_path': 'report-F-config-panel.md'}), None, 1),
+            ('general-purpose',  'delete rematch/driftFixup + sweep-harness cleanup',           1_700_000,  8_570, ('Edit', {'file_path': 'decouple-sections-and-apply-defaults/tasks.md'}), None, 1),
+            ('general-purpose',  'corpus export drops rematch report',                          800_000,  3_584, ('Write', {'file_path': 'report-I-corpus.md'}), None, 1),
+            ('general-purpose',  'backend menu-reanalyse config wipe',                         1_800_000,  8_477, ('Write', {'file_path': 'report-J-backend.md'}), None, 1),
+            ('general-purpose',  'docs + whereis skill updates',                              13_500_000, 22_594, ('Write', {'file_path': 'report-K-docs.md'}), None, 1),
+        ],
+        five_hour_pct = 40.0,
+        seven_day_pct = 25.0,
+        yas_toml      = '[layout]\nsubagent_tree = true\n',
+    ),
+    ScenarioConfig(
+        name        = 'subagent-tree-cohort2',
+        context_pct = 0.42,
+        # Cohort 2 (PEAK=10): spec-implementer -> 6 general-purpose (d2) ->
+        # Explore + ops (d3) spun up underneath two of the depth-2 workers.
+        # Exercises 3 depth levels, duplicate task descriptions (retries), and
+        # several unresolved parents (attached to root).
+        subagents   = [
+            ('spec-implementer', 'Implement add-server-side-render change',                    24_800_000, 35_300, ('Read', {'file_path': '5e436f0e-session.jsonl'})),
+            ('general-purpose',  'API routes + lifecycle wiring (tasks 5.1-5.8)',                8_400_000, 25_447, ('Bash', {'command': 'cd backend && uv run pytest'}), None, 1),
+            ('general-purpose',  'Frontend export modal server-render path (tasks 6.1-6.6)',     9_600_000, 25_331, ('Bash', {'command': 'echo "=== Final Verification ==="'}), None, 1),
+            ('general-purpose',  'Export modal server-render UI (tasks 6.1-6.6)',                5_400_000, 19_439, ('Bash', {'command': 'npm test --prefix frontend'}), None, 1),
+            ('general-purpose',  'Docker/ops render image tier (tasks 7.1-7.5)',                 8_400_000, 19_508, ('Edit', {'file_path': 'spec-implementer-add-server-side-render.md'}), None, 1),
+            ('general-purpose',  'Documentation updates + skill sync (tasks 8.1-8.3)',           6_300_000, 18_004, ('Read', {'file_path': 'add-server-side-render/design.md'}), None, 1),
+            ('general-purpose',  'Docker/ops render tier (tasks 7.1-7.5)',                       5_300_000, 20_275, ('Bash', {'command': 'cat > /tmp/final-verification.txt'}), None, 1),
+            ('general-purpose',  'Documentation and skill updates (tasks 8.1-8.3)',              8_000_000, 18_943, ('Bash', {'command': 'cat 5e436f0e-session.jsonl'}), None, 1),
+            ('Explore',          'Read render docs and backend structure',                        300_000,  2_801, ('Bash', {'command': 'ls -la /tmp/claude-1000/'}), None, 5),
+            ('ops',              'Implement tasks 7.1-7.5 for render tier',                        300_000,  1_681, ('Bash', {'command': 'echo test'}), None, 7),
+        ],
+        five_hour_pct = 35.0,
+        seven_day_pct = 22.0,
+        yas_toml      = '[layout]\nsubagent_tree = true\n',
+    ),
+    ScenarioConfig(
+        name        = 'subagent-tree-cohort3',
+        context_pct = 0.30,
+        # Cohort 3 (PEAK=8): spec-author fans out short (25-128s) research
+        # agents of many *named* agent types (api/fractal/ui/ops, several
+        # duplicated retries) — good stress case for varied agentType labels
+        # + very short durations + tiny token counts.
+        subagents   = [
+            ('spec-author', 'Author server-render OpenSpec change',      3_400_000, 33_460, ('Write', {'file_path': 'spec-author-server-render.md'})),
+            ('api',         'Research backend job/cache/route infra',      700_000,    736, ('Write', {'file_path': 'spec-author-server-render.md'}), None, 1),
+            ('fractal',     'Research offline renderer',                   300_000,  1_136, ('Write', {'file_path': 'spec-author-server-render.md'}), None, 1),
+            ('fractal',     'Research offline renderer script',            200_000,    939, ('Bash', {'command': 'ls -la frontend/scripts/'}), None, 1),
+            ('ui',          'Research export modal UI',                  1_000_000,  2_428, ('Write', {'file_path': 'spec-author-server-render.md'}), None, 1),
+            ('ops',         'Research Docker/Makefile ops layer',           200_000,  1_077, ('Read', {'file_path': 'cb81d945-session.jsonl'}), None, 1),
+            ('ops',         'Research docker/make ops layer',               900_000,  8_797, ('Bash', {'command': 'cat > spec-author-server-render.md'}), None, 1),
+            ('ui',          'Research export modal frontend',               300_000,  1_077, ('Read', {'file_path': 'cb81d945-session.jsonl'}), None, 1),
+        ],
+        five_hour_pct = 25.0,
+        seven_day_pct = 15.0,
+        yas_toml      = '[layout]\nsubagent_tree = true\n',
+    ),
+    ScenarioConfig(
+        name        = 'subagent-tree-cohort4',
+        context_pct = 0.50,
+        # Cohort 4 (PEAK=7): clean per-file implementation wave — a huge-ctx
+        # spec-implementer root plus 7 uniformly-shaped general-purpose depth-2
+        # workers, all ending on a Write. Tidy "happy path" mockup.
+        subagents   = [
+            ('spec-implementer', 'Implement explicit-visual-config change',                    182_000_000, 78_809, ('Write', {'file_path': '8017af67-session.jsonl'})),
+            ('general-purpose',  'Schema bump + codegen for explicit-visual-config',              4_500_000, 11_737, ('Bash', {'command': 'cat 8017af67-session.jsonl'}), None, 1),
+            ('general-purpose',  'Delete resolver motif base layer (resolve.ts)',                  4_300_000, 11_686, ('Write', {'file_path': 'resolve.ts'}), None, 1),
+            ('general-purpose',  'Remove caller-absent motif fallback (evaluator+pipeline)',       4_100_000, 20_571, ('Write', {'file_path': 'evaluator.ts'}), None, 1),
+            ('general-purpose',  'Slim matrix.ts to apply-time library',                           3_200_000, 11_875, ('Write', {'file_path': 'matrix.ts'}), None, 1),
+            ('general-purpose',  'Delete runtime generator layer (channels.ts)',                   2_500_000, 12_736, ('Write', {'file_path': 'channels.ts'}), None, 1),
+            ('general-purpose',  'Materialize choreography at seed (seed.ts)',                     5_200_000, 29_545, ('Write', {'file_path': 'seed.ts'}), None, 1),
+            ('general-purpose',  'Fix on-load configVersion gate (main.ts + sweep-harness.ts)',    1_200_000,  6_930, ('Write', {'file_path': 'sweep-harness.ts'}), None, 1),
+        ],
+        five_hour_pct = 45.0,
+        seven_day_pct = 30.0,
+        yas_toml      = '[layout]\nsubagent_tree = true\n',
+    ),
+    ScenarioConfig(
+        name        = 'subagent-tree-cohort5',
+        context_pct = 0.35,
+        # Cohort 5 (PEAK=7): the deepest real tree mined — spec-implementer
+        # (d1) -> nested spec-implementer (d2) -> 5 depth-3 workers of mixed
+        # types (fractal/general-purpose/ui). Genuine 3-level nesting with a
+        # spec-implementer nested under a spec-implementer.
+        subagents   = [
+            ('spec-implementer', 'Implement boundary-c-and-morph-axes',                 500_000,  4_735, ('Read', {'file_path': '46b6a33b-session.jsonl'})),
+            ('spec-implementer', 'Implement boundary-c-and-morph-axes change',       38_400_000, 73_248, ('Write', {'file_path': 'boundary-c-and-morph-axes/tasks.md'}), None, 1),
+            ('fractal',          'Task 2.4/4.1/5.1 matrix.ts',                        3_100_000, 18_418, ('Write', {'file_path': 'matrix.ts'}), None, 2),
+            ('general-purpose',  'Task 2.5/2.6/4.2 resolve.ts',                        6_300_000, 33_629, ('Write', {'file_path': 'resolve.ts'}), None, 2),
+            ('fractal',          'Task 3.1 compositeUniforms',                        1_500_000,  7_295, ('Write', {'file_path': 'compositeUniforms.ts'}), None, 2),
+            ('ui',               'Task 3.1 main.ts neutral bag',                        100_000,  1_641, ('Write', {'file_path': 'main.ts'}), None, 2),
+            ('fractal',          'Task 6.1 navigation.ts captureView',                  800_000,  6_155, ('Write', {'file_path': 'navigation.ts'}), None, 2),
+        ],
+        five_hour_pct = 32.0,
+        seven_day_pct = 18.0,
+        yas_toml      = '[layout]\nsubagent_tree = true\n',
+    ),
     ScenarioConfig(
         name        = 'cohort-two-column',
         context_pct = 0.40,

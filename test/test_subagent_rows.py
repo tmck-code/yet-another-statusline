@@ -12,9 +12,12 @@ from yas.config import Config
 
 from yas.constants import (
     GLYPH_REPLYING,
+    SUBAGENT_DESC_MIN_WIDTH,
+    SUBAGENT_STATS_ACTIVITY_GAP,
 )
 from yas.info import SessionView
 from yas.info.subagents import RunningSubagent
+from yas.render.gradient import model_display
 from yas.render.text import _visible_width, fmt_tok
 from yas.tokens import TickRecord, TokenLog
 from helper import strip_ansi
@@ -853,8 +856,9 @@ def test_tree_single_activity_column_aligned_across_prefix_depths() -> None:
 def test_tree_columns_common_anchor_across_names_and_prefixes() -> None:
     # layout.tree_columns: desc_col is the widest (prefix + duration + type)
     # across the cohort, so the shortest names/prefixes get padded up to it;
-    # stats_col/activity_col target ~30%/~50% of the row width, never left of
-    # where the preceding field ends.
+    # stats_col/activity_col target ~30%/~50% of the row width (or the
+    # SUBAGENT_DESC_MIN_WIDTH guarantee, whichever is larger when width
+    # allows), never left of where the preceding field ends.
     root = _make_tree_sub('agent-a', agent_type='spec-author')     # prefix '', long type
     kid  = _make_tree_sub('agent-b', parent_id='a', agent_type='api')  # prefix '├ ', short type
     cells = [(root, ''), (kid, '├ ')]
@@ -863,8 +867,10 @@ def test_tree_columns_common_anchor_across_names_and_prefixes() -> None:
     assert desc_col == 0 + 5 + 1 + len('spec-author') + 1
     assert stats_col >= desc_col + 8
     assert activity_col >= stats_col + 16
-    assert stats_col == round(140 * 0.30) or stats_col == desc_col + 8
-    assert activity_col == round(140 * 0.50) or activity_col == stats_col + 16
+    assert activity_col <= 140
+    stats_guarantee = desc_col + 3 + SUBAGENT_DESC_MIN_WIDTH
+    assert stats_col in (round(140 * 0.30), desc_col + 8, stats_guarantee)
+    assert activity_col in (round(140 * 0.50), stats_col + 16, 140)
 
 
 def test_tree_single_description_aligned_across_depths_and_names() -> None:
@@ -901,6 +907,66 @@ def test_tree_single_model_left_aligned_no_padding() -> None:
     # activity text — never padded out to the old 6-char rjust field width.
     assert '· haiku' in line
     assert 'haiku ' + ' ' * 5 not in line  # no leftover rjust-style padding run
+
+
+def test_tree_columns_guarantees_desc_min_width_at_wide_width() -> None:
+    # TASK A: at a wide enough terminal, stats_col clears desc_col by at least
+    # SUBAGENT_DESC_MIN_WIDTH + 3 (the ' · ' separator), so subagent_row's
+    # desc_max = stats_col - desc_col - 3 guarantees a >=45-char description
+    # column (p90 of mined real subagent titles).
+    root = _make_tree_sub('agent-a', agent_type='spec-implementer')
+    cells = [(root, '')]
+    desc_col, stats_col, activity_col = layout.tree_columns(cells, 200)
+    desc_max = stats_col - desc_col - 3
+    assert desc_max >= SUBAGENT_DESC_MIN_WIDTH
+    assert activity_col <= 200
+
+
+def test_tree_columns_degrades_gracefully_at_narrow_width() -> None:
+    # TASK A: at a narrow width the guarantee must not push activity_col past
+    # the target width or produce negative/nonsensical column offsets — the
+    # description guarantee is skipped and the old percentage anchor is used.
+    root = _make_tree_sub('agent-a', agent_type='spec-implementer')
+    cells = [(root, '')]
+    desc_col, stats_col, activity_col = layout.tree_columns(cells, 50)
+    assert stats_col >= desc_col + 8
+    assert activity_col >= stats_col + 16
+    assert activity_col <= 50
+    assert stats_col > 0 and activity_col > 0
+
+
+def test_tree_single_constant_gap_with_model_padded_to_cohort_width() -> None:
+    # TASK B: pad every row's model label to the cohort's widest model width
+    # (tree_model_w), then a CONSTANT SUBAGENT_STATS_ACTIVITY_GAP-col gap
+    # separates the cluster from the activity snippet, regardless of model
+    # label length.
+    short = _make_tree_sub('agent-a', agent_type='api', model='claude-haiku-4-5-20251001',
+                           last_activity=('tool_use', 'Bash', {'command': 'x'}))
+    long  = _make_tree_sub('agent-b', agent_type='api', model='claude-sonnet-4-6',
+                           last_activity=('tool_use', 'Read', {'file_path': 'y.py'}))
+    cells = [(short, ''), (long, '')]
+    model_w = layout.tree_model_width(cells)
+    assert model_w == max(len(model_display(short.model)), len(model_display(long.model)))
+    l_short = strip_ansi(_r.subagent_row(short, 136, twoline=True, tree_single=True, tree_model_w=model_w))
+    l_long  = strip_ansi(_r.subagent_row(long, 136, twoline=True, tree_single=True, tree_model_w=model_w))
+    # The gap measured from the END OF THE PADDED MODEL FIELD (not from the
+    # end of the visible label text) is identical for both rows — the model
+    # pad-to-cohort-width absorbs the label-length difference, so what's left
+    # is the constant activity gap (plus the activity glyph/space that always
+    # leads the snippet).
+    gap_short = l_short.index('Bash[') - (l_short.index('haiku') + len('haiku'))
+    gap_long  = l_long.index('Read[') - (l_long.index('sonnet') + len('sonnet'))
+    assert gap_short - (model_w - len('haiku')) == gap_long - (model_w - len('sonnet'))
+    assert gap_short - (model_w - len('haiku')) >= SUBAGENT_STATS_ACTIVITY_GAP
+
+
+def test_tree_single_off_keeps_two_line_with_tree_model_w() -> None:
+    # Flat (twoline, tree_single=False) rendering stays byte-identical even
+    # when a caller passes tree_model_w — the param is a no-op outside
+    # tree_single mode.
+    sub = _make_sub()
+    assert _r.subagent_row(sub, 136, twoline=True) == \
+           _r.subagent_row(sub, 136, twoline=True, tree_model_w=12)
 
 
 def test_tree_single_off_keeps_two_line() -> None:

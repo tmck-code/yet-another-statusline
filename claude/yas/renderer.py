@@ -81,6 +81,7 @@ from yas.constants import (
     PILL_RIGHT,
     SEVEN_DAY_MINUTES,
     SEVEN_DAY_WARMUP_MINUTES,
+    SUBAGENT_STATS_ACTIVITY_GAP,
     TASK_HEADER_RIGHT_GAP_MIN,
     WF_NAME_MIN,
     WF_PHASE_DOT,
@@ -756,6 +757,7 @@ class Renderer:
         tree_single: bool = False,
         tree_desc_col: int | None = None,
         tree_activity_col: int | None = None,
+        tree_model_w: int | None = None,
     ) -> str:
         # Tree view: a plain branch prefix ('├ ', '└ ', indented deeper) eats
         # visible columns off the front of every line, so the row renders into
@@ -831,11 +833,17 @@ class Renderer:
             share     = subagent_share(sub.total_input + sub.output, session_inout)
             share_str = f'{share * 100:.1f}%' if share is not None else ''
             tok_field = fmt_tok(sub.total_input).rjust(5)
-            # Tree single-line: the model is left-aligned (no fixed-width
-            # padding) — the CLUSTER area is padded to stats_w as a whole
-            # instead, so trailing space comes from that, not from the model
-            # field's own justification (per the design mock's plain 'haiku').
-            model_str = short_model if tree_single else short_model.rjust(6)
+            if tree_single:
+                # A fixed-width share field keeps the cluster's total width
+                # deterministic across rows (needed so the constant activity
+                # gap below lands at the same absolute column). Model is
+                # padded to the cohort's widest label (tree_model_w) instead of
+                # a fixed 6-char rjust, per the design mock's plain 'haiku'.
+                if share_str:
+                    share_str = share_str.rjust(6)
+                model_str = short_model.ljust(tree_model_w) if tree_model_w else short_model
+            else:
+                model_str = short_model.rjust(6)
 
             if is_done:
                 front_c = f'{self.CTX_DIM}{dur_s}{self.R} {self.CTX_DIM}{type_text}{self.R}'
@@ -929,15 +937,20 @@ class Renderer:
 
             if tree_single:
                 # Append the current-activity column after the stats cluster.
-                # A 2-col gap separates them; the activity (tool glyph + verb,
-                # no `└` continuation marker) truncates with the usual ellipsis
-                # when the reserved column is tight. Dimmed like the old line 2.
-                line1  += ' ' * max(0, stats_w - _visible_width(line1))
-                act_w   = max(0, target_w - stats_w - 2)
+                # The model label (and, when tree_single, the share field) is
+                # now padded to a fixed width, so the cluster's own width is
+                # deterministic across rows and a CONSTANT
+                # SUBAGENT_STATS_ACTIVITY_GAP-col gap — rather than a variable
+                # fill-to-column pad — is enough to keep the activity column
+                # aligned down the cohort. The activity (tool glyph + verb, no
+                # `└` continuation marker) truncates with the usual ellipsis
+                # when tight. Dimmed like the old line 2.
+                gap      = SUBAGENT_STATS_ACTIVITY_GAP
+                act_w    = max(0, target_w - _visible_width(line1) - gap)
                 activity = self.subagent_activity(sub.last_activity, cap=max(0, act_w - 3))
                 if _visible_width(activity) > act_w:
                     activity = activity[:max(0, act_w - 1)] + ELLIPSIS
-                line1 = f'{line1}  {self.CTX_DIM}{activity}{self.R}'
+                line1 = f'{line1}{" " * gap}{self.CTX_DIM}{activity}{self.R}'
                 line1 += ' ' * max(0, target_w - _visible_width(line1))
                 if prefix_w:
                     return f'{self.CTX_DIM}{tree_prefix}{self.R}{line1}'
