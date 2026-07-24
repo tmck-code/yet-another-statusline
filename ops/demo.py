@@ -1000,6 +1000,32 @@ SCENARIOS: list[ScenarioConfig] = [
         seven_day_pct = 20.0,
         yas_toml    = '[layout]\nsubagent_tree = true\n',
     ),
+    ScenarioConfig(
+        name        = 'subagent-tree-plan',
+        context_pct = 0.40,
+        # Checklist + tree-mode cohort side by side: exercises the
+        # SUBAGENT_TREE_PLAN_WIDTH cap (the plan column should hold at ~78
+        # cols on a wide box, handing the rest to the subagent tree) rather
+        # than the old 45%-of-inner even split.
+        tasks       = [
+            ('Audit gradient palette',  'Auditing gradient palette',  'completed'),
+            ('Wire alert-mode pill',    'Wiring alert-mode pill',     'completed'),
+            ('Refactor border math',    'Refactoring border math',    'in_progress'),
+            ('Update CONTEXT.md',       'Updating CONTEXT.md',        'pending'),
+            ('Add sparkline buckets',   'Adding sparkline buckets',   'pending'),
+        ],
+        subagents   = [
+            ('spec-author', 'Fetching openspec artifact instructions',   45_200, 1_400, ('Bash', {'command': 'openspec show --json'})),
+            ('api',         'Creating tmp directory for report',         57_100,   900, ('Bash', {'command': 'mkdir -p /tmp/report'}), None, 1),
+            ('fractal',     'Reading FramePipeline.load() signature',    28_700,   640, ('Read', {'file_path': 'render/pipeline.py'}), None, 1),
+            ('ui',          'Grepping for capability flag usage',        46_100,   730, ('Grep', {'pattern': 'capability'}), None, 1),
+            ('ops',         'Reading render-in-docker.md documentation', 46_300,   810, ('Read', {'file_path': 'docs/render-in-docker.md'}), None, 1),
+            ('probe',       'Checking docker daemon health',             12_400,   210, ('Bash', {'command': 'docker info'}), None, 5),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+        yas_toml    = '[layout]\nsubagent_tree = true\nmax_width = 300\n',
+    ),
     # Five real-cohort tree-mode scenarios mined from production sessions (see
     # .scratch/session-analysis.md) — genuine 6-11-agent fan-outs, not a
     # synthetic mockup, to sanity-check the description/gap alignment (TASK

@@ -38,6 +38,13 @@ TWO_COL_WF_WIDTH = 120
 # Set under DEFAULT_MAX_WIDTH=140 so the two-column layout is actually
 # reachable in a default-config wide terminal.
 TWO_COL_SUBAGENT_WIDTH = 120
+# When the wide layout's checklist/subagents side-by-side split is in tree
+# mode (cfg.subagent_tree), the plan/task-list column is fixed at this width
+# instead of the usual 45%-of-inner cap, so the subagent tree gets the rest
+# of a wide box instead of being starved by an even split. Still clamped to
+# the 45%-of-inner ceiling on narrow terminals so it degrades to the old
+# behavior when the box is too small to justify a fixed-width left column.
+SUBAGENT_TREE_PLAN_WIDTH = 78
 # Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
 # the row cannot hold both columns at full size plus the rate/spark leader, so
 # build_wide drops it for the compact context line instead of overflowing the

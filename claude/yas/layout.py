@@ -18,6 +18,7 @@ from yas.constants import (
     RESET,
     SUBAGENT_DESC_MIN_WIDTH,
     SUBAGENT_DISPLAY_CAP,
+    SUBAGENT_TREE_PLAN_WIDTH,
     TOKENS_COST_MIN_WIDTH,
     TWO_COL_SUBAGENT_WIDTH,
     TOOL_COUNTS_LABEL,
@@ -962,7 +963,14 @@ def build_wide(
         inner             = width - 4
         task_lines_full   = r.task_row(tasks, inner)
         longest_task_line = max((_visible_width(line) for line in task_lines_full), default=0)
-        left_w            = min(longest_task_line, inner * 45 // 100)
+        # Tree mode: fix the plan column at SUBAGENT_TREE_PLAN_WIDTH so the
+        # subagent tree gets the rest of the box on wide terminals, instead of
+        # an even 45% split that starves it. Still clamped to the old 45%
+        # cap, so on narrow terminals this degrades to the pre-tree behavior.
+        if view.cfg.subagent_tree:
+            left_w        = min(SUBAGENT_TREE_PLAN_WIDTH, inner * 45 // 100)
+        else:
+            left_w        = min(longest_task_line, inner * 45 // 100)
         right_w           = inner - 3 - left_w
         if right_w >= 40:
             side_by_side = True

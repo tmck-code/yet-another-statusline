@@ -551,6 +551,72 @@ def test_side_by_side_falls_back_to_stacked_when_narrow(monkeypatch: pytest.Monk
     assert has_task and has_sub, 'both sections should render in the stacked fallback'
 
 
+def test_side_by_side_plan_column_capped_in_tree_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tree mode + wide box: the plan column is fixed at SUBAGENT_TREE_PLAN_WIDTH
+    (not the old 45%-of-inner even split), so the subagent tree gets the rest."""
+    from helper import strip_ansi
+    from yas.constants import SUBAGENT_TREE_PLAN_WIDTH
+    _both_sections(monkeypatch, long_subject=True)
+
+    width = 300
+    view  = SessionView(_session(), Config(subagent_tree=True))
+    spec  = layout.build_wide(view, _tick(), width, _r)
+
+    combined_idx = _divider_content_idx(spec)
+    assert combined_idx, 'expected a side-by-side block with a divider column'
+    div_cols = {3 + strip_ansi(spec.rows[i].content).index('│') for i in combined_idx}
+    assert len(div_cols) == 1
+    divider_col = div_cols.pop()
+    left_w = divider_col - 4
+    assert left_w == SUBAGENT_TREE_PLAN_WIDTH, f'left_w={left_w}, expected {SUBAGENT_TREE_PLAN_WIDTH}'
+
+
+def test_side_by_side_plan_split_unchanged_when_tree_mode_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tree mode off: identical to the pre-existing 45%-of-inner split at the
+    same wide width — byte-identical output either way."""
+    from helper import strip_ansi
+    _both_sections(monkeypatch, long_subject=True)
+
+    width = 300
+    view_default = SessionView(_session(), Config())
+    view_off     = SessionView(_session(), Config(subagent_tree=False))
+    spec_default = layout.build_wide(view_default, _tick(), width, _r)
+    spec_off     = layout.build_wide(view_off, _tick(), width, _r)
+    lines_default = [strip_ansi(ln) for ln in layout.render_layout(spec_default, _r)]
+    lines_off     = [strip_ansi(ln) for ln in layout.render_layout(spec_off, _r)]
+    assert lines_default == lines_off
+
+    combined_idx = _divider_content_idx(spec_default)
+    assert combined_idx, 'expected a side-by-side block with a divider column'
+    div_cols = {3 + strip_ansi(spec_default.rows[i].content).index('│') for i in combined_idx}
+    divider_col = div_cols.pop()
+    left_w = divider_col - 4
+    inner  = width - 4
+    assert left_w == inner * 45 // 100, 'tree mode off must keep the old 45%-of-inner cap'
+
+
+def test_side_by_side_plan_column_degrades_at_narrow_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tree mode on, but the box is too narrow for a fixed 78-col plan column
+    to leave >=40 cols for the tree: falls back to the old 45%-of-inner cap
+    (still side-by-side, just not pinned at SUBAGENT_TREE_PLAN_WIDTH)."""
+    from helper import strip_ansi
+    from yas.constants import SUBAGENT_TREE_PLAN_WIDTH
+    _both_sections(monkeypatch, long_subject=True)
+
+    width = 140  # inner=136, 45%-cap=61 < SUBAGENT_TREE_PLAN_WIDTH=78
+    inner = width - 4
+    assert inner * 45 // 100 < SUBAGENT_TREE_PLAN_WIDTH, 'precondition: 45% cap must undercut the fixed width here'
+
+    view = SessionView(_session(), Config(subagent_tree=True))
+    spec = layout.build_wide(view, _tick(), width, _r)
+    combined_idx = _divider_content_idx(spec)
+    assert combined_idx, 'expected side-by-side (still enough room at width 140)'
+    div_cols = {3 + strip_ansi(spec.rows[i].content).index('│') for i in combined_idx}
+    divider_col = div_cols.pop()
+    left_w = divider_col - 4
+    assert left_w == inner * 45 // 100, 'must degrade to the 45%-of-inner cap, not the fixed width'
+
+
 def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
     """Single-section: checklist present, no subagents → full-width, no divider."""
     from helper import strip_ansi
