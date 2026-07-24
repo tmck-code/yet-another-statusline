@@ -123,6 +123,16 @@ def test_two_line_cluster_shows_new_model_family(model: str, word: str) -> None:
     assert word in strip_ansi(line1)
 
 
+def test_two_line_cluster_shows_bracketed_context_suffix() -> None:
+    # Agent frontmatter model like 'sonnet[1m]' must keep the [1m] suffix
+    # visible instead of being normalised down to just 'sonnet'.
+    sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6[1m]')
+    si  = (sub.total_input + sub.output) * 2
+    line1, _ = _two(sub, 136, session_inout=si)
+    plain = strip_ansi(line1)
+    assert 'sonnet[1m]' in plain
+
+
 def test_two_line_no_tpm_field() -> None:
     sub = _make_sub(first_timestamp=time.time() - 60, total_input=3000, output=600)
     si  = (sub.total_input + sub.output) * 2
@@ -392,6 +402,12 @@ def test_one_line_shows_new_model_family(model: str, word: str) -> None:
     sub = _make_sub(model=model, last_activity=('tool_use', 'Bash', {}))
     out = strip_ansi(_one(sub))
     assert word in out
+
+
+def test_one_line_shows_bracketed_context_suffix() -> None:
+    sub = _make_sub(model='claude-sonnet-4-6[1m]', last_activity=('tool_use', 'Bash', {}))
+    out = strip_ansi(_one(sub))
+    assert 'sonnet[1m]' in out
 
 
 def test_one_line_running_keeps_marker() -> None:
@@ -692,3 +708,234 @@ def test_build_wide_two_subagents_render(monkeypatch: pytest.MonkeyPatch) -> Non
     for ln in sub_lines:
         assert 't/m' not in ln
         assert '↑' not in ln
+
+
+# J. Tree view ----------------------------------------------------------------
+
+def _make_tree_sub(agent_id: str, parent_id: str = '', ts_off: float = 0.0, **kw) -> RunningSubagent:
+    sub = _make_sub(first_timestamp=time.time() - 100 + ts_off, **kw)
+    sub.agent_id  = agent_id
+    sub.parent_id = parent_id
+    return sub
+
+
+def test_meta_parent_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # parentAgentId/spawnDepth in the meta.json land on the parsed subagent;
+    # a meta without them falls back to top-level ('' / 0).
+    monkeypatch.setattr(subagents_mod, 'CLAUDE_DIR', tmp_path)
+    sub_dir = tmp_path / 'projects' / '-proj' / 'sess-1' / 'subagents'
+    sub_dir.mkdir(parents=True)
+    line = json.dumps({'type': 'assistant', 'timestamp': '2026-01-01T00:00:00Z',
+                       'message': {'id': 'm1', 'usage': {'input_tokens': 1}}}) + '\n'
+    (sub_dir / 'agent-parent.meta.json').write_text(json.dumps({'agentType': 'root', 'description': 'd'}))
+    (sub_dir / 'agent-parent.jsonl').write_text(line)
+    (sub_dir / 'agent-child.meta.json').write_text(json.dumps(
+        {'agentType': 'kid', 'description': 'd', 'parentAgentId': 'parent', 'spawnDepth': 2}))
+    (sub_dir / 'agent-child.jsonl').write_text(line)
+    got = {s.agent_type: s for s in
+           subagents_mod.RunningSubagents.from_session('sess-1', '/proj').subagents}
+    assert got['root'].parent_id == '' and got['root'].spawn_depth == 0
+    assert got['root'].agent_id == 'agent-parent'
+    assert got['kid'].parent_id == 'parent' and got['kid'].spawn_depth == 2
+
+
+def test_tree_order_groups_children_under_parent() -> None:
+    root  = _make_tree_sub('agent-a', ts_off=0, agent_type='main')
+    other = _make_tree_sub('agent-b', ts_off=1, agent_type='other')
+    kid1  = _make_tree_sub('agent-c', parent_id='a', ts_off=2, agent_type='k1')
+    kid2  = _make_tree_sub('agent-d', parent_id='agent-a', ts_off=3, agent_type='k2')
+    # Interleaved input: children regroup directly under their parent, siblings
+    # keep order, `a`-prefixed and bare parent ids both match.
+    out = subagents_mod.tree_order([root, kid1, other, kid2])
+    assert [(s.agent_type, d, last) for s, d, last in out] == [
+        ('main', 0, False), ('k1', 1, False), ('k2', 1, True), ('other', 0, False),
+    ]
+
+
+def test_tree_order_unknown_parent_is_top_level() -> None:
+    orphan = _make_tree_sub('agent-x', parent_id='nope', agent_type='orphan')
+    out = subagents_mod.tree_order([orphan])
+    assert out == [(orphan, 0, False)]
+
+
+def test_subagent_cells_prefixes_branch_glyphs() -> None:
+    root = _make_tree_sub('agent-a', agent_type='main')
+    k1   = _make_tree_sub('agent-b', parent_id='a', ts_off=1)
+    k2   = _make_tree_sub('agent-c', parent_id='a', ts_off=2)
+    gk   = _make_tree_sub('agent-d', parent_id='c', ts_off=3)
+    cells = layout.subagent_cells([root, k1, k2, gk], True)
+    assert [p for _, p in cells] == ['', '├ ', '└ ', '  └ ']
+
+
+def test_subagent_cells_flat_mode_unchanged() -> None:
+    subs = [_make_tree_sub('agent-b', parent_id='a'), _make_tree_sub('agent-a', ts_off=1)]
+    # Default (flat) mode: original order, no prefixes, no reordering.
+    assert layout.subagent_cells(subs, False) == [(subs[0], ''), (subs[1], '')]
+
+
+def test_tree_prefix_two_line_widths_and_indent() -> None:
+    sub = _make_sub()
+    line1, line2 = _two(sub, 136, tree_prefix='├ ')
+    p1, p2 = strip_ansi(line1), strip_ansi(line2)
+    assert p1.startswith('├ ')
+    assert p2.startswith('  ')            # continuation indents under the branch
+    assert _visible_width(line1) == 136   # prefix eats content width, not the box
+    assert _visible_width(line2) == 136
+
+
+def test_tree_prefix_one_line_width() -> None:
+    sub  = _make_sub()
+    line = _one(sub, 96, tree_prefix='└ ')
+    assert strip_ansi(line).startswith('└ ')
+    assert _visible_width(line) == 96
+
+
+def test_tree_prefix_default_noop() -> None:
+    sub = _make_sub()
+    assert _r.subagent_row(sub, 136, twoline=True) == \
+           _r.subagent_row(sub, 136, twoline=True, tree_prefix='')
+
+
+def test_tree_single_puts_activity_on_line_one() -> None:
+    # Tree single-line: the current-activity continuation moves onto line 1 as
+    # a right-hand column after the stats/model cluster — one line, no └ marker.
+    sub  = _make_sub(last_activity=('tool_use', 'Bash', {'command': 'openspec show'}))
+    out  = _r.subagent_row(sub, 136, twoline=True, tree_single=True)
+    assert '\n' not in out                       # exactly one line
+    plain = strip_ansi(out)
+    assert 'Bash[openspec show]' in plain         # activity on the same line
+    assert 'sonnet' in plain                      # after the model cluster
+    assert plain.index('sonnet') < plain.index('Bash[')  # activity is to the right
+    assert '└' not in plain and '├' not in plain  # no continuation/branch glyph here
+
+
+def test_tree_single_width_preserved_and_prefixed() -> None:
+    sub  = _make_sub()
+    root = _r.subagent_row(sub, 136, twoline=True, tree_single=True)
+    kid  = _r.subagent_row(sub, 136, twoline=True, tree_single=True, tree_prefix='├ ')
+    assert '\n' not in root and '\n' not in kid
+    assert _visible_width(root) == 136
+    assert _visible_width(kid) == 136             # prefix eats content, not the box
+    assert strip_ansi(kid).startswith('├ ')
+
+
+def test_tree_single_activity_column_aligned_across_rows() -> None:
+    # The activity column starts at a consistent offset regardless of the model
+    # width, because the cluster right-aligns to the reserved stats width.
+    a = _make_sub(model='claude-sonnet-4-6',       last_activity=('tool_use', 'Bash', {'command': 'x'}))
+    b = _make_sub(model='claude-haiku-4-5-2025',   last_activity=('tool_use', 'Read', {'file_path': 'y.py'}))
+    la = strip_ansi(_r.subagent_row(a, 136, twoline=True, tree_single=True))
+    lb = strip_ansi(_r.subagent_row(b, 136, twoline=True, tree_single=True))
+    assert la.index('Bash[') == lb.index('Read[')
+
+
+def test_tree_single_activity_truncates_when_tight() -> None:
+    long = 'y' * 200
+    sub  = _make_sub(last_activity=('text', long, {}))
+    out  = strip_ansi(_r.subagent_row(sub, 136, twoline=True, tree_single=True))
+    assert out.rstrip().endswith('…')
+    assert _visible_width(out) == 136
+
+
+def test_tree_single_activity_column_aligned_across_prefix_depths() -> None:
+    # Regression: activity_reserve must be sized off the PRE-prefix width, not
+    # the already-shrunk content_width, so the glyph's absolute column (prefix
+    # included) doesn't drift as deeper branches eat more front width.
+    sub = _make_sub(last_activity=('tool_use', 'Bash', {'command': 'x'}))
+    cols = []
+    for prefix in ('', '├ ', '  └ '):
+        line = strip_ansi(_r.subagent_row(sub, 136, twoline=True, tree_single=True, tree_prefix=prefix))
+        cols.append(line.index('Bash['))
+        assert _visible_width(line) == 136
+    assert len(set(cols)) == 1, f'activity column drifted across prefixes: {cols}'
+
+
+def test_tree_columns_common_anchor_across_names_and_prefixes() -> None:
+    # layout.tree_columns: desc_col is the widest (prefix + duration + type)
+    # across the cohort, so the shortest names/prefixes get padded up to it;
+    # stats_col/activity_col target ~30%/~50% of the row width, never left of
+    # where the preceding field ends.
+    root = _make_tree_sub('agent-a', agent_type='spec-author')     # prefix '', long type
+    kid  = _make_tree_sub('agent-b', parent_id='a', agent_type='api')  # prefix '├ ', short type
+    cells = [(root, ''), (kid, '├ ')]
+    desc_col, stats_col, activity_col = layout.tree_columns(cells, 140)
+    # desc_col matches the widest row: '' + 5 + 1 + len('spec-author') + 1
+    assert desc_col == 0 + 5 + 1 + len('spec-author') + 1
+    assert stats_col >= desc_col + 8
+    assert activity_col >= stats_col + 16
+    assert stats_col == round(140 * 0.30) or stats_col == desc_col + 8
+    assert activity_col == round(140 * 0.50) or activity_col == stats_col + 16
+
+
+def test_tree_single_description_aligned_across_depths_and_names() -> None:
+    # Full pipeline: root (long type name, no prefix) and a deeper child
+    # (short type name, indented prefix) still start ' · description' and the
+    # activity column at the identical absolute offset.
+    root = _make_tree_sub('agent-a', agent_type='spec-author', description='Fetch the artifact',
+                          last_activity=('tool_use', 'Bash', {'command': 'openspec show'}))
+    kid  = _make_tree_sub('agent-b', parent_id='a', agent_type='api', description='Make tmp dir',
+                          last_activity=('tool_use', 'Bash', {'command': 'mkdir -p /tmp'}))
+    cells = [(root, ''), (kid, '├ ')]
+    desc_col, stats_col, activity_col = layout.tree_columns(cells, 140)
+    lines = [
+        strip_ansi(_r.subagent_row(sub, 140, twoline=True, tree_single=True, tree_prefix=prefix,
+                                   stats_col=stats_col, tree_desc_col=desc_col,
+                                   tree_activity_col=activity_col))
+        for sub, prefix in cells
+    ]
+    desc_idx = [ln.index(' · ') for ln in lines]
+    act_idx  = [ln.index('Bash[') for ln in lines]
+    assert len(set(desc_idx)) == 1, f'description column drifted: {desc_idx}'
+    assert len(set(act_idx)) == 1, f'activity column drifted: {act_idx}'
+    for ln in lines:
+        assert _visible_width(ln) == 140
+
+
+def test_tree_single_model_left_aligned_no_padding() -> None:
+    # Per the design mock, the model is plain (no right-justify padding to a
+    # fixed width) in tree_single mode — alignment across rows comes from the
+    # cluster area padding to stats_w as a whole, not from the model field.
+    sub  = _make_sub(model='claude-haiku-4-5-20251001')
+    line = strip_ansi(_r.subagent_row(sub, 136, twoline=True, tree_single=True))
+    # 'haiku' immediately followed by two spaces (the activity gap) or the
+    # activity text — never padded out to the old 6-char rjust field width.
+    assert '· haiku' in line
+    assert 'haiku ' + ' ' * 5 not in line  # no leftover rjust-style padding run
+
+
+def test_tree_single_off_keeps_two_line() -> None:
+    # Without tree_single the two-line form is unchanged (flat-mode invariant).
+    sub = _make_sub()
+    assert _r.subagent_row(sub, 136, twoline=True) == \
+           _r.subagent_row(sub, 136, twoline=True, tree_single=False)
+
+
+def test_build_wide_tree_mode_renders_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _make_tree_sub('agent-a', agent_type='root-agent', description='spawn things',
+                          last_activity=('tool_use', 'Task', {'description': 'spawn'}))
+    kid1 = _make_tree_sub('agent-b', parent_id='a', ts_off=1, agent_type='kid-one',
+                          last_activity=('tool_use', 'Bash', {'command': 'ls'}))
+    kid2 = _make_tree_sub('agent-c', parent_id='a', ts_off=2, agent_type='kid-two',
+                          last_activity=('tool_use', 'Read', {'file_path': 'z.py'}))
+    monkeypatch.setattr(
+        subagents_mod.RunningSubagents, 'from_session',
+        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[root, kid1, kid2])),
+    )
+    session = session_mod.SessionInfo.from_dict(json.loads(SESSION.read_text()))
+    view    = SessionView(session, Config(subagent_tree=True))
+    tick    = TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
+    spec    = layout.build_wide(view, tick, 140, _r)
+    out     = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
+    kid_lines = [ln for ln in out if 'kid-one' in ln or 'kid-two' in ln]
+    assert len(kid_lines) == 2                     # one line per subagent
+    assert '├ ' in kid_lines[0] and 'kid-one' in kid_lines[0] and 'Bash[' in kid_lines[0]
+    assert '└ ' in kid_lines[1] and 'kid-two' in kid_lines[1] and 'Read[' in kid_lines[1]
+    # tree mode stacks single-column even above TWO_COL_SUBAGENT_WIDTH; the root
+    # is a single line carrying its own activity, no separate continuation row.
+    root_lines = [ln for ln in out if 'root-agent' in ln]
+    assert len(root_lines) == 1 and '├ ' not in root_lines[0] and 'Task[' in root_lines[0]
+    # Description and activity columns line up across depths: root (no
+    # prefix, longer type name) vs the indented children (shorter names).
+    all_rows  = root_lines + kid_lines
+    desc_cols = [ln.index(' · ') for ln in all_rows]
+    assert len(set(desc_cols)) == 1, f'description column drifted: {desc_cols}'

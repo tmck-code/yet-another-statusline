@@ -15,6 +15,9 @@ DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 DEFAULT_SHOW_TOOL_USES = False
+# Subagent tree view: parent/child rows drawn with ├/└ branch prefixes.
+# Off by default so the flat cohort rendering is byte-identical unless enabled.
+DEFAULT_SUBAGENT_TREE  = False
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
 # Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so

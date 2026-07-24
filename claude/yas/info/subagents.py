@@ -215,11 +215,47 @@ def parse_transcript(jsonl: Path) -> tuple[int, int, int, float, str, tuple[str,
     return billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts
 
 
+def tree_order(subs: list[RunningSubagent]) -> list[tuple[RunningSubagent, int, bool]]:
+    '''Order a visible cohort parent-first for the tree view.
+
+    Returns ``(sub, depth, is_last_child)`` triples in depth-first order:
+    children group directly under their parent (matched by ``parent_id``
+    against the parent's ``agent_id``, with or without the ``agent-`` filename
+    prefix), siblings keep first_timestamp order, and an agent whose parent is
+    unknown or not in ``subs`` renders as a top-level root (depth 0,
+    is_last_child False). Pure ordering — no ANSI, no glyphs.
+    '''
+    by_id: dict[str, RunningSubagent] = {}
+    for sub in subs:
+        if sub.agent_id:
+            by_id[sub.agent_id] = sub
+            by_id[sub.agent_id.removeprefix('agent-')] = sub
+    children: dict[int, list[RunningSubagent]] = {}
+    roots: list[RunningSubagent] = []
+    for sub in subs:
+        parent = by_id.get(sub.parent_id) if sub.parent_id else None
+        if parent is not None and parent is not sub:
+            children.setdefault(id(parent), []).append(sub)
+        else:
+            roots.append(sub)
+    out: list[tuple[RunningSubagent, int, bool]] = []
+
+    def walk(sub: RunningSubagent, depth: int, last: bool) -> None:
+        out.append((sub, depth, last))
+        kids = children.get(id(sub), [])
+        for i, kid in enumerate(kids):
+            walk(kid, depth + 1, i == len(kids) - 1)
+
+    for root in roots:
+        walk(root, 0, False)
+    return out
+
+
 class RunningSubagent:
     __slots__ = (
         'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
-        'mtime', 'agent_id', 'jsonl_path',
+        'mtime', 'agent_id', 'jsonl_path', 'parent_id', 'spawn_depth',
     )
 
     def __init__(
@@ -237,6 +273,8 @@ class RunningSubagent:
         mtime:           float = 0.0,  # transcript last-modified time (st_mtime)
         agent_id:        str = '',     # transcript filename stem; matches run-JSON agentId (workflow cohort)
         jsonl_path:      str = '',     # absolute path to this agent's transcript (for tool-count rescan)
+        parent_id:       str = '',     # meta.json parentAgentId — spawner's agent id ('' → top-level)
+        spawn_depth:     int = 0,      # meta.json spawnDepth (1 = spawned by main; 0 when absent)
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -251,6 +289,8 @@ class RunningSubagent:
         self.mtime            = mtime
         self.agent_id         = agent_id
         self.jsonl_path       = jsonl_path
+        self.parent_id        = parent_id
+        self.spawn_depth      = spawn_depth
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RunningSubagent):
@@ -262,7 +302,7 @@ class RunningSubagent:
             self.agent_type, self.description, self.billed_in, self.output,
             self.first_timestamp, self.model, self.cache_read_in, self.total_input,
             self.last_activity, self.end_ts, self.mtime, self.agent_id,
-            self.jsonl_path,
+            self.jsonl_path, self.parent_id, self.spawn_depth,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -272,7 +312,8 @@ class RunningSubagent:
                 f'billed_in={self.billed_in}, output={self.output}, first_timestamp={self.first_timestamp}, '
                 f'model={self.model!r}, cache_read_in={self.cache_read_in}, total_input={self.total_input}, '
                 f'last_activity={self.last_activity!r}, end_ts={self.end_ts}, mtime={self.mtime}, '
-                f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r})')
+                f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r}, '
+                f'parent_id={self.parent_id!r}, spawn_depth={self.spawn_depth})')
 
 
 class RunningSubagents:
@@ -322,10 +363,18 @@ class RunningSubagents:
             for meta in subagents_dir.glob('*.meta.json'):
                 agent_type = ''
                 description = ''
+                parent_id = ''
+                spawn_depth = 0
                 try:
                     data = json.loads(meta.read_text())
                     agent_type = _sanitize(data.get('agentType', '') or '')
                     description = _sanitize(data.get('description', '') or '')
+                    # Parentage (tree view): parentAgentId names the spawning
+                    # agent's id; spawnDepth is 1 for main-spawned agents. Both
+                    # are absent in older metas → top-level fallback.
+                    parent_id = str(data.get('parentAgentId', '') or '')
+                    raw_depth = data.get('spawnDepth', 0)
+                    spawn_depth = int(raw_depth) if isinstance(raw_depth, (int, float)) else 0
                 except Exception:
                     continue
 
@@ -350,7 +399,10 @@ class RunningSubagents:
                     last_activity   = last_activity,
                     end_ts          = end_ts,
                     mtime           = mtime,
+                    agent_id        = jsonl.stem,
                     jsonl_path      = str(jsonl),
+                    parent_id       = parent_id,
+                    spawn_depth     = spawn_depth,
                 ))
         except OSError:
             pass

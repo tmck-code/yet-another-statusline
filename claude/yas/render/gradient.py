@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,22 @@ def model_key(name: str) -> str:
     if 'fable'  in m: return 'fable'
     if 'mythos' in m: return 'mythos'
     return 'other'
+
+
+# Trailing bracket suffix on a model string, e.g. 'sonnet[1m]' -> '[1m]'.
+# Agent frontmatter (and some raw model ids) can carry a context-window
+# variant this way; keep it visible instead of letting `model_key` swallow it.
+_MODEL_SUFFIX_RE = re.compile(r'\[[^\]]*\]$')
+
+
+def model_suffix(name: str) -> str:
+    match = _MODEL_SUFFIX_RE.search(name)
+    return match.group(0) if match else ''
+
+
+def model_display(name: str) -> str:
+    """Short model key plus any bracketed context-size suffix (e.g. 'sonnet[1m]')."""
+    return model_key(name) + model_suffix(name)
 
 
 # ---------------------------------------------------------------------------

@@ -166,7 +166,7 @@ class TestWorkflowDetection:
 
         # expected
         expected_wf_ids  = ['a1de7949b753bf883']
-        expected_sub_ids = ['']  # ordinary subagent carries no agent_id
+        expected_sub_ids = ['agent-plain']  # ordinary subagent id = jsonl stem (tree-view parent matching)
 
         # assert
         assert [a.agent_id for w in workflows.workflows for a in w.agents] == expected_wf_ids

@@ -185,7 +185,11 @@ def write_subagents(
     age_seconds:  float = 0.0,
     mtime_age:    float = 0.0,
 ) -> None:
-    """Each subagent entry: (agentType, description, billed_in, output_tokens[, action[, done_seconds_ago]]).
+    """Each subagent entry: (agentType, description, billed_in, output_tokens[, action[, done_seconds_ago[, parent]]]).
+
+    parent (7th element, int > 0) is the 1-based index of this agent's spawner
+    within `subagents`; it writes parentAgentId/spawnDepth into the meta.json so
+    the tree view (`YAS_SUBAGENT_TREE` / `[layout].subagent_tree`) can nest it.
 
     action selects the latest assistant message's content blocks:
       - (tool_name, input_dict)  -> a tool_use block  -> `GLYPH_TASKS Tool[arg]`
@@ -210,22 +214,31 @@ def write_subagents(
         if f.is_file():  # skip the workflows/ subdir (managed by write_workflows)
             f.unlink()
     now = time.time()
-    ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
-    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
+    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6[1m]')
+    depths: dict[int, int] = {}  # 1-based entry index -> spawnDepth (tree view)
     for i, row in enumerate(subagents, 1):
+        # Stagger start timestamps 1s apart so first_timestamp ordering (and
+        # therefore sibling order in the tree view) follows entry order rather
+        # than filesystem glob order on ties.
+        ts = (datetime.now() - timedelta(seconds=max(0.0, age_seconds - i))).astimezone().isoformat()
         agent_type_raw, description_raw, billed_in_raw, output_tokens_raw = row[:4]
         action_raw    = row[4] if len(row) > 4 else None
         done_secs_raw = row[5] if len(row) > 5 else None
         done_secs     = float(done_secs_raw) if isinstance(done_secs_raw, (int, float)) and done_secs_raw > 0 else None
+        parent_raw    = row[6] if len(row) > 6 else None
+        parent_idx    = int(parent_raw) if isinstance(parent_raw, (int, float)) and parent_raw > 0 else None
         agent_type    = str(agent_type_raw)
         description   = str(description_raw)
         billed_in     = int(billed_in_raw) if isinstance(billed_in_raw, (int, float)) else 0
         output_tokens = int(output_tokens_raw) if isinstance(output_tokens_raw, (int, float)) else 0
         model  = _demo_models[(i - 1) % len(_demo_models)]
         name = f'demo-subagent-{i}'
-        (subagents_dir / f'{name}.meta.json').write_text(
-            json.dumps({'agentType': agent_type, 'description': description})
-        )
+        depths[i] = (depths.get(parent_idx, 0) + 1) if parent_idx else 1
+        meta_obj: dict[str, object] = {'agentType': agent_type, 'description': description}
+        if parent_idx:
+            meta_obj['parentAgentId'] = f'demo-subagent-{parent_idx}'
+            meta_obj['spawnDepth']    = depths[i]
+        (subagents_dir / f'{name}.meta.json').write_text(json.dumps(meta_obj))
         jsonl = subagents_dir / f'{name}.jsonl'
         if billed_in or output_tokens or action_raw:
             # cache_creation carries the bulk; input_tokens gets the remainder
@@ -319,7 +332,7 @@ def write_workflows(
             shutil.rmtree(root)
     now = time.time()
     ts  = (datetime.now() - timedelta(seconds=age_seconds)).astimezone().isoformat()
-    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001')
+    _demo_models = ('claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6[1m]')
     for run in runs:
         run_id  = str(run['run_id'])
         agents  = list(run.get('agents') or [])  # type: ignore[arg-type]
@@ -968,6 +981,24 @@ SCENARIOS: list[ScenarioConfig] = [
         five_hour_pct      = 30.0,
         seven_day_pct      = 20.0,
         subagent_mtime_age = 40.0,
+    ),
+    ScenarioConfig(
+        name        = 'subagent-tree',
+        context_pct = 0.42,
+        # Nested spawn graph rendered with tree branches: the spec-author root
+        # fans out four children (last child gets └), and the ops child spawns
+        # a grandchild to exercise the deeper indent.
+        subagents   = [
+            ('spec-author', 'Fetching openspec artifact instructions',   45_200, 1_400, ('Bash', {'command': 'openspec show --json'})),
+            ('api',         'Creating tmp directory for report',         57_100,   900, ('Bash', {'command': 'mkdir -p /tmp/report'}), None, 1),
+            ('fractal',     'Reading FramePipeline.load() signature',    28_700,   640, ('Read', {'file_path': 'render/pipeline.py'}), None, 1),
+            ('ui',          'Grepping for capability flag usage',        46_100,   730, ('Grep', {'pattern': 'capability'}), None, 1),
+            ('ops',         'Reading render-in-docker.md documentation', 46_300,   810, ('Read', {'file_path': 'docs/render-in-docker.md'}), None, 1),
+            ('probe',       'Checking docker daemon health',             12_400,   210, ('Bash', {'command': 'docker info'}), None, 5),
+        ],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+        yas_toml    = '[layout]\nsubagent_tree = true\n',
     ),
     ScenarioConfig(
         name        = 'cohort-two-column',

@@ -223,6 +223,25 @@ def test_env_show_render_time_zero_overrides_toml_true(tmp_path: Path) -> None:
     assert cfg.show_render_time is False
 
 
+# subagent_tree (parent/child subagent rows with tree glyphs; off by default)
+
+def test_subagent_tree_default_off(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.subagent_tree is False
+
+
+def test_env_subagent_tree_enables(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_SUBAGENT_TREE': '1'}, config_dir=tmp_path)
+    assert cfg.subagent_tree is True
+
+
+@requires_tomllib
+def test_toml_subagent_tree_enables(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nsubagent_tree = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.subagent_tree is True
+
+
 # show_tool_uses (per-tool tool_use counts row, wide layout; on by default)
 
 @requires_tomllib

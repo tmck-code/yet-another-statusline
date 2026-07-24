@@ -1,6 +1,8 @@
 ---
 name: pr-screenshotter
 description: Produces real before/after PNG screenshots for a YAS branch's rendering changes and publishes them to the yas-pr-screenshots repo, returning a ready-to-paste markdown before/after table. Delegate to this agent for "screenshot this branch", "shoot before/after images for the PR", "capture statusline screenshots", or when a PR-authoring flow needs image screenshots (not ANSI text) for the Screenshots section. It picks the relevant demo scenarios from the diff, renders both sides, commits + pushes to the screenshots repo's main, and hands back ONLY the table — it does NOT edit the PR body (that's the PR author's job).
+model: sonnet
+effort: low
 tools: Read, Bash, Grep, Glob, Skill
 ---
 

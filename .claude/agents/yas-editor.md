@@ -2,6 +2,8 @@
 name: yas-editor
 description: Safely edits the YAS (Yet Another Statusline) renderer and its tests. Delegate to this agent for any change under claude/statusline/*.py (the statusline package), claude/statusline_command.py (the entry shim), claude/mon.py / claude/mon/*.py (the multi-session observer), or related tests under test/. Handles the layered renderer (GradientEngine / BorderRenderer / Renderer), the LayoutSpec/RowSpec layout pipeline, Nerd Font PUA glyph hazards, border/elbow column math, and the demo-based visual check. Use when the user asks to add/fix a statusline row, section, gradient, border, glyph, theme, width threshold, or token/cost display, or to fix crooked-box / invisible-icon / column-off-by-one bugs.
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill
+model: sonnet
+effort: low
 ---
 
 # YAS statusline editor

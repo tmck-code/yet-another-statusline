@@ -25,7 +25,7 @@ from yas.constants import (
     WORKFLOW_RUN_CAP,
 )
 from yas.info import SessionView, _fmt_elapsed_clock
-from yas.info.subagents import RunningSubagent, read_last_prompt_ts
+from yas.info.subagents import RunningSubagent, read_last_prompt_ts, tree_order
 from yas.render.pill import Pill
 from yas.renderer import Renderer
 from yas.render.text import _visible_width, _token_offsets
@@ -151,6 +151,51 @@ def zip_columns(
         right = f'{right}{" " * max(0, right_w - _visible_width(right))}'
         rows.append(f'{left} {divider} {right}')
     return rows
+
+
+def subagent_cells(
+    visible_subs: list[RunningSubagent],
+    tree: bool,
+) -> list[tuple[RunningSubagent, str]]:
+    """Pair each visible subagent with its tree-branch prefix.
+
+    Flat mode (``tree`` False, the default) returns the cohort unchanged with
+    empty prefixes, so the rendering is byte-identical to before. Tree mode
+    reorders parent-first via ``tree_order`` and builds the branch prefix:
+    depth-0 roots carry none; a child gets ``'├ '`` (``'└ '`` when it is its
+    parent's last child), indented two spaces per extra nesting level.
+    """
+    if not tree:
+        return [(sub, '') for sub in visible_subs]
+    cells: list[tuple[RunningSubagent, str]] = []
+    for sub, depth, last in tree_order(visible_subs):
+        if depth == 0:
+            prefix = ''
+        else:
+            prefix = '  ' * (depth - 1) + ('└ ' if last else '├ ')
+        cells.append((sub, prefix))
+    return cells
+
+
+def tree_columns(cells: list[tuple[RunningSubagent, str]], width: int) -> tuple[int, int, int]:
+    """Compute the (desc_col, stats_col, activity_col) anchors for tree-single rows.
+
+    ``desc_col`` is the widest (prefix + duration + type) front-field across the
+    cohort, plus the leading gap before ' · description' — so every row's
+    description starts at the same absolute column regardless of its own prefix
+    depth or type-name length (the renderer pads the shorter rows' type field to
+    match). ``stats_col``/``activity_col`` target roughly 30%/50% of the row
+    width per the design mock, clamped so a very wide front field (long prefix +
+    type name) can never push them left of where the preceding field ends.
+    """
+    desc_col = 0
+    for sub, prefix in cells:
+        prefix_w = _visible_width(prefix)
+        front_w  = 5 + 1 + _visible_width(sub.agent_type or '?')  # dur(5) + ' ' + type
+        desc_col = max(desc_col, prefix_w + front_w + 1)  # +1: leading space of ' · '
+    stats_col    = max(desc_col + 8, round(width * 0.30))
+    activity_col = max(stats_col + 16, round(width * 0.50))
+    return desc_col, stats_col, activity_col
 
 
 def workflow_divider_col(width: int) -> int:
@@ -306,9 +351,10 @@ def build_narrow(
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
-        for sub in visible_subs:
+        for sub, prefix in subagent_cells(visible_subs, view.cfg.subagent_tree):
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                       stats_col=100 if width >= 125 else None).split('\n'):
+                                       stats_col=100 if width >= 125 else None,
+                                       tree_prefix=prefix).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -381,9 +427,10 @@ def build_medium(
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
-        for sub in visible_subs:
+        for sub, prefix in subagent_cells(visible_subs, view.cfg.subagent_tree):
             for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                       stats_col=100 if width >= 125 else None).split('\n'):
+                                       stats_col=100 if width >= 125 else None,
+                                       tree_prefix=prefix).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
@@ -893,10 +940,17 @@ def build_wide(
             side_by_side = True
             divider_col  = 3 + left_w + 1  # 1-indexed visual column of the │
             left_lines   = r.task_row(tasks, left_w)
+            right_cells  = subagent_cells(visible_subs, view.cfg.subagent_tree)
+            right_desc_col = right_stats_col = right_activity_col = None
+            if view.cfg.subagent_tree:
+                right_desc_col, right_stats_col, right_activity_col = tree_columns(right_cells, right_w)
             right_lines: list[str] = []
-            for sub in visible_subs:
+            for sub, prefix in right_cells:
                 right_lines.extend(
-                    r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout).split('\n')
+                    r.subagent_row(sub, right_w, twoline=True, session_inout=session_inout,
+                                   stats_col=right_stats_col, tree_prefix=prefix,
+                                   tree_single=view.cfg.subagent_tree, tree_desc_col=right_desc_col,
+                                   tree_activity_col=right_activity_col).split('\n')
                 )
             div_color = r.grad_at(divider_col - 1, width, fill=fill)
             divider   = f'{div_color}{BOX_V}{RESET}'
@@ -921,18 +975,24 @@ def build_wide(
         if visible_subs:
             sub_labels: list[tuple[str, int]] = [('subagents', 3)] if view.cfg.labels else []
             rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=sub_labels))
-            two_col = width >= TWO_COL_SUBAGENT_WIDTH and len(visible_subs) >= 2
+            sub_cells = subagent_cells(visible_subs, view.cfg.subagent_tree)
+            # Tree mode always stacks: a column-major pairing would tear the
+            # parent/child branches apart across the two columns.
+            two_col   = (width >= TWO_COL_SUBAGENT_WIDTH and len(visible_subs) >= 2
+                         and not view.cfg.subagent_tree)
             if two_col:
                 inner     = width - 4
                 half_w    = (inner - 5) // 2
                 div_color = r.grad_at(workflow_divider_col(width) - 1, width, fill=fill)
                 divider   = f'  {div_color}{GLYPH_WF_DIVIDER}{RESET}  '
-                left_count = (len(visible_subs) + 1) // 2  # ceil: left column gets the extra agent
-                left       = visible_subs[:left_count]
-                right      = visible_subs[left_count:]
+                left_count = (len(sub_cells) + 1) // 2  # ceil: left column gets the extra agent
+                left       = sub_cells[:left_count]
+                right      = sub_cells[left_count:]
 
-                def cell_lines(sub: RunningSubagent) -> list[str]:
-                    raw = r.subagent_row(sub, half_w, twoline=True, session_inout=session_inout)
+                def cell_lines(cell: tuple[RunningSubagent, str]) -> list[str]:
+                    sub, prefix = cell
+                    raw = r.subagent_row(sub, half_w, twoline=True, session_inout=session_inout,
+                                         tree_prefix=prefix)
                     lines = raw.split('\n')
                     return [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in lines]
 
@@ -945,9 +1005,17 @@ def build_wide(
                     for j in range(len(left_lines)):
                         rows.append(RowSpec('content', content=f'{left_lines[j]}{divider}{right_lines[j]}'))
             else:
-                for sub in visible_subs:
-                    for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=session_inout,
-                                               stats_col=100 if width >= 125 else None).split('\n'):
+                inner = width - 4
+                desc_col = stats_col_v = activity_col = None
+                if view.cfg.subagent_tree:
+                    desc_col, stats_col_v, activity_col = tree_columns(sub_cells, inner)
+                else:
+                    stats_col_v = 100 if width >= 125 else None
+                for sub, prefix in sub_cells:
+                    for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=session_inout,
+                                               stats_col=stats_col_v,
+                                               tree_prefix=prefix, tree_single=view.cfg.subagent_tree,
+                                               tree_desc_col=desc_col, tree_activity_col=activity_col).split('\n'):
                         rows.append(RowSpec('content', content=line))
             pending_ups = ()
 

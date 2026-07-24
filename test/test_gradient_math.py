@@ -9,6 +9,30 @@ _ge = gradient.GradientEngine()
 
 
 
+def test_model_key_bare_name() -> None:
+    assert gradient.model_key('claude-sonnet-4-6') == 'sonnet'
+
+
+def test_model_key_ignores_bracket_suffix() -> None:
+    # model_key stays a bare family lookup key (used to key colour tables);
+    # the suffix is surfaced separately via model_suffix/model_display.
+    assert gradient.model_key('sonnet[1m]') == 'sonnet'
+
+
+def test_model_suffix_extracts_bracket() -> None:
+    assert gradient.model_suffix('sonnet[1m]') == '[1m]'
+
+
+def test_model_suffix_empty_when_absent() -> None:
+    assert gradient.model_suffix('claude-sonnet-4-6') == ''
+
+
+def test_model_display_preserves_suffix() -> None:
+    assert gradient.model_display('sonnet[1m]') == 'sonnet[1m]'
+    assert gradient.model_display('claude-sonnet-4-6[1m]') == 'sonnet[1m]'
+    assert gradient.model_display('claude-haiku-4-5-20251001') == 'haiku'
+
+
 def test_gradient_rgb_at_zero() -> None:
     assert _r.gradient_rgb(0.0) == (40, 210, 80)
 

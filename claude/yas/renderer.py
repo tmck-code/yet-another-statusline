@@ -88,6 +88,7 @@ from yas.constants import (
 )
 from yas.render.gradient import (
     GradientEngine,
+    model_display,
     model_key,
     paint_bg_span,
     pill_gradient_fg,
@@ -751,7 +752,27 @@ class Renderer:
         twoline: bool = False,
         session_inout: int = 0,
         stats_col: int | None = None,
+        tree_prefix: str = '',
+        tree_single: bool = False,
+        tree_desc_col: int | None = None,
+        tree_activity_col: int | None = None,
     ) -> str:
+        # Tree view: a plain branch prefix ('├ ', '└ ', indented deeper) eats
+        # visible columns off the front of every line, so the row renders into
+        # the remaining width and the stats/activity anchors shift left by the
+        # same amount to keep those columns straight across mixed depths.
+        # `orig_content_width` is the pre-prefix box width, used only by the
+        # legacy reserve fallback below (no caller-supplied tree_activity_col).
+        orig_content_width = content_width
+        prefix_w = _visible_width(tree_prefix)
+        if prefix_w:
+            content_width = max(1, content_width - prefix_w)
+            if stats_col is not None:
+                stats_col = max(0, stats_col - prefix_w)
+            if tree_activity_col is not None:
+                tree_activity_col = max(0, tree_activity_col - prefix_w)
+            if tree_desc_col is not None:
+                tree_desc_col = max(0, tree_desc_col - prefix_w)
         now     = time.time()
         is_done = sub.end_ts > 0
         if is_done:
@@ -760,7 +781,9 @@ class Renderer:
             dur = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
 
-        short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'fable'/'mythos'/'other'
+        # Display form keeps any bracketed context-size suffix (e.g. 'sonnet[1m]')
+        # from agent frontmatter; colour lookup still keys off the bare family.
+        short_model = model_display(sub.model)
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
 
@@ -779,10 +802,40 @@ class Renderer:
             # share% and then tok. The model and the front duration always stay.
             front_w = 5 + 1 + _visible_width(type_text)  # dur(5) + ' ' + type
 
+            # Tree view: pad the type field so the front (prefix + duration +
+            # type) reaches a caller-supplied common width across the whole
+            # cohort — every row's ' · description' then starts at the same
+            # absolute column regardless of prefix depth or type-name length.
+            if tree_desc_col is not None:
+                front_w = max(front_w, tree_desc_col - 1)  # -1: leading space of ' · '
+                type_text = type_text.ljust(max(0, front_w - 6))
+
+            # Tree single-line: the current-activity continuation moves onto
+            # line 1 as a right-hand column. The stats/model cluster right-
+            # aligns to a fixed `stats_w` (leaving a reserved activity column to
+            # its right) instead of flushing to the full content width, so the
+            # activity column starts at a consistent offset down the cohort.
+            stats_w = target_w
+            if tree_single:
+                if tree_activity_col is not None:
+                    # Caller-anchored (~50% of the row per the design mock);
+                    # leave a 2-col gap before the activity text begins.
+                    stats_w = max(front_w + 1, min(target_w, tree_activity_col - 2))
+                else:
+                    # Legacy fallback (no cohort-wide anchor supplied): reserve
+                    # sized off the pre-prefix width so its absolute position
+                    # is identical at every tree depth.
+                    activity_reserve = min(48, orig_content_width // 3)
+                    stats_w          = max(front_w + 1, target_w - activity_reserve)
+
             share     = subagent_share(sub.total_input + sub.output, session_inout)
             share_str = f'{share * 100:.1f}%' if share is not None else ''
             tok_field = fmt_tok(sub.total_input).rjust(5)
-            model_str = short_model.rjust(6)
+            # Tree single-line: the model is left-aligned (no fixed-width
+            # padding) — the CLUSTER area is padded to stats_w as a whole
+            # instead, so trailing space comes from that, not from the model
+            # field's own justification (per the design mock's plain 'haiku').
+            model_str = short_model if tree_single else short_model.rjust(6)
 
             if is_done:
                 front_c = f'{self.CTX_DIM}{dur_s}{self.R} {self.CTX_DIM}{type_text}{self.R}'
@@ -812,11 +865,11 @@ class Renderer:
             # the slack to the right of `stats_col`; otherwise we fall through
             # to the right-aligned path so very narrow widths stay sane.
             model_only_w = _visible_width(build_cluster(False, False))
-            anchored     = stats_col is not None and (target_w - stats_col) >= model_only_w
+            anchored     = stats_col is not None and (stats_w - stats_col) >= model_only_w
 
             if anchored:
                 assert stats_col is not None  # narrowed by `anchored`
-                avail = target_w - stats_col  # slack to the right of the anchor
+                avail = stats_w - stats_col  # slack to the right of the anchor
                 # Pick the richest cluster that fits within the anchored slack.
                 cluster = build_cluster(False, False)  # model-only fallback
                 for show_share, show_tok in ((True, True), (False, True)):
@@ -845,20 +898,20 @@ class Renderer:
                 # Anchor the cluster's first `·` at content-offset stats_col.
                 pad1  = max(1, stats_col - front_w - sep_desc_w)
                 line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
-                line1 += ' ' * max(0, target_w - _visible_width(line1))
+                line1 += ' ' * max(0, stats_w - _visible_width(line1))
             else:
                 # Pick the richest cluster that fits alongside the front + a 1-col gap.
                 cluster = build_cluster(False, False)  # model-only fallback
                 for show_share, show_tok in ((True, True), (False, True)):
                     cand = build_cluster(show_share, show_tok)
-                    if front_w + 1 + _visible_width(cand) <= target_w:
+                    if front_w + 1 + _visible_width(cand) <= stats_w:
                         cluster = cand
                         break
                 cluster_w = _visible_width(cluster)
 
                 # Fill the description into the space left over (truncates first).
                 desc_text  = sub.description or ''
-                desc_max   = target_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
+                desc_max   = stats_w - front_w - cluster_w - 1 - 3  # 1-col gap + ' · '
                 sep_desc   = ''
                 sep_desc_w = 0
                 if desc_text and desc_max > 0:
@@ -871,8 +924,24 @@ class Renderer:
                         sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{desc_text}{self.R}'
                     sep_desc_w = 3 + desc_w
 
-                pad1  = max(1, target_w - front_w - sep_desc_w - cluster_w)
+                pad1  = max(1, stats_w - front_w - sep_desc_w - cluster_w)
                 line1 = f'{front_c}{sep_desc}{" " * pad1}{cluster}'
+
+            if tree_single:
+                # Append the current-activity column after the stats cluster.
+                # A 2-col gap separates them; the activity (tool glyph + verb,
+                # no `└` continuation marker) truncates with the usual ellipsis
+                # when the reserved column is tight. Dimmed like the old line 2.
+                line1  += ' ' * max(0, stats_w - _visible_width(line1))
+                act_w   = max(0, target_w - stats_w - 2)
+                activity = self.subagent_activity(sub.last_activity, cap=max(0, act_w - 3))
+                if _visible_width(activity) > act_w:
+                    activity = activity[:max(0, act_w - 1)] + ELLIPSIS
+                line1 = f'{line1}  {self.CTX_DIM}{activity}{self.R}'
+                line1 += ' ' * max(0, target_w - _visible_width(line1))
+                if prefix_w:
+                    return f'{self.CTX_DIM}{tree_prefix}{self.R}{line1}'
+                return line1
 
             # --- line 2: activity-only continuation, no right metrics (D6) ---
             # The snippet grows with the spare width line 2 has (no right
@@ -890,6 +959,10 @@ class Renderer:
             pad2    = max(0, target_w - left2_w)
             line2   = f'{left2}{" " * pad2}'
 
+            if prefix_w:
+                # Line 1 carries the coloured branch; line 2 indents under it.
+                branch = f'{self.CTX_DIM}{tree_prefix}{self.R}'
+                return f'{branch}{line1}\n{" " * prefix_w}{line2}'
             return f'{line1}\n{line2}'
 
         # --- one-line collapse (D6): drops ↑output; marker/type/verb on the
@@ -943,7 +1016,10 @@ class Renderer:
         # up down stacked rows; the slack between the left run and the cluster
         # is the gap.
         pad_n = max(1, target_w - left_n_w - right_n_w)
-        return f'{left_n}{" " * pad_n}{right_n}'
+        line_n = f'{left_n}{" " * pad_n}{right_n}'
+        if prefix_w:
+            line_n = f'{self.CTX_DIM}{tree_prefix}{self.R}{line_n}'
+        return line_n
 
     def workflow_header(self, run: RunningWorkflow, content_width: int) -> str:
         """Group header for a workflow run.
