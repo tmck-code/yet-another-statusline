@@ -146,11 +146,37 @@ def test_subagent_cohort_caps_at_six_most_recent(monkeypatch: pytest.MonkeyPatch
     subs = [_make_sub_labelled(f'sub-{i}', now - (8 - i)) for i in range(8)]
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)))
-    spec = layout.build_wide(_view(), _tick(), 160, _r)
+    # Pin the cap explicitly rather than relying on Config's default, which
+    # is no longer SUBAGENT_DISPLAY_CAP (see agent_tree_max_height).
+    view = SessionView(_session(), Config(agent_tree_max_height=SUBAGENT_DISPLAY_CAP))
+    spec = layout.build_wide(view, _tick(), 160, _r)
     texts = ' '.join(strip_ansi(row.content) for row in spec.rows if row.kind == 'content')
     shown = [i for i in range(8) if f'sub-{i}' in texts]
     assert len(shown) == SUBAGENT_DISPLAY_CAP
     assert shown == [2, 3, 4, 5, 6, 7]  # oldest two (0, 1) dropped, chronological
+
+
+def test_subagent_cohort_honours_config_agent_tree_max_height(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Config.agent_tree_max_height threads through build_wide -> select_visible_cohort
+    -> cap_tree_groups, replacing the old fixed SUBAGENT_DISPLAY_CAP constant."""
+    from helper import strip_ansi
+    _silence_dynamic(monkeypatch)
+    now  = time.time()
+    subs = [_make_sub_labelled(f'sub-{i}', now - (8 - i)) for i in range(8)]
+    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=subs)))
+
+    view_default = SessionView(_session(), Config())  # default cap is 12: all 8 shown
+    spec_default = layout.build_wide(view_default, _tick(), 160, _r)
+    texts_default = ' '.join(strip_ansi(row.content) for row in spec_default.rows if row.kind == 'content')
+    shown_default = [i for i in range(8) if f'sub-{i}' in texts_default]
+    assert shown_default == list(range(8))
+
+    view_narrow = SessionView(_session(), Config(agent_tree_max_height=3))
+    spec_narrow = layout.build_wide(view_narrow, _tick(), 160, _r)
+    texts_narrow = ' '.join(strip_ansi(row.content) for row in spec_narrow.rows if row.kind == 'content')
+    shown_narrow = [i for i in range(8) if f'sub-{i}' in texts_narrow]
+    assert shown_narrow == [5, 6, 7]  # only the three most recently started
 
 
 def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> None:

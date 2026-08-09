@@ -18,7 +18,6 @@ from yas.constants import (
     LINES_LABEL,
     RESET,
     SUBAGENT_DESC_FLOOR,
-    SUBAGENT_DISPLAY_CAP,
     SUBAGENT_NAME_MAX,
     SUBAGENT_RETENTION_SECONDS,
     SUBAGENT_STATS_ACTIVITY_GAP,
@@ -558,7 +557,7 @@ def build_narrow(
     subagents = view.subagents
     last_prompt_ts = read_last_prompt_ts(session.session_id)
     visible_subs   = subagents.visible(time.time(), last_prompt_ts)
-    visible_subs = select_visible_cohort(visible_subs, SUBAGENT_DISPLAY_CAP)
+    visible_subs = select_visible_cohort(visible_subs, view.cfg.agent_tree_max_height)
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     if pill_pct:
         rows: list[RowSpec] = [
@@ -654,7 +653,7 @@ def build_medium(
     subagents = view.subagents
     last_prompt_ts = read_last_prompt_ts(session.session_id)
     visible_subs   = subagents.visible(time.time(), last_prompt_ts)
-    visible_subs = select_visible_cohort(visible_subs, SUBAGENT_DISPLAY_CAP)
+    visible_subs = select_visible_cohort(visible_subs, view.cfg.agent_tree_max_height)
     rows: list[RowSpec] = [top_row, content_row, sep_row]
     if tasks.is_visible():
         for line in r.task_row(tasks, width - 4):
@@ -1173,7 +1172,7 @@ def build_wide(
 
     last_prompt_ts = read_last_prompt_ts(session.session_id)
     visible_subs   = subagents.visible(time.time(), last_prompt_ts)
-    visible_subs = select_visible_cohort(visible_subs, SUBAGENT_DISPLAY_CAP)
+    visible_subs = select_visible_cohort(visible_subs, view.cfg.agent_tree_max_height)
 
     # Side-by-side composition (D2/D3/D5/D7): when the wide layout has BOTH a
     # visible checklist AND >=1 visible subagent, lay the checklist (left) and

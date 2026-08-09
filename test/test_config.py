@@ -68,7 +68,31 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.show_tool_uses is False
     assert cfg.justify is False
     assert cfg.labels is False
+    assert cfg.agent_tree_max_height == 12
     assert cfg.errors == ()
+
+
+# 4.1b agent_tree_max_height (mirrors soft_limit's [tokens] resolution, under [agents])
+
+@requires_tomllib
+def test_toml_overrides_default_agent_tree_max_height(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[agents]\ntree_max_height = 20\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.agent_tree_max_height == 20
+
+
+def test_env_overrides_toml_agent_tree_max_height(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[agents]\ntree_max_height = 20\n')
+    cfg = config.Config.load(env={'YAS_AGENT_TREE_MAX_HEIGHT': '4'}, config_dir=tmp_path)
+    assert cfg.agent_tree_max_height == 4
+
+
+@requires_tomllib
+def test_out_of_range_toml_agent_tree_max_height(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[agents]\ntree_max_height = -5\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.agent_tree_max_height == 12
+    assert 'agent_tree_max_height' in cfg.errors
 
 
 # 4.2 Alias resolution + canonical-wins

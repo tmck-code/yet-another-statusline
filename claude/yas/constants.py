@@ -70,6 +70,31 @@ LINES_SEGMENT_MIN_WIDTH = 103
 # subagent rows' two-anchor read); this floor guarantees a readable separation
 # and triggers the middle-ellipsis fallback before left + timer would collide.
 TASK_HEADER_RIGHT_GAP_MIN = 2
+
+# Fixed per-slot label width for the openspec authoring-row stage block. These
+# widths are constant regardless of state (e.g. 'deltas 0/3' and 'deltas 3/9'
+# both occupy exactly 10 columns) -- this is load-bearing: it is the entire
+# reason stacked authoring rows align their divider columns across differing
+# names and lifecycle stages. If any label template ever grows past its width,
+# stacked-row alignment breaks silently with no exception (see design.md
+# Decision 7 in openspec/changes/add-openspec-authoring-row).
+AUTHORING_STAGE_LABEL_W = {'proposal': 8, 'design': 6, 'deltas': 10, 'tasks': 5}
+
+# Minimum visible columns the authoring row's name cell must retain before the
+# stage cells degrade to glyphs-only (labels dropped, dividers/elbows kept).
+AUTHORING_NAME_FLOOR = 15
+
+# Box width below which even the glyph-only tier would leave the authoring
+# row's name cell non-positive; below this the row is dropped entirely rather
+# than rendered corrupt. Derived from the cell arithmetic, not a magic number:
+# glyph-only block (4 glyphs, width 1 each) + 4 dividers (' ┊ ', 3 cols each)
+# = 4*1 + 4*3 = 16 columns; content budget is width - 4; a 1-column floor for
+# the name cell gives 16 + 4 + 1 = 21.
+AUTHORING_ROW_MIN_WIDTH = 21
+
+# Fixed rendering order of the four openspec authoring-row stage slots.
+AUTHORING_STAGE_ORDER = ('proposal', 'design', 'deltas', 'tasks')
+
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 # Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1
@@ -442,7 +467,15 @@ WORKFLOW_RUN_CAP          = 2
 # At most SUBAGENT_DISPLAY_CAP subagent rows render in the standalone cohort;
 # the layout builders keep the most recent (latest-started) rows and drop the
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
+# Kept as a fallback default for callers that don't thread a Config through;
+# the live cap is `Config.agent_tree_max_height` (see DEFAULT_AGENT_TREE_MAX_HEIGHT).
 SUBAGENT_DISPLAY_CAP      = 6
+
+# Default for the `[agents] tree_max_height` yas.toml knob — the cap on
+# subagent tree rows rendered in the standalone cohort (see cap_tree_groups
+# in yas.info.subagents). Distinct from SUBAGENT_DISPLAY_CAP above, which is
+# the historical fixed constant this knob replaces at the layout call sites.
+DEFAULT_AGENT_TREE_MAX_HEIGHT = 12
 
 # A terminal (completed/killed/stopped/failed) subagent row is retained for at
 # most this many seconds after its end_ts before it drops from the cohort

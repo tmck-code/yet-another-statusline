@@ -26,6 +26,7 @@ from yas.constants import (
     DEFAULT_JUSTIFY,
     DEFAULT_LABELS,
     DEFAULT_MAX_WIDTH,
+    DEFAULT_AGENT_TREE_MAX_HEIGHT,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
     DEFAULT_THEME,
@@ -341,7 +342,8 @@ class Config:
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
         'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
         'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
-        'show_render_time', 'show_tool_uses', 'soft_limit_models', 'errors', 'debug_lines',
+        'show_render_time', 'show_tool_uses', 'soft_limit_models', 'agent_tree_max_height',
+        'errors', 'debug_lines',
     )
 
     max_width:          int
@@ -361,6 +363,7 @@ class Config:
     show_render_time:   bool
     show_tool_uses:     bool
     soft_limit_models:  tuple[tuple[str, int], ...]
+    agent_tree_max_height: int
     errors:             tuple[str, ...]
     debug_lines:        tuple[str, ...]
 
@@ -383,6 +386,7 @@ class Config:
         show_render_time:   bool = False,
         show_tool_uses:     bool = DEFAULT_SHOW_TOOL_USES,
         soft_limit_models:  tuple[tuple[str, int], ...] = (),
+        agent_tree_max_height: int = DEFAULT_AGENT_TREE_MAX_HEIGHT,
         errors:             tuple[str, ...] = (),
         debug_lines:        tuple[str, ...] = (),
     ) -> None:
@@ -404,6 +408,7 @@ class Config:
         s(self, 'show_render_time', show_render_time)
         s(self, 'show_tool_uses', show_tool_uses)
         s(self, 'soft_limit_models', soft_limit_models)
+        s(self, 'agent_tree_max_height', agent_tree_max_height)
         s(self, 'errors', errors)
         s(self, 'debug_lines', debug_lines)
 
@@ -422,6 +427,7 @@ class Config:
                 f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
                 f'show_render_time={self.show_render_time}, show_tool_uses={self.show_tool_uses}, '
                 f'soft_limit_models={self.soft_limit_models!r}, '
+                f'agent_tree_max_height={self.agent_tree_max_height}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
@@ -453,6 +459,7 @@ class Config:
 
         layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
         context = _table('context')
+        agents = _table('agents')
         glyphs = _table_in(appearance, 'glyphs')
         cli = _parse_argv(argv) if argv is not None else {}
 
@@ -537,6 +544,10 @@ class Config:
             _parse_context_thresholds, DEFAULT_CONTEXT_THRESHOLDS, errors, debug)
 
         soft_limit_models = _parse_models(tokens.get('model'), errors, debug)
+        agent_tree_max_height = _resolve(
+            'agent_tree_max_height',
+            _env_sources(env, 'YAS_AGENT_TREE_MAX_HEIGHT') + toml_src(agents, 'tree_max_height'),
+            _parse_pos_int, DEFAULT_AGENT_TREE_MAX_HEIGHT, errors, debug)
 
         return cls(
             max_width=max_width,
@@ -556,6 +567,7 @@ class Config:
             show_render_time=show_render_time,
             show_tool_uses=show_tool_uses,
             soft_limit_models=tuple(soft_limit_models),
+            agent_tree_max_height=agent_tree_max_height,
             errors=tuple(errors),
             debug_lines=tuple(debug),
         )
