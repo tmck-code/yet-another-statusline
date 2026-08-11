@@ -27,6 +27,20 @@ the template structure — read it from the repo so the two never drift.
      points rather than one long run-on sentence — a wall of text is hard to read.
    Present these as a draft for the user to edit; don't fabricate motivation you can't infer.
 
+   **Describe the destination, not the journey.** The title and body describe the change *as
+   it will land on `main`* — the diff `main...HEAD`, as a reviewer of that diff sees it. They
+   are not a changelog of the branch.
+   - Never describe work that only happened *within* the branch. If a knob is introduced and
+     then extended over several commits, it is simply *introduced* — "Add a `show_icons`
+     config flag", not "Fix `show_icons` leaks". A fix relative to an earlier commit on the
+     same branch is invisible on `main` and doesn't belong in the PR.
+   - Never anchor Context to a commit that isn't on `main` yet ("two gaps remained after
+     23777c9"). State the problem as it exists on `main` today.
+   - Prefer a short, plain title naming the user-visible outcome ("Add config param to hide
+     icons") over a long one enumerating internals.
+   - When the branch is rewritten or grows after the PR exists, re-derive title and body from
+     the current `main...HEAD` diff rather than patching the old text.
+
 4. **Embed system info.** Run `make pr-info` and paste its output into the System info fenced
    block verbatim.
 
