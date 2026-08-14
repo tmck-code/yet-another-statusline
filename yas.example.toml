@@ -103,3 +103,9 @@
 #                 #   entirely (only an openspec/ found by walking upward from cwd
 #                 #   is used). Unlike most numeric knobs here, 0 is legal.
 #                 #   env: YAS_OPENSPEC_SCAN_DEPTH
+
+# [recording]
+# enabled = false  # bool; record a verbatim copy of each render's session payload
+#                  #   to ~/.claude/yas/recordings/{session_id}.psv.gz for replay.
+#                  #   Recordings are opt-in, default off, and are never pruned.
+#                  #   env: YAS_RECORDING

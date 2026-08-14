@@ -24,3 +24,6 @@ ops/research/
 
 # ascii-mode render artifacts for eyeballing
 prototype/
+
+scratch/
+.scratch/

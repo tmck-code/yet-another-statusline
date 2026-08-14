@@ -259,6 +259,47 @@ def test_env_show_render_time_zero_overrides_toml_true(tmp_path: Path) -> None:
     assert cfg.show_render_time is False
 
 
+# recording (session replay recording; off by default)
+
+def test_recording_default_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.recording is False
+
+
+@requires_tomllib
+def test_toml_recording_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[recording]\nenabled = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.recording is True
+
+
+@requires_tomllib
+def test_env_recording_zero_overrides_toml_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[recording]\nenabled = true\n')
+    cfg = config.Config.load(env={'YAS_RECORDING': '0'}, config_dir=tmp_path)
+    assert cfg.recording is False
+
+
+def test_env_recording_empty_counts_as_absent(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_RECORDING': ''}, config_dir=tmp_path)
+    assert cfg.recording is False
+
+
+@requires_tomllib
+def test_toml_recording_invalid_value_falls_back(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[recording]\nenabled = "yes"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.recording is False
+    assert 'recording' in cfg.errors
+
+
+def test_env_recording_invalid_value_in_debug_only(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={'YAS_RECORDING': 'invalid'}, config_dir=tmp_path)
+    assert cfg.recording is False
+    assert 'recording' not in cfg.errors
+    assert any('recording' in line for line in cfg.debug_lines)
+
+
 # show_tool_uses (per-tool tool_use counts row, wide layout; on by default)
 
 @requires_tomllib

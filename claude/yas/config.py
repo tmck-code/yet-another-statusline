@@ -27,6 +27,7 @@ from yas.constants import (
     DEFAULT_LABELS,
     DEFAULT_MAX_WIDTH,
     DEFAULT_OPENSPEC_SCAN_DEPTH,
+    DEFAULT_RECORDING,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_TOKEN_WINDOW,
     DEFAULT_THEME,
@@ -352,7 +353,7 @@ class Config:
         'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
         'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
         'show_render_time', 'show_tool_uses', 'soft_limit_models', 'openspec_scan_depth',
-        'show_icons', 'errors', 'debug_lines',
+        'show_icons', 'recording', 'errors', 'debug_lines',
     )
 
     max_width:          int
@@ -374,6 +375,7 @@ class Config:
     soft_limit_models:  tuple[tuple[str, int], ...]
     openspec_scan_depth: int
     show_icons:          bool
+    recording:          bool
     errors:             tuple[str, ...]
     debug_lines:        tuple[str, ...]
 
@@ -398,6 +400,7 @@ class Config:
         soft_limit_models:  tuple[tuple[str, int], ...] = (),
         openspec_scan_depth: int = DEFAULT_OPENSPEC_SCAN_DEPTH,
         show_icons:          bool = True,
+        recording:          bool = DEFAULT_RECORDING,
         errors:             tuple[str, ...] = (),
         debug_lines:        tuple[str, ...] = (),
     ) -> None:
@@ -421,6 +424,7 @@ class Config:
         s(self, 'soft_limit_models', soft_limit_models)
         s(self, 'openspec_scan_depth', openspec_scan_depth)
         s(self, 'show_icons', show_icons)
+        s(self, 'recording', recording)
         s(self, 'errors', errors)
         s(self, 'debug_lines', debug_lines)
 
@@ -440,7 +444,7 @@ class Config:
                 f'show_render_time={self.show_render_time}, show_tool_uses={self.show_tool_uses}, '
                 f'soft_limit_models={self.soft_limit_models!r}, '
                 f'openspec_scan_depth={self.openspec_scan_depth}, '
-                f'show_icons={self.show_icons}, '
+                f'show_icons={self.show_icons}, recording={self.recording}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
@@ -473,6 +477,7 @@ class Config:
         layout, tokens, appearance = _table('layout'), _table('tokens'), _table('appearance')
         context = _table('context')
         openspec = _table('openspec')
+        recording_tbl = _table('recording')
         glyphs = _table_in(appearance, 'glyphs')
         cli = _parse_argv(argv) if argv is not None else {}
 
@@ -535,6 +540,10 @@ class Config:
             'show_render_time',
             _env_sources(env, 'YAS_SHOW_RENDER_TIME') + toml_src(layout, 'show_render_time'),
             _parse_bool, False, errors, debug)
+        recording = _resolve(
+            'recording',
+            _env_sources(env, 'YAS_RECORDING') + toml_src(recording_tbl, 'enabled'),
+            _parse_bool, DEFAULT_RECORDING, errors, debug)
         show_tool_uses = _resolve(
             'show_tool_uses',
             _env_sources(env, 'YAS_SHOW_TOOL_USES') + toml_src(layout, 'show_tool_uses'),
@@ -587,6 +596,7 @@ class Config:
             soft_limit_models=tuple(soft_limit_models),
             openspec_scan_depth=openspec_scan_depth,
             show_icons=show_icons,
+            recording=recording,
             errors=tuple(errors),
             debug_lines=tuple(debug),
         )

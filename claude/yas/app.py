@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 import time
 from datetime import datetime
+from typing import Any
 
 from yas.config import Config
 from yas.constants import CLAUDE_DIR, MIN_WIDTH, NARROW_WIDTH, MEDIUM_WIDTH, VERSION
@@ -23,6 +25,18 @@ def record_tick(session: SessionInfo, usage: TranscriptUsage) -> TickRecord:
     tok_rate  = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     day_cost  = compute_day_cost(session.model, token_log)
     return TickRecord(token_log=token_log, day_cost=day_cost, tok_rate=tok_rate)
+
+
+def _record_tick(session_id: str, width: int, info: dict[str, Any]) -> None:
+    """Write a tick to the recording gzip file with timestamp, raw width, and payload."""
+    try:
+        path = CLAUDE_DIR / 'yas' / 'recordings' / f'{session_id}.psv.gz'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(info, separators=(',', ':'), ensure_ascii=False)
+        with gzip.open(path, 'at', encoding='utf-8') as f:
+            f.write(f'{time.time()} | {width} | {payload}\n')
+    except Exception:
+        return
 
 
 def resolve_theme(cli_name: str | None) -> Theme:
@@ -111,6 +125,8 @@ def main(t0: float | None = None) -> None:
         timing  = f'{prev_ms:.1f}ms' if prev_ms is not None else ''
 
     raw_tw = terminal_width()
+    if cfg.recording:
+        _record_tick(session_id, raw_tw, info)
     if raw_tw < MIN_WIDTH:
         return
     if cfg.full_width:

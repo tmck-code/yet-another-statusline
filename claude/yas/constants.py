@@ -20,6 +20,7 @@ DEFAULT_MAX_WIDTH    = 140
 # entirely (only cwd's own upward-found openspec/ is considered). See
 # yas.info.openspec for the repo-levels -> path-segments conversion.
 DEFAULT_OPENSPEC_SCAN_DEPTH = 1
+DEFAULT_RECORDING = False
 DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'

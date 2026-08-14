@@ -164,8 +164,18 @@ def ansi_to_pango(ansi: str) -> str:
     return ''.join(out)
 
 
-def render_png(txt_path: Path, png_path: Path) -> None:
-    """Render an ANSI .txt snapshot to a trimmed PNG via Pango + ImageMagick."""
+def render_png_from_str(
+    ansi: str,
+    png_path: Path,
+    *,
+    canvas: tuple[int, int] | None = None,
+) -> None:
+    """Render an ANSI string to a PNG via Pango + ImageMagick.
+
+    When canvas is given, pad to that (width, height) with fixed pixel dimensions
+    and suppress progress output (for frame sequences). When canvas is None, use
+    -trim for automatic sizing (existing demo behavior).
+    """
     font = os.environ.get('YAS_DEMO_FONT', DEFAULT_FONT)
     size = os.environ.get('YAS_DEMO_SIZE', DEFAULT_SIZE)
     bg   = os.environ.get('YAS_DEMO_BG',   DEFAULT_BG)
@@ -173,7 +183,6 @@ def render_png(txt_path: Path, png_path: Path) -> None:
     pad  = os.environ.get('YAS_DEMO_PAD',  DEFAULT_PAD)
     dpi  = os.environ.get('YAS_DEMO_DPI',  DEFAULT_DPI)
 
-    ansi = txt_path.read_text().strip('\n')
     body = ansi_to_pango(ansi)
     # A root span pins the font family/size and the default (non-SGR) foreground;
     # inner spans override colour/style per run.
@@ -184,21 +193,44 @@ def render_png(txt_path: Path, png_path: Path) -> None:
         fh.write(markup)
         markup_path = fh.name
     try:
-        subprocess.run(
-            [
-                'magick',
-                '-background', bg,
-                '-density',    dpi,
-                f'pango:@{markup_path}',
-                '-trim', '+repage',
-                '-bordercolor', bg, '-border', pad,
-                str(png_path),
-            ],
-            check=True,
-        )
+        if canvas is not None:
+            # Fixed canvas mode: pad to specific dimensions, suppress progress output
+            width, height = canvas
+            subprocess.run(
+                [
+                    'magick',
+                    '-background', bg,
+                    '-density',    dpi,
+                    f'pango:@{markup_path}',
+                    '-extent', f'{width}x{height}', '-gravity', 'NorthWest',
+                    '-bordercolor', bg, '-border', pad,
+                    str(png_path),
+                ],
+                check=True,
+            )
+        else:
+            # Trim mode: auto-size (existing behavior), emit progress
+            subprocess.run(
+                [
+                    'magick',
+                    '-background', bg,
+                    '-density',    dpi,
+                    f'pango:@{markup_path}',
+                    '-trim', '+repage',
+                    '-bordercolor', bg, '-border', pad,
+                    str(png_path),
+                ],
+                check=True,
+            )
+            print(f'  wrote {png_path}')
     finally:
         os.unlink(markup_path)
-    print(f'  wrote {png_path}')
+
+
+def render_png(txt_path: Path, png_path: Path) -> None:
+    """Render an ANSI .txt snapshot to a trimmed PNG via Pango + ImageMagick."""
+    ansi = txt_path.read_text().strip('\n')
+    render_png_from_str(ansi, png_path)
 
 
 def main(argv: list[str]) -> int:

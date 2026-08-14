@@ -62,6 +62,15 @@ test:
 statusline/test:
 	@uv run python ops/demo.py
 
+# Replay: build and play a session recording
+# Usage: make replay SESSION=<session-id> [SPEED=10.0] [WIDTH=recorded]
+# SESSION: session ID or path to .psv.gz recording
+# SPEED: playback speed multiplier (default: 10.0)
+# WIDTH: width mode (recorded/current/N, default: recorded)
+replay:
+	@uv run python3 ops/replay.py build $(SESSION) -o /tmp/replay.psv
+	@uv run python3 ops/replay.py play /tmp/replay.psv --speed $(SPEED) --width $(WIDTH)
+
 mon/run:
 	uv run python claude/mon.py
 
@@ -84,4 +93,4 @@ version/bump:
 	@git commit -m "Bump version to $(VERSION)"
 	@git push
 
-.PHONY: hooks bench pr-info demo demo/img demo/widths test statusline/test mon/run version/bump
+.PHONY: hooks bench pr-info demo demo/img demo/widths test statusline/test mon/run replay version/bump

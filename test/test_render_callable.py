@@ -1,3 +1,4 @@
+import gzip
 import json
 import subprocess
 import sys
@@ -80,7 +81,7 @@ def _run_main(info, tmp_path, monkeypatch, env_extra):
     import io
     monkeypatch.setattr(app, 'terminal_width', lambda: 200)
     monkeypatch.setattr(app, 'CLAUDE_DIR', tmp_path / '.claude')
-    for k in ('YAS_MAX_WIDTH', 'YAS_FULL_WIDTH', 'YAS_SHOW_RENDER_TIME'):
+    for k in ('YAS_MAX_WIDTH', 'YAS_FULL_WIDTH', 'YAS_SHOW_RENDER_TIME', 'YAS_RECORDING'):
         monkeypatch.delenv(k, raising=False)
     for k, v in env_extra.items():
         monkeypatch.setenv(k, v)
@@ -117,6 +118,110 @@ def test_show_render_time_on_emits_annotation(tmp_path, monkeypatch):
     out  = _run_main(info, tmp_path, monkeypatch, {'YAS_SHOW_RENDER_TIME': '1'})
     assert '47.2ms' in strip_ansi(out.splitlines()[-1])
     assert len(writes) == 1  # this run records its own duration for the next
+
+
+def test_recording_off_writes_nothing(tmp_path, monkeypatch):
+    info = _load_example()
+    _run_main(info, tmp_path, monkeypatch, {})
+    recordings_dir = tmp_path / '.claude' / 'yas' / 'recordings'
+    assert not recordings_dir.exists()
+
+
+def test_recording_on_writes_one_member_per_tick(tmp_path, monkeypatch):
+    info = _load_example()
+    session_id = info['session_id']
+    for _ in range(3):
+        _run_main(info, tmp_path, monkeypatch, {'YAS_RECORDING': '1'})
+
+    recording_file = tmp_path / '.claude' / 'yas' / 'recordings' / f'{session_id}.psv.gz'
+    assert recording_file.exists()
+
+    # Decompress and read lines
+    lines = []
+    with gzip.open(recording_file, 'rt', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    assert len(lines) == 3
+
+
+def test_recording_payload_round_trips_with_pipe(tmp_path, monkeypatch):
+    info = _load_example()
+    session_id = info['session_id']
+    _run_main(info, tmp_path, monkeypatch, {'YAS_RECORDING': '1'})
+
+    recording_file = tmp_path / '.claude' / 'yas' / 'recordings' / f'{session_id}.psv.gz'
+    with gzip.open(recording_file, 'rt', encoding='utf-8') as f:
+        line = f.readline().strip()
+
+    # Split with maxsplit=2 to recover timestamp | width | payload
+    parts = line.split(' | ', 2)
+    assert len(parts) == 3
+    timestamp, width, payload = parts
+
+    # Payload should be valid JSON
+    recovered = json.loads(payload)
+    assert isinstance(recovered, dict)
+    # Verify it matches the original info structure
+    assert 'session_id' in recovered or 'session_info' in recovered or len(recovered) > 0
+
+
+def test_recording_captures_raw_width_not_clamped(tmp_path, monkeypatch):
+    info = _load_example()
+    session_id = info['session_id']
+    # terminal_width() mocked to 200, which is > DEFAULT_MAX_WIDTH (140)
+    # so the rendered width would be clamped, but we record the raw width
+    _run_main(info, tmp_path, monkeypatch, {'YAS_RECORDING': '1'})
+
+    recording_file = tmp_path / '.claude' / 'yas' / 'recordings' / f'{session_id}.psv.gz'
+    with gzip.open(recording_file, 'rt', encoding='utf-8') as f:
+        line = f.readline().strip()
+
+    parts = line.split(' | ', 2)
+    width_str = parts[1]
+    assert width_str == '200'  # The mocked terminal_width() value
+
+
+def test_recording_sub_min_width_tick_still_records(tmp_path, monkeypatch):
+    from yas.constants import MIN_WIDTH
+    import io
+
+    # Record a tick with width below MIN_WIDTH to verify it still gets recorded
+    # even though main() doesn't emit stdout
+    info = _load_example()
+    session_id = info['session_id']
+    monkeypatch.setattr(app, 'terminal_width', lambda: MIN_WIDTH - 1)
+    monkeypatch.setattr(app, 'CLAUDE_DIR', tmp_path / '.claude')
+    monkeypatch.delenv('YAS_RECORDING', raising=False)
+    monkeypatch.setenv('YAS_RECORDING', '1')
+
+    buf = io.StringIO()
+    monkeypatch.setattr(app.sys, 'stdout', buf)
+    monkeypatch.setattr(app.sys, 'stdin', io.StringIO(json.dumps(info)))
+    app.main()
+
+    out = buf.getvalue()
+    # Should emit nothing (below MIN_WIDTH)
+    assert out == ''
+
+    # But recording should still exist
+    recording_file = tmp_path / '.claude' / 'yas' / 'recordings' / f'{session_id}.psv.gz'
+    assert recording_file.exists()
+
+
+def test_recording_unwritable_dir_leaves_output_intact(tmp_path, monkeypatch):
+    info = _load_example()
+    # Make the recordings directory read-only to simulate a write failure
+    recordings_dir = tmp_path / '.claude' / 'yas' / 'recordings'
+    recordings_dir.mkdir(parents=True, exist_ok=True)
+    recordings_dir.chmod(0o444)
+
+    try:
+        # Even though recording fails, render should succeed
+        out = _run_main(info, tmp_path, monkeypatch, {'YAS_RECORDING': '1'})
+        assert len(out) > 0  # Output is intact
+    finally:
+        # Restore permissions for cleanup
+        recordings_dir.chmod(0o755)
 
 
 def test_render_matches_cli_subprocess(tmp_home, monkeypatch):

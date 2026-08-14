@@ -49,6 +49,37 @@ A dummy session to demonstrate the layout:
 
 <img width="3084" height="1250" alt="yas-0 2 5" src="https://github.com/user-attachments/assets/94d318c7-d7b4-4ad0-a06c-90f303d7f9a7" />
 
+## Replay
+
+The replay system lets you record a session and play it back or export it as a video:
+
+```bash
+# Build keyframes from a session ID or recording path
+make replay SESSION=<session-id>
+
+# Or manually:
+# 1. Build keyframes from a recording
+uv run python3 ops/replay.py build <session-id> -o replay.psv
+
+# 2. Play back interactively
+uv run python3 ops/replay.py play replay.psv --speed 10.0 --width recorded
+
+# 3. Export to MP4 or GIF
+uv run python3 ops/replay.py export replay.psv -o session.mp4 --speed 10.0
+```
+
+**Playback controls:**
+- `space` — pause/resume
+- `←`/`→` — seek ±10 seconds
+- `↑`/`↓` / `PgUp`/`PgDn` — seek ±1 minute
+- `0`-`9` — jump to N×10% of the session
+- `+`/`-` — double/halve playback speed
+- `q` — quit
+
+**Known limitations:**
+- The openspec, skills, and plugins sections render empty in replays (v1 gap).
+- Export requires `ffmpeg` and ImageMagick (`magick`) to be installed.
+
 ## Widths
 
 The statusline also renders differently according to available width
@@ -94,6 +125,7 @@ aliases when both are set — the aliases keep working but are deprecated.
 | `labels` | `YAS_LABELS` | — | `[layout].labels` | `false` |
 | `justify` | `YAS_JUSTIFY` | — | `[layout].justify` | `false` |
 | `show_day_stats` | `YAS_SHOW_DAY_STATS` | — | `[tokens].show_day_stats` | `true` |
+| `recording` | `YAS_RECORDING` | — | `[recording].enabled` | `false` |
 | `openspec_scan_depth` | `YAS_OPENSPEC_SCAN_DEPTH` | — | `[openspec].scan_depth` | `1` |
 
 #### Valid values

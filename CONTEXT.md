@@ -220,7 +220,7 @@ Suppressed when: `resets_at == 0` (no window), window expired, or within warmup 
 ### Configuration
 
 **Config**:
-The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, `justify`, `labels` (**Section Labels**), plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
+The frozen dataclass (`Config` in `claude/statusline_command.py`, built once via `Config.load`) that holds every resolved knob: `max_width`, `full_width`, `soft_limit`, `token_window`, `theme`, `bg_shift`, `glyph_mode`, `single_width`, `show_day_stats`, `justify`, `labels` (**Section Labels**), `recording`, plus the per-model `soft_limit` overrides. Each knob is resolved independently through one fixed **Precedence Chain**, so one bad value never disturbs the others.
 _Avoid_: "settings" (overloaded with Claude Code's `settings.json`, which is unrelated — `Config` reads `yas.toml` and `YAS_*` env vars).
 
 **Glyph Mode**:
@@ -299,7 +299,7 @@ The statusline source lives in `claude/yas/` as a layered package with two subpa
 | `themes` | `Theme` dataclass, `THEMES` registry, `CLAUDE_DARK` default |
 | `renderer` | `Renderer` — all section helpers (path, model, tokens, context, plugins, …) |
 | `layout` | `RowSpec`, `LayoutSpec`, `build_narrow/medium/wide`, `render_layout` — builders consume a `SessionView` (and `TickRecord` for wide) |
-| `app` | `render`, `resolve_theme`, `main` — public entry points; `record_tick`/`TickRecord` construction and dispatch |
+| `app` | `render`, `resolve_theme`, `main` — public entry points; `record_tick`/`TickRecord` construction and dispatch; `_record_tick` per-render recording tap (session payloads to gzip) |
 
 **`yas/info/`** — data-gather layer (public face: `from yas.info import SessionView`):
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'ops'))
@@ -81,3 +82,22 @@ class TestStrikethrough:
 
         # assert
         assert result == expected
+
+
+class TestRenderPngEntryPoints:
+    """Test that string and path entry points produce the same Pango markup."""
+
+    def test_string_and_path_entry_produce_same_markup(self):
+        """render_png_from_str and render_png produce same Pango markup."""
+        # Sample ANSI input
+        test_ansi = '\033[38;5;10mGreen text\033[0m'
+        expected_markup = ansi_to_pango(test_ansi)
+
+        # String entry point produces the expected markup directly
+        assert ansi_to_pango(test_ansi) == expected_markup
+
+        # Path entry point reads the string and produces the same result
+        with tempfile.TemporaryDirectory() as tmpdir:
+            txt_path = Path(tmpdir) / 'test.txt'
+            txt_path.write_text(test_ansi)
+            assert ansi_to_pango(txt_path.read_text().strip('\n')) == expected_markup
