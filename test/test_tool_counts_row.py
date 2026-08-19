@@ -173,7 +173,7 @@ def test_row_directly_under_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2)})
     spec = layout.build_wide(view, _tick(), 160, _r)
     tok_idx = max(i for i, r in enumerate(spec.rows)
-                  if r.kind == 'content' and 't/m' in strip_ansi(r.content))
+                  if r.kind == 'content' and '$' in strip_ansi(r.content))
     tool_idx = next(i for i, r in enumerate(spec.rows)
                     if r.kind == 'content' and 'Zbash' in strip_ansi(r.content))
     # tokens content, then the seam separator, then the tool content row.

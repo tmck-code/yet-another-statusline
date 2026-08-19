@@ -20,9 +20,11 @@ from yas.constants import (
     GLYPH_HOURGLASS,
     GLYPH_RENAMED,
     GLYPH_WF_DIVIDER,
+    LABEL_ABBREVIATIONS,
     LINES_LABEL,
     NARROW_SIDE_BY_SIDE_MIN_WIDTH,
     PLAN_ONELINE_MIN_W,
+    PLUGINS_TRAILING_MAX_W,
     RESET,
     SUBAGENT_DESC_FLOOR,
     SUBAGENT_DISPLAY_CAP,
@@ -59,7 +61,7 @@ from yas.render.metrics import (
 from yas.render.pill import Pill
 from yas.render.gradient import model_display
 from yas.renderer import Renderer
-from yas.render.text import _visible_width, _token_offsets, fmt_tok_fixed
+from yas.render.text import _ansi_byte_offset, _visible_width, _token_offsets, fmt_tok_fixed
 from yas.tokens import TickRecord
 
 # Characters that can start a dirty-status block in the plain-text path string.
@@ -90,22 +92,6 @@ class _TopRowShed(NamedTuple):
     cache_section_w:   int
     elapsed_content:   str
     elapsed_section_w: int
-
-
-def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
-    """Return the byte (str index) in *ansi* that corresponds to plain-text
-    position *plain_idx* (0-indexed visible character count, ANSI escapes
-    excluded). Returns ``len(ansi)`` when *plain_idx* >= visible width."""
-    pos = 0   # current byte position in `ansi`
-    vis = 0   # visible characters counted so far
-    while pos < len(ansi) and vis < plain_idx:
-        m = _ANSI_RE.match(ansi, pos)
-        if m:
-            pos = m.end()
-            continue
-        pos += 1
-        vis += 1
-    return pos
 
 
 class RowSpec:
@@ -912,49 +898,46 @@ def build_wide(
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     session_inout = view.session_inout
 
+    # `plugins_line` is computed ahead of `tokens_cost` below since it is now
+    # fed into that row as its trailing column (replacing the old in-row
+    # rate/sparkline leader, which moved to its own standalone `tokens_over_time`
+    # row further down).
+    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, show_icons=view.cfg.show_icons)
+    # `plugins_line` now shares the tokens/cost row's trailing column rather
+    # than owning a full-width row of its own, so it is pre-clipped to a
+    # fixed, realistic-widest cap (`PLUGINS_TRAILING_MAX_W`) instead of
+    # `width - 3`: clipping to the box's own width would make the measured
+    # trailing content scale with the box, making `tokens_cost`'s own
+    # min-width-with-leader gate unsatisfiable at ANY width for a long list.
+    # `tokens_cost` clips further still, to whatever narrower width the
+    # column actually gets once the tokens/cost segments claim their share.
+    plugins_avail = min(width - 3, PLUGINS_TRAILING_MAX_W)
+    if _visible_width(plugins_line) > plugins_avail:
+        cut = _ansi_byte_offset(plugins_line, plugins_avail - 1)
+        plugins_line = f'{plugins_line[:cut]}{ELLIPSIS}{RESET}'
+
     # Reading `view.tool_counts` here forces its transcript scan on every wide
     # render (previously only when `cfg.show_tool_uses` was on, for the
     # per-tool row further down) — needed to feed the session-total lines
     # read/changed segment into `tokens_cost` below. Accepted +2.9ms cost per
     # design.md Decision 6.
-    line_tokens, vsep_cols, _mark_col, tokens_min_w = r.tokens_cost(
+    line_tokens, vsep_cols, _mark_col, tokens_min_w, has_lines_seg = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
-        sess_cost, day_cost, tok_rate,
+        sess_cost, day_cost, plugins_line,
         session.session_id, width, fill, view.cfg.show_day_stats,
         view.cfg.justify,
         lines=(view.tool_counts.lines_read, view.tool_counts.lines_changed),
         show_icons=view.cfg.show_icons,
     )
-    # The three-segment tokens │ cost │ rate row is fixed-content-width: at the
-    # bottom of the wide band (box ~80-84) it cannot hold both columns plus the
-    # rate/spark leader without overflowing the box and detaching its two │ from
-    # the ┬/┴ elbows. ``tokens_min_w`` is the exact content-aware floor reported
-    # by tokens_cost; below it (and below the worst-case constant) we drop the row
-    # and fall back to the compact context line the medium layout uses.
+    # The tokens │ [lines │] cost │ [skills+plugins] row is fixed-content-width:
+    # at the bottom of the wide band (box ~80-84) it cannot hold the tokens and
+    # cost columns without overflowing the box and detaching its │ from the
+    # ┬/┴ elbows. ``tokens_min_w`` is the exact content-aware floor reported
+    # by tokens_cost; below it (and below the worst-case constant) we drop the
+    # row and fall back to the compact context line the medium layout uses.
     tokens_fits = width >= max(tokens_min_w, TOKENS_COST_MIN_WIDTH)
 
-    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, show_icons=view.cfg.show_icons)
-    # border_line pads to width - 3 ('│ ' + content + '│') but never truncates;
-    # a long plugin list would overflow the box, so clip it here.
-    #
-    # Width-gap audit Finding A: at very wide boxes this row's trailing pad
-    # (skills/plugin names are short, fixed content, already shown in full)
-    # grows into a large blank run — up to ~282 cols at width=350. Considered
-    # centering it under `cfg.justify` (implemented and measured); reverted:
-    # centering only relocates the dead space into two roughly-equal runs,
-    # it does not reduce it (measured 283 total post-centering vs 282
-    # before, at width=350 — a wash, not an improvement), and each half is
-    # still individually a "large gap" by the audit's own threshold. There is
-    # no more information this row can show — the names are already fully
-    # rendered — so there is no fix here that doesn't either invent new
-    # content (out of scope) or edit `border_line`'s own padding behaviour
-    # (a different, riskier layer). Leaving this row's original left-aligned
-    # + trailing-pad behaviour as-is.
-    plugins_avail = width - 3
-    if _visible_width(plugins_line) > plugins_avail:
-        cut = _ansi_byte_offset(plugins_line, plugins_avail - 1)
-        plugins_line = f'{plugins_line[:cut]}{ELLIPSIS}{RESET}'
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
     openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
@@ -1472,9 +1455,22 @@ def build_wide(
         # Tokens/cost separator labels: input/cache/output measured over the
         # three token columns left of the first vsep │ (input at the ↓ icon,
         # cache at the '(' parenthetical, output at the ↑ icon after the ')'),
-        # cost between the two vseps, and "tokens over time" over the rate
-        # sparkline after the second. The `sess/day` suffix names the
+        # cost centred in its own cell, and "skills + plugins" over the
+        # trailing column when present. The `sess/day` suffix names the
         # session/day pair shown only when day stats are on.
+        #
+        # `vsep_cols` (0-3 entries) doesn't self-describe which segments it
+        # bounds — (lines segment, trailing segment) are each independently
+        # optional (see `tokens_cost`'s shed ladder), so a bare length check
+        # is ambiguous at length 2. `has_lines_seg` comes straight back from
+        # `tokens_cost` (its own shed-ladder decision) rather than being
+        # re-derived by sniffing the rendered content for the read-lines
+        # glyph — that glyph is itself gated on `show_icons`, so with icons
+        # off the glyph-sniff silently read `False` even when the segment
+        # was present, dropping the 'loc r/w' label and mis-anchoring
+        # 'cost sess/day' onto the wrong (elbow) column. `has_leader_seg`
+        # then follows from the arithmetic (vsep_cols length == 1 +
+        # has_lines + has_leader).
         tok_labels: list[tuple[str, int]] = []
         if view.cfg.labels:
             _tp      = _ANSI_RE.sub('', line_tokens[0])
@@ -1506,21 +1502,35 @@ def build_wide(
                 tok_labels.append((_cache_lbl, _cache_anchor))
             if _out_i != -1:
                 tok_labels.append((f'output{_suf}', 3 + _out_i))
-            # Centre `cost` within its cell (between the last two vseps) instead of
-            # left-anchoring at the cell's start. The cost cell is its own section
-            # (bounded by vseps), so this never conflicts with the token labels.
-            # Index from the end: vsep_cols is a 2-tuple when the lines segment is
-            # shed and a 3-tuple when it's included (design.md Decision 8), and the
-            # cost cell is always the pair immediately preceding the sparkline.
-            _cost_lbl = f'cost{_suf}'
-            _cost_mid = (vsep_cols[-2] + vsep_cols[-1]) // 2
-            tok_labels.append((_cost_lbl, max(vsep_cols[-2] + 1, _cost_mid - len(_cost_lbl) // 2)))
-            tok_labels.append(('tokens over time', vsep_cols[-1] + 2))
-            # `lines read/changed` caption, centred between the first two vseps —
-            # only present when the segment itself is (len == 3; Decision 8).
-            if len(vsep_cols) == 3:
-                _lines_mid = (vsep_cols[0] + vsep_cols[1]) // 2
-                tok_labels.append((LINES_LABEL, max(vsep_cols[0] + 1, _lines_mid - len(LINES_LABEL) // 2)))
+            _has_lines_seg  = has_lines_seg
+            _has_leader_seg = len(vsep_cols) > (1 + (1 if _has_lines_seg else 0))
+            # Centre `cost` within its cell instead of left-anchoring at the
+            # cell's start. The cell's left edge is the tokens│ (no lines
+            # segment) or lines│ (lines segment) vsep; its right edge is the
+            # cost│skills-plugins vsep when that trailing segment is present,
+            # else the cell runs unbounded to the row's own end (no right
+            # anchor to centre against, so left-anchor with a fixed offset).
+            _cost_left = vsep_cols[1] if _has_lines_seg else vsep_cols[0]
+            _cost_lbl  = f'cost{_suf}'
+            if _has_leader_seg:
+                _cost_mid = (_cost_left + vsep_cols[-1]) // 2
+                tok_labels.append((_cost_lbl, max(_cost_left + 1, _cost_mid - len(_cost_lbl) // 2)))
+                tok_labels.append(('skills + plugins', vsep_cols[-1] + 2))
+            else:
+                tok_labels.append((_cost_lbl, _cost_left + 2))
+            # `lines read/changed` caption, centred between the first two vseps
+            # — only present when that segment itself is. The cell here is
+            # narrow enough that `_fit_label` (borders.py) almost always
+            # renders the abbreviated form ('loc r/w', LABEL_ABBREVIATIONS),
+            # not the full LINES_LABEL text passed through `tok_labels` — so
+            # centring must be computed against the abbreviation's length,
+            # not the long form's, or the placed text lands 3-4 columns left
+            # of true centre (the anchor is a start-of-text position, never
+            # re-centred once `_overlay_labels` picks a shorter rendered form).
+            if _has_lines_seg:
+                _lines_disp = LABEL_ABBREVIATIONS.get(LINES_LABEL, LINES_LABEL)
+                _lines_mid  = (vsep_cols[0] + vsep_cols[1]) // 2
+                tok_labels.append((LINES_LABEL, max(vsep_cols[0] + 1, _lines_mid - len(_lines_disp) // 2)))
         rows.append(RowSpec('separator_dim', downs=vsep_cols, labels=tok_labels))
         for lt in line_tokens:
             rows.append(RowSpec('content', content=lt))
@@ -1551,13 +1561,17 @@ def build_wide(
         rows.append(RowSpec('content', content=r.tool_counts_row(tc.counts, width, fill=fill)))
         pending_ups = ()
 
-    if plugins_line:
-        # Single "skills + plugins" caption anchored at content start (col 3).
-        plugins_labels: list[tuple[str, int]] = (
-            [('skills + plugins', 3)] if view.cfg.labels else []
-        )
-        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=plugins_labels))
-        rows.append(RowSpec('content', content=plugins_line))
+    # Standalone "tokens over time" row (rate label + live sparkline), off by
+    # default (`cfg.show_tokens_over_time`) — formerly the trailing segment of
+    # the tokens/cost row above ("skills + plugins" now occupies that column
+    # instead; see the `tokens_cost` call earlier), now full-width on its own
+    # line below it.
+    if tokens_fits and view.cfg.show_tokens_over_time:
+        tot_labels: list[tuple[str, int]] = [('tokens over time', 3)] if view.cfg.labels else []
+        rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups, labels=tot_labels))
+        rows.append(RowSpec('content', content=r.tokens_over_time(
+            tok_rate, session.session_id, width, fill=fill, show_icons=view.cfg.show_icons,
+        )))
         pending_ups = ()
 
     last_prompt_ts = read_last_prompt_ts(session.session_id)

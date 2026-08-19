@@ -7,6 +7,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 import yas.layout as layout
 import yas.renderer as renderer_mod
 import yas.session as session_mod
@@ -61,13 +63,12 @@ def test_labels_on_paints_top_border_and_tokens_separator():
     sep = _tokens_separator(lines)
     assert superscript('input') in sep
     assert superscript('cost') in sep
-    assert superscript('tokens over time') in sep
 
 
 def test_labels_off_has_no_superscripts():
     lines = _render(labels=False)
     blob = '\n'.join(strip_ansi(ln) for ln in lines)
-    for word in ('5h', 'cache', 'input', 'cost', 'tokens over time'):
+    for word in ('5h', 'cache', 'input', 'cost'):
         assert superscript(word) not in blob
 
 
@@ -155,7 +156,7 @@ def _tok_sep_and_content(lines: list[str]) -> tuple[str, str]:
     """The dim tokens separator and the tokens content row directly below it."""
     for i, ln in enumerate(lines):
         plain = strip_ansi(ln)
-        if 't/m' in plain:
+        if '$' in plain:
             return strip_ansi(lines[i - 1]), plain
     return '', ''
 
@@ -165,15 +166,29 @@ def _label_center(sep: str, word: str) -> float:
     return start + (len(word) - 1) / 2
 
 
-def _short_labels_view() -> SessionView:
+def _short_labels_view(with_trailing: bool = False) -> SessionView:
     # day-stats off keeps the labels short enough to centre without contending
     # with the neighbouring token labels.
-    return SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
+    view = SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
                        Config(labels=True, show_day_stats=False))
+    if with_trailing:
+        # Inject a skill to populate the tokens/cost row's trailing
+        # "skills + plugins" segment with content -- the segment (and its
+        # right-hand vsep) is present either way (see `tokens_cost`'s
+        # `include_leader`, which no longer requires non-empty content), but
+        # this exercises the populated case explicitly.
+        from yas.info.skills import LoadedSkills
+        view.__dict__['skills'] = LoadedSkills(names=['demo:skill'])
+    return view
 
 
-def test_cost_label_centered_in_its_cell():
-    lines = _render_view(_short_labels_view())
+@pytest.mark.parametrize('with_trailing', [True, False])
+def test_cost_label_centered_in_its_cell(with_trailing: bool):
+    # The cost cell always has a right-hand vsep to centre against -- the
+    # trailing "skills + plugins" divider is present whether or not any
+    # skills/plugins are loaded (bug: it used to vanish along with the
+    # section when the list was empty).
+    lines = _render_view(_short_labels_view(with_trailing=with_trailing))
     sep, cont = _tok_sep_and_content(lines)
     # border + 2 interior vseps normally, but at this width (200) the lines
     # read/changed segment is also included (box_width >= LINES_SEGMENT_MIN_WIDTH),
@@ -186,8 +201,42 @@ def test_cost_label_centered_in_its_cell():
     assert abs(_label_center(sep, 'cost') - cell_center) <= 1
 
 
+def test_skills_plugins_label_present_even_when_empty():
+    # The "skills + plugins" section header is shown even with no
+    # skills/plugins loaded -- it must not disappear along with its content.
+    lines = _render_view(_short_labels_view(with_trailing=False))
+    sep, _cont = _tok_sep_and_content(lines)
+    assert superscript('skills + plugins') in sep
+
+
+def test_lines_and_cost_labels_present_with_icons_off():
+    # Regression: with show_icons=False, tokens_cost's rendered row never
+    # carries the read-lines glyph layout.py used to sniff for -- it used to
+    # silently drop the 'loc r/w' caption and mis-anchor 'cost sess/day' onto
+    # the elbow between the loc and cost cells (dropped as well) whenever the
+    # lines segment was actually present. Both labels must still render.
+    view = SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
+                       Config(labels=True, show_day_stats=False, show_icons=False))
+    sep, _cont = _tok_sep_and_content(_render_view(view))
+    assert superscript('loc r/w') in sep or superscript('loc read/write') in sep
+    assert superscript('cost') in sep
+
+
+def test_lines_label_centered_in_its_cell():
+    # 'loc read/write' almost always renders abbreviated ('loc r/w') in this
+    # cell -- centring must be computed against the abbreviation's length,
+    # not the long form's, or the placed text lands left of true centre
+    # (regression: the anchor used `len(LINES_LABEL)` while `_overlay_labels`
+    # placed the shorter abbreviated form).
+    lines = _render_view(_short_labels_view(with_trailing=True))
+    sep, cont = _tok_sep_and_content(lines)
+    bars = [i for i, ch in enumerate(cont) if ch == '│']
+    cell_center = (bars[1] + bars[2]) / 2                    # loc r/w cell
+    assert abs(_label_center(sep, 'loc r/w') - cell_center) <= 1
+
+
 def test_cache_label_centered_over_parenthetical():
-    lines = _render_view(_short_labels_view())
+    lines = _render_view(_short_labels_view(with_trailing=True))
     sep, cont = _tok_sep_and_content(lines)
     open_i, close_i = cont.index('('), cont.index(')')
     assert abs(_label_center(sep, 'cache') - (open_i + close_i) / 2) <= 1
