@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 import yas.renderer as renderer
-from yas.constants import GLYPH_LINES_CHANGED, GLYPH_LINES_READ, ICON_COST, ICON_TOK_RATE
+from yas.constants import GLYPH_LINES_CHANGED, GLYPH_LINES_READ, ICON_COST
 from yas.render.text import _visible_width
 from helper import strip_ansi
 
@@ -19,7 +19,7 @@ def _call(show_day_stats: bool = True, justify: bool = False, **over: Any) -> An
         sess_in=1, sess_cache=0, sess_out=2,
         day_in=3, day_cache=0, day_out=4,
         sess_cost=0.01, day_cost=0.02,
-        tok_rate=0, session_id='', box_width=BOX_WIDTH,
+        trailing_content='', session_id='', box_width=BOX_WIDTH,
         show_day_stats=show_day_stats, justify=justify,
     )
     kw.update(over)
@@ -29,37 +29,47 @@ def _call(show_day_stats: bool = True, justify: bool = False, **over: Any) -> An
 # Shape: exactly one content line
 
 def test_tokens_cost_returns_one_line() -> None:
-    lines, _cols, mark_col, _min = _call()
+    lines, _cols, mark_col, _min, _has_lines = _call()
     assert len(lines) == 1
     assert mark_col == 0  # tick marker removed (D4)
 
 
 def test_tokens_cost_returns_one_line_session_only() -> None:
-    lines, _cols, _mark, _min = _call(show_day_stats=False)
+    lines, _cols, _mark, _min, _has_lines = _call(show_day_stats=False)
     assert len(lines) == 1
 
 
-# Divider columns line up with the rendered │ positions
+# Shape: the "skills + plugins" trailing column always gets a divider once the
+# box has room -- even with no trailing content, unlike the shed-when-too-
+# narrow case below. Default box (160) is wide enough for tokens|cost plus
+# the (empty) trailing column: a 2-tuple.
+
+def test_tokens_cost_empty_trailing_content_still_gets_divider() -> None:
+    _lines, cols, _mark, _min, _has_lines = _call()
+    assert len(cols) == 2
+
 
 def test_tokens_cost_cols_within_box() -> None:
-    _lines, (col1, col2), _mark, _min = _call()
-    assert 1 <= col1 < col2 <= BOX_WIDTH - 3
+    _lines, cols, _mark, _min, _has_lines = _call()
+    for col in cols:
+        assert 1 <= col <= BOX_WIDTH - 3
 
 
 def test_tokens_cost_divider_cols_match_rendered_bars() -> None:
-    # col1/col2 are 1-indexed columns assuming content starts at column 3
+    # cols are 1-indexed columns assuming content starts at column 3
     # (after the "│ " border lead); string index = col - 3.
-    lines, (col1, col2), _mark, _min = _call()
+    lines, cols, _mark, _min, _has_lines = _call()
     stripped = strip_ansi(lines[0])
-    assert stripped[col1 - 3] == '│'
-    assert stripped[col2 - 3] == '│'
+    for col in cols:
+        assert stripped[col - 3] == '│'
 
 
 def test_tokens_cost_divider_cols_match_rendered_bars_with_lines_segment() -> None:
-    # Sibling of the 2-tuple case above: with the lines segment included (box
-    # wide enough to clear LINES_SEGMENT_MIN_WIDTH), vsep_cols is a 3-tuple and
-    # every reported column must still land on its rendered │.
-    lines, cols, _mark, _min = _call(box_width=110, lines=(1234, 567))
+    # Sibling of the 2-tuple case above: with the lines segment ALSO included
+    # (box wide enough to clear LINES_SEGMENT_MIN_WIDTH), vsep_cols grows to a
+    # 3-tuple (tokens|lines, lines|cost, cost|leader) and every reported
+    # column must still land on its rendered │.
+    lines, cols, _mark, _min, _has_lines = _call(box_width=110, lines=(1234, 567))
     assert len(cols) == 3
     stripped = strip_ansi(lines[0])
     for col in cols:
@@ -68,50 +78,50 @@ def test_tokens_cost_divider_cols_match_rendered_bars_with_lines_segment() -> No
 
 def test_tokens_cost_dividers_track_content() -> None:
     # Columns hug their measured content, so larger token/cost magnitudes push
-    # both dividers further right than tiny content — they are not pinned to a
-    # fixed budget. The reported cols must still match the rendered │ exactly.
-    l1, (s_col1, s_col2), _m1, _s1 = _call(
+    # the first (tokens|cost) divider further right than tiny content — it is
+    # not pinned to a fixed budget. The reported col must still match the
+    # rendered │ exactly.
+    l1, s_cols, _m1, _s1, _h1 = _call(
         sess_in=1, sess_cache=0, sess_out=2,
         day_in=3, day_cache=0, day_out=4, sess_cost=0.01, day_cost=0.02,
     )
-    l2, (b_col1, b_col2), _m2, _s2 = _call(
+    l2, b_cols, _m2, _s2, _h2 = _call(
         sess_in=128_400, sess_cache=1_245_000, sess_out=47_300,
         day_in=1_904_000, day_cache=18_300_000, day_out=612_500,
         sess_cost=3.27, day_cost=41.88,
     )
-    assert b_col1 > s_col1
-    assert b_col2 > s_col2
-    for line, col1, col2 in ((l1[0], s_col1, s_col2), (l2[0], b_col1, b_col2)):
+    assert b_cols[0] > s_cols[0]
+    for line, cols in ((l1[0], s_cols), (l2[0], b_cols)):
         stripped = strip_ansi(line)
-        assert stripped[col1 - 3] == '│'
-        assert stripped[col2 - 3] == '│'
+        for col in cols:
+            assert stripped[col - 3] == '│'
 
 
 def test_tokens_cost_divider_grows_honestly_past_budget() -> None:
     # Once content exceeds the realistic-widest budget, the cell grows to hold it
     # so the divider never overflows — the │ shifts right rather than detaching.
     # The reported col must still match the rendered │ exactly.
-    lines, (col1, col2), _m, _s = _call(
+    lines, cols, _m, _s, _h = _call(
         sess_in=128_400, sess_cache=1_245_000, sess_out=47_300,
         day_in=1_904_000, day_cache=18_300_000, day_out=612_500,
         sess_cost=327.0, day_cost=4188.88,  # cost '$ $327.00 / $4,188.88' = 21 cols > 20 budget
     )
     stripped = strip_ansi(lines[0])
-    assert stripped[col1 - 3] == '│'
-    assert stripped[col2 - 3] == '│'
+    for col in cols:
+        assert stripped[col - 3] == '│'
 
 
 def test_tokens_cost_dividers_differ_across_day_stats_toggle() -> None:
     # Columns hug content, so the merged session/day content (on) is wider than
-    # the session-only content (off); the dividers now differ between the two.
-    # Each render still keeps its │ at its reported cols.
-    l_on,  (on_col1, on_col2),  _m1, _s1 = _call(show_day_stats=True)
-    l_off, (off_col1, off_col2), _m2, _s2 = _call(show_day_stats=False)
-    assert (on_col1, on_col2) != (off_col1, off_col2)
-    for line, col1, col2 in ((l_on[0], on_col1, on_col2), (l_off[0], off_col1, off_col2)):
+    # the session-only content (off); the first divider now differs between the
+    # two. Each render still keeps its │ at its reported cols.
+    l_on,  on_cols,  _m1, _s1, _h1 = _call(show_day_stats=True)
+    l_off, off_cols, _m2, _s2, _h2 = _call(show_day_stats=False)
+    assert on_cols[0] != off_cols[0]
+    for line, cols in ((l_on[0], on_cols), (l_off[0], off_cols)):
         stripped = strip_ansi(line)
-        assert stripped[col1 - 3] == '│'
-        assert stripped[col2 - 3] == '│'
+        for col in cols:
+            assert stripped[col - 3] == '│'
 
 
 def test_tokens_cost_columns_hug_content() -> None:
@@ -119,7 +129,7 @@ def test_tokens_cost_columns_hug_content() -> None:
     # 2-space lead — there is no extra pad past the content. Verify the rendered │
     # matches the reported col, the two chars before it are the vsep lead spaces,
     # and the char before THAT is a non-space content char.
-    lines, (col1, _col2), _mark, _min = _call(
+    lines, (col1, *_rest), _mark, _min, _has_lines = _call(
         sess_in=128_400, sess_cache=1_245_000, sess_out=47_300,
         day_in=1_904_000, day_cache=18_300_000, day_out=612_500,
         sess_cost=3.27, day_cost=41.88,
@@ -133,17 +143,48 @@ def test_tokens_cost_columns_hug_content() -> None:
     assert stripped[col1 - 6] != ' '
 
 
-def test_tokens_cost_rate_icon_after_second_divider() -> None:
-    lines, (_col1, col2), _mark, _min = _call()
+# Trailing content column (e.g. "skills + plugins")
+
+def test_tokens_cost_trailing_content_appears_after_divider() -> None:
+    lines, cols, _mark, _min, _has_lines = _call(trailing_content='hello')
     stripped = strip_ansi(lines[0])
-    # The rate-and-sparkline column begins just past the vsep_leader │.
-    assert ICON_TOK_RATE in stripped[col2 - 3:]
+    assert len(cols) == 2
+    assert 'hello' in stripped[cols[-1] - 3:]
+
+
+def test_tokens_cost_trailing_column_present_and_blank_when_content_empty() -> None:
+    # The "skills + plugins" section is shown (divider + blank padding) even
+    # with nothing to display -- its border must not depend on content.
+    with_empty = _call(trailing_content='')
+    lines, cols, _mark, _min, _has_lines = with_empty
+    assert len(cols) == 2
+    stripped = strip_ansi(lines[0])
+    assert stripped[cols[-1] - 2:].strip() == ''
+
+
+def test_tokens_cost_trailing_content_dropped_when_too_narrow() -> None:
+    # A long trailing string can't fit at a tight box; the segment (and its
+    # divider) is shed and the row falls back to the tokens|cost shape.
+    lines, cols, _mark, _min, _has_lines = _call(box_width=90, trailing_content='x' * 200)
+    assert len(cols) == 1
+    assert 'x' * 200 not in strip_ansi(lines[0])
+
+
+def test_tokens_cost_trailing_content_padded_to_column_width() -> None:
+    # A short trailing string is left-justified and padded with spaces out to
+    # the leader column's width, not truncated or centred.
+    lines, cols, _mark, _min, _has_lines = _call(trailing_content='hi')
+    stripped = strip_ansi(lines[0])
+    # vsep_block(leader=True) renders the divider then a single trailing
+    # space; the leader text begins two columns past the │.
+    leader_region = stripped[cols[-1] - 3 + 2:]
+    assert leader_region.startswith('hi')
 
 
 # Merged session/day content (day stats on)
 
 def test_tokens_cost_merged_session_day_content() -> None:
-    lines, _cols, _mark, _min = _call(
+    lines, _cols, _mark, _min, _has_lines = _call(
         sess_in=128_400, sess_cache=1_245_000, sess_out=47_300,
         day_in=1_904_000, day_cache=18_300_000, day_out=612_500,
         sess_cost=3.27, day_cost=41.88,
@@ -156,7 +197,7 @@ def test_tokens_cost_merged_session_day_content() -> None:
 # Session-only content (day stats off)
 
 def test_tokens_cost_session_only_content() -> None:
-    lines, _cols, _mark, _min = _call(
+    lines, _cols, _mark, _min, _has_lines = _call(
         show_day_stats=False,
         sess_in=128_400, sess_cache=1_245_000, sess_out=47_300,
         day_in=1_904_000, day_cache=18_300_000, day_out=612_500,
@@ -170,46 +211,42 @@ def test_tokens_cost_session_only_content() -> None:
     assert '18.3M' not in s
     assert '612.5K' not in s
     assert '41.88' not in s
-    assert '/' not in s.split('t/m')[0]  # no slash-merge before the rate label
 
 
 # Narrow-box regime (the 80-84 overflow / detached-divider bug). The wide layout
-# owns box >= 80, but the three-segment row only genuinely fits around box 85.
-# At every box width the rendered row must (i) not overflow the box and (ii) keep
-# its two │ aligned with the reported divider cols.
+# owns box >= 80, but the row's own content grows the floor with realistic
+# magnitudes. At every box width the rendered row must (i) not overflow the box
+# and (ii) keep its │ aligned with the reported divider col.
 
 # Realistic widest 6-7 digit magnitudes (the bug-report content).
 _NARROW = dict(
     sess_in=155_800, sess_cache=1_600_000, sess_out=18_000,
     day_in=8_400_000, day_cache=216_600_000, day_out=1_500_000,
-    sess_cost=6.15, day_cost=560.31, tok_rate=74_600,
+    sess_cost=6.15, day_cost=560.31,
 )
 
 
-@pytest.mark.parametrize('box', [85, 86])
-def test_tokens_cost_no_overflow_at_or_above_fit_floor(box: int) -> None:
+def test_tokens_cost_no_overflow_at_or_above_fit_floor() -> None:
     # At/above its reported min_width the row fits the box exactly. (Below the
     # floor the row physically cannot shrink to its content minimum — that is why
     # build_wide drops it for the compact context line; see test_layout_seam.)
-    lines, _cols, _mark, min_w = _call(box_width=box, **_NARROW)
-    assert box >= min_w, (box, min_w)  # 85/86 are at/above the floor for this content
-    # Content occupies box - 3 cols (2-col '│ ' lead + 1-col trailing '│').
-    assert _visible_width(lines[0]) <= box - 3
+    floor = _call(box_width=BOX_WIDTH, **_NARROW)[3]
+    for box in (floor, floor + 1, floor + 5):
+        lines, _cols, _mark, min_w, _has_lines = _call(box_width=box, **_NARROW)
+        assert box >= min_w, (box, min_w)
+        # Content occupies box - 3 cols (2-col '│ ' lead + 1-col trailing '│').
+        assert _visible_width(lines[0]) <= box - 3
 
 
-@pytest.mark.parametrize('box', [80, 82, 84, 85])
+@pytest.mark.parametrize('box', [78, 80, 85, 90])
 def test_tokens_cost_dividers_match_rendered_at_narrow_boxes(box: int) -> None:
-    # The assertion that previously only held at box 160: every reported divider
-    # column lands on the rendered │ — no detachment from the ┬/┴ elbows.
-    # box=80 is now narrow enough that the shed ladder drops the
-    # tokens-over-time (rate/sparkline) segment entirely -- one divider
-    # survives (tokens|cost) instead of two (tokens|cost|leader).
-    lines, cols, _mark, _min = _call(box_width=box, **_NARROW)
+    # Every reported divider column lands on the rendered │ — no detachment
+    # from the ┬/┴ elbows. The (empty) trailing "skills + plugins" divider
+    # still fits at these widths, so the shape is a 2-tuple (tokens|cost,
+    # cost|leader).
+    lines, cols, _mark, _min, _has_lines = _call(box_width=box, **_NARROW)
     stripped = strip_ansi(lines[0])
-    if box == 80:
-        assert len(cols) == 1
-    else:
-        assert len(cols) == 2
+    assert len(cols) == 2
     for col in cols:
         assert stripped[col - 3] == '│'
 
@@ -217,9 +254,10 @@ def test_tokens_cost_dividers_match_rendered_at_narrow_boxes(box: int) -> None:
 @pytest.mark.parametrize('box', [103, 110, 130, 160])
 def test_tokens_cost_dividers_match_rendered_at_wide_boxes_with_lines(box: int) -> None:
     # Sibling of the narrow-box divider check above, for the 3-tuple shape:
-    # every reported divider column (2 or 3, box-dependent) lands on the
-    # rendered │ once the lines segment is in play.
-    lines, cols, _mark, _min = _call(box_width=box, lines=(1234, 567), **_NARROW)
+    # every reported divider column lands on the rendered │ once both the
+    # lines segment and the trailing "skills + plugins" divider are in play.
+    lines, cols, _mark, _min, _has_lines = _call(box_width=box, lines=(1234, 567), **_NARROW)
+    assert len(cols) == 3
     stripped = strip_ansi(lines[0])
     for col in cols:
         assert stripped[col - 3] == '│'
@@ -239,8 +277,9 @@ def test_tokens_cost_lines_segment_shed_below_103_is_byte_identical() -> None:
 
 def test_tokens_cost_lines_segment_present_at_or_above_103() -> None:
     # At a box wide enough to clear LINES_SEGMENT_MIN_WIDTH, the segment
-    # renders: vsep_cols grows to a 3-tuple and the glyphs/values appear.
-    lines, cols, _mark, _min = _call(box_width=110, lines=(1234, 567))
+    # renders: vsep_cols grows to a 3-tuple (tokens|lines, lines|cost,
+    # cost|leader) and the glyphs/values appear.
+    lines, cols, _mark, _min, _has_lines = _call(box_width=110, lines=(1234, 567))
     assert len(cols) == 3
     s = strip_ansi(lines[0])
     assert GLYPH_LINES_READ in s
@@ -259,88 +298,40 @@ def test_tokens_cost_min_width_unchanged_when_lines_shed() -> None:
         assert min_with == min_without
 
 
-def test_tokens_cost_sparkline_omitted_below_10_chars() -> None:
-    # The sparkline is dropped when fewer than 10 chars remain for the graph
-    # (bar_w < 10); the bare rate label survives. At a small box the leader
-    # collapses to its label_w+1 floor (16) and with a tiny rate label bar_w is
-    # 9, so the leader region after the 2nd divider is exactly the rate label
-    # width. At a wide box bar_w >= 10, so the leader region is wider (graph
-    # space present). Width-based so it doesn't depend on the on-disk rate log.
-    r = Renderer()
-    from yas.constants import ICON_TOK_RATE as _ICON
-    from yas.render.text import fmt_tok
-    rate_label_w = _visible_width(
-        f'{r.TOK_ICON}{_ICON}  {r.TOK}{fmt_tok(0)}{r.R}{r.LABEL} t/m{r.R}'
-    )
-
-    def leader_region_w(box: int) -> int:
-        lines, (_c1, col2), _m, _s = _call(box_width=box)
-        s = strip_ansi(lines[0])
-        # vsep_block(leader=True) renders the divider then a single trailing
-        # space; the leader text begins two columns past the │.
-        return _visible_width(s[col2 - 3 + 2:])
-
-    # Small box: bar_w < 10, sparkline omitted -> leader is just the bare label.
-    assert leader_region_w(60) == rate_label_w
-    # Wide box: bar_w >= 10, graph space present -> leader region is wider.
-    assert leader_region_w(BOX_WIDTH) > rate_label_w
-    # The rate label / icon stays present in both regimes.
-    assert ICON_TOK_RATE in strip_ansi(_call(box_width=60)[0][0])
+def test_tokens_cost_min_width_unaffected_by_trailing_content() -> None:
+    # The trailing content column never affects the returned min_width — it is
+    # derived from the protected tokens-sess/day survivor alone.
+    for box in (60, 95, 160):
+        min_without = _call(box_width=box)[3]
+        min_with = _call(box_width=box, trailing_content='skills + plugins')[3]
+        assert min_with == min_without
 
 
-def test_tokens_cost_sparkline_omitted_below_10_chars_with_lines_segment() -> None:
-    # The sparkline-degrade behaviour above holds unchanged when the lines
-    # segment is present: bar_w < 10 still collapses the leader to the bare
-    # rate label, and the 3rd divider (lines segment) is still reported and
-    # matches its rendered │.
-    r = Renderer()
-    rate_label_w = _visible_width(
-        f'{r.TOK_ICON}{ICON_TOK_RATE}  {r.TOK}{"74.6K"}{r.R}{r.LABEL} t/m{r.R}'
-    )
-
-    def leader_region_w(box: int) -> int:
-        lines, cols, _m, _s = _call(box_width=box, lines=(1234, 567), **_NARROW)
-        col2 = cols[-1]
-        s = strip_ansi(lines[0])
-        return _visible_width(s[col2 - 3 + 2:])
-
-    # Narrow-but-lines-included box: bar_w < 10 -> bare label, same width as
-    # a rate label built from tok_rate=74_600 (matches _NARROW's tok_rate).
-    lines_narrow, cols_narrow, _m, _s = _call(box_width=103, lines=(1234, 567), **_NARROW)
-    assert len(cols_narrow) == 3
-    assert leader_region_w(103) == rate_label_w
-    stripped_narrow = strip_ansi(lines_narrow[0])
-    for col in cols_narrow:
-        assert stripped_narrow[col - 3] == '│'
-    # Wide box: bar_w >= 10, graph space present -> leader region is wider.
-    assert leader_region_w(160) > rate_label_w
-
-
-# Justify breathing room (day stats on). Slack that would all feed the sparkline
-# is first spent as padding *inside* the sections, each capped at 4 spaces.
+# Justify breathing room (day stats on). Slack that would otherwise flow
+# past the content is first spent as padding *inside* the sections.
 
 # Content with realistic magnitudes so the gaps/pads are visible in the strip.
 _JUSTIFY = dict(
     sess_in=17_900, sess_cache=34_600, sess_out=258,
     day_in=872_000, day_cache=33_000_000, day_out=306_100,
-    sess_cost=0.39, day_cost=85.48, tok_rate=18_100,
+    sess_cost=0.39, day_cost=85.48,
 )
 
 
 def test_tokens_cost_justify_off_unchanged() -> None:
     # justify defaults to off; passing justify=False explicitly must be
     # byte-for-byte identical to the default call.
-    a_lines, a_cols, a_mark, a_min = _call(**_JUSTIFY)
-    b_lines, b_cols, b_mark, b_min = _call(justify=False, **_JUSTIFY)
-    assert (a_lines, a_cols, a_mark, a_min) == (b_lines, b_cols, b_mark, b_min)
+    a_lines, a_cols, a_mark, a_min, a_h = _call(**_JUSTIFY)
+    b_lines, b_cols, b_mark, b_min, b_h = _call(justify=False, **_JUSTIFY)
+    assert (a_lines, a_cols, a_mark, a_min, a_h) == (b_lines, b_cols, b_mark, b_min, b_h)
 
 
 def test_tokens_cost_justify_widens_gaps_and_pads_to_cap() -> None:
     # At a wide box with plenty of slack, justify fills every slot to the 4-space
-    # cap: the two tokens inter-group gaps become 4, and the cost LHS/RHS and the
-    # t/m leader LHS each get 4 spaces.
-    on,  _c_on,  _m_on,  _s_on  = _call(box_width=160, justify=True,  **_JUSTIFY)
-    off, _c_off, _m_off, _s_off = _call(box_width=160, justify=False, **_JUSTIFY)
+    # cap: the two tokens inter-group gaps become 4, and the cost LHS/RHS each
+    # get 4 spaces.
+    on,  _c_on,  _m_on,  _s_on, _h_on  = _call(box_width=160, justify=True,  **_JUSTIFY)
+    off, _c_off, _m_off, _s_off, _h_off = _call(box_width=160, justify=False, **_JUSTIFY)
     s_on  = strip_ansi(on[0])
     s_off = strip_ansi(off[0])
 
@@ -354,26 +345,23 @@ def test_tokens_cost_justify_widens_gaps_and_pads_to_cap() -> None:
     i = s_on.index(ICON_COST)             # ICON_COST starts the cost cell
     assert s_on[i - 6:i] == '│' + ' ' * 5  # divider + 1 vsep trail + 4-space LHS cap
     assert '$85.48    ' in s_on           # 4-space RHS cap trails the day cost
-    # t/m leader gains 4 spaces of LHS padding (again behind the 1 vsep-trail space).
-    j = s_on.index(ICON_TOK_RATE)         # ICON_TOK_RATE leads the rate label
-    assert s_on[j - 6:j] == '│' + ' ' * 5  # divider + 1 vsep trail + 4-space leader cap
 
 
 def test_tokens_cost_justify_dividers_match_rendered_bars() -> None:
-    # The padding shifts col1/col2; both must still land exactly on the rendered
-    # │ so the ┬/┴ elbows above/below stay attached.
-    lines, (col1, col2), _mark, _min = _call(box_width=160, justify=True, **_JUSTIFY)
+    # The padding shifts the dividers; each must still land exactly on the
+    # rendered │ so the ┬/┴ elbows above/below stay attached.
+    lines, cols, _mark, _min, _has_lines = _call(box_width=160, justify=True, **_JUSTIFY)
     stripped = strip_ansi(lines[0])
-    assert stripped[col1 - 3] == '│'
-    assert stripped[col2 - 3] == '│'
+    for col in cols:
+        assert stripped[col - 3] == '│'
 
 
 def test_tokens_cost_justify_min_width_unchanged() -> None:
     # The optional padding must not inflate min_width: the reported floor is
     # identical with justify on and off, and at that floor the row fits exactly.
     for box in range(78, 92):
-        _l_on,  _c_on,  _m_on,  min_on  = _call(box_width=box, justify=True,  **_NARROW)
-        _l_off, _c_off, _m_off, min_off = _call(box_width=box, justify=False, **_NARROW)
+        _l_on,  _c_on,  _m_on,  min_on, _h_on  = _call(box_width=box, justify=True,  **_NARROW)
+        _l_off, _c_off, _m_off, min_off, _h_off = _call(box_width=box, justify=False, **_NARROW)
         assert min_on == min_off
     # At the tight floor the gaps collapse to 1 (no slack), so the justify-on row
     # equals the justify-off row byte-for-byte.
@@ -395,7 +383,7 @@ def test_tokens_cost_min_width_is_consistent_with_fit() -> None:
     # The reported min_width must be the exact smallest box at which the row fits
     # without overflow, so the builder's guard never under- or over-shows the row.
     for box in range(78, 92):
-        lines, _cols, _mark, min_w = _call(box_width=box, **_NARROW)
+        lines, _cols, _mark, min_w, _has_lines = _call(box_width=box, **_NARROW)
         fits = _visible_width(lines[0]) <= box - 3
         assert fits == (box >= min_w), (box, min_w, _visible_width(lines[0]))
 
@@ -410,40 +398,71 @@ def test_tokens_cost_show_icons_defaults_true() -> None:
 
 
 def test_tokens_cost_show_icons_false_drops_glyphs() -> None:
-    lines, _cols, _mark, _min = _call(show_icons=False, lines=(1234, 567), box_width=140)
+    lines, _cols, _mark, _min, _has_lines = _call(show_icons=False, lines=(1234, 567), box_width=140)
     text = lines[0]
-    for glyph in (ICON_COST, ICON_TOK_RATE, GLYPH_LINES_READ, GLYPH_LINES_CHANGED):
+    for glyph in (ICON_COST, GLYPH_LINES_READ, GLYPH_LINES_CHANGED):
         assert glyph not in text
 
 
 def test_tokens_cost_show_icons_true_keeps_glyphs() -> None:
-    lines, _cols, _mark, _min = _call(show_icons=True, lines=(1234, 567), box_width=140)
+    lines, _cols, _mark, _min, _has_lines = _call(show_icons=True, lines=(1234, 567), box_width=140)
     text = lines[0]
-    for glyph in (ICON_COST, ICON_TOK_RATE, GLYPH_LINES_READ, GLYPH_LINES_CHANGED):
+    for glyph in (ICON_COST, GLYPH_LINES_READ, GLYPH_LINES_CHANGED):
         assert glyph in text
 
 
+def test_tokens_cost_has_lines_flag_true_when_segment_survives() -> None:
+    # Regression: `has_lines` must reflect the segment's actual inclusion in
+    # the returned line, not whether its (show_icons-gated) read glyph
+    # happens to be present -- the caller (layout.py) anchors the 'loc r/w'
+    # and 'cost sess/day' labels off this flag, not off glyph-sniffing.
+    _lines, _cols, _mark, _min, has_lines = _call(box_width=110, lines=(1234, 567))
+    assert has_lines is True
+
+
+def test_tokens_cost_has_lines_flag_true_with_icons_off() -> None:
+    # The bug this guards: with show_icons=False the read-lines glyph never
+    # appears in the rendered row even though the segment itself is present
+    # -- `has_lines` must still report True (it comes from the shed-ladder
+    # decision, not the rendered glyph).
+    lines, _cols, _mark, _min, has_lines = _call(show_icons=False, lines=(1234, 567), box_width=140)
+    assert has_lines is True
+    assert GLYPH_LINES_READ not in lines[0]  # glyph absent, segment still present
+
+
+def test_tokens_cost_has_lines_flag_false_when_shed() -> None:
+    # Below LINES_SEGMENT_MIN_WIDTH the segment is shed even though `lines=`
+    # was passed -- `has_lines` must report False so the caller doesn't try
+    # to anchor a label onto a segment that isn't there.
+    _lines, _cols, _mark, _min, has_lines = _call(box_width=95, lines=(1234, 567))
+    assert has_lines is False
+
+
+def test_tokens_cost_has_lines_flag_false_without_lines_arg() -> None:
+    _lines, _cols, _mark, _min, has_lines = _call()
+    assert has_lines is False
+
+
 def test_tokens_cost_show_icons_false_keeps_numbers_and_dividers() -> None:
-    lines, (col1, col2), _mark, _min = _call(show_icons=False, box_width=BOX_WIDTH)
+    lines, cols, _mark, _min, _has_lines = _call(show_icons=False, box_width=BOX_WIDTH)
     stripped = strip_ansi(lines[0])
-    assert stripped[col1 - 3] == '│'
-    assert stripped[col2 - 3] == '│'
+    for col in cols:
+        assert stripped[col - 3] == '│'
     assert '0.01' in stripped and '0.02' in stripped
 
 
 def test_tokens_cost_show_icons_false_narrower_min_width() -> None:
     # Fewer glyphs means less content, so the row's own min_width floor with
     # icons off must not exceed the icons-on floor.
-    _l_on,  _c_on,  _m_on,  min_on  = _call(show_icons=True,  **_NARROW)
-    _l_off, _c_off, _m_off, min_off = _call(show_icons=False, **_NARROW)
+    _l_on,  _c_on,  _m_on,  min_on,  _h_on  = _call(show_icons=True,  **_NARROW)
+    _l_off, _c_off, _m_off, min_off, _h_off = _call(show_icons=False, **_NARROW)
     assert min_off <= min_on
 
 
 def test_tokens_cost_show_icons_false_session_only_drops_cost_icon() -> None:
-    lines, _cols, _mark, _min = _call(show_icons=False, show_day_stats=False)
+    lines, _cols, _mark, _min, _has_lines = _call(show_icons=False, show_day_stats=False)
     text = lines[0]
     assert ICON_COST not in text
-    assert ICON_TOK_RATE not in text
 
 
 # show_icons=False, show_day_stats=True: with no icon to reserve the row's
@@ -456,7 +475,7 @@ def test_tokens_cost_show_icons_false_session_only_drops_cost_icon() -> None:
 # after it or land the number flush against the row's own left border.
 
 def test_tokens_cost_show_icons_false_leading_number_right_justified() -> None:
-    lines, _cols, _mark, _min = _call(show_icons=False, sess_in=1)
+    lines, _cols, _mark, _min, _has_lines = _call(show_icons=False, sess_in=1)
     stripped = strip_ansi(lines[0])
     # Row content starts right after the single border-gap space border_line
     # always inserts; IN_W is the reserved field width for the leading number.

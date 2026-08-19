@@ -67,6 +67,7 @@ def test_default_when_nothing_set(tmp_path: Path) -> None:
     assert cfg.show_day_stats is True
     assert cfg.show_render_time is False
     assert cfg.show_tool_uses is False
+    assert cfg.show_tokens_over_time is False
     assert cfg.justify is False
     assert cfg.labels is False
     assert cfg.openspec_scan_depth == 1
@@ -293,6 +294,47 @@ def test_env_show_tool_uses_overrides_toml_false(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = false\n')
     cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': '1'}, config_dir=tmp_path)
     assert cfg.show_tool_uses is True
+
+
+# show_tokens_over_time (standalone rate/sparkline row, wide layout; off by default)
+
+@requires_tomllib
+def test_toml_show_tokens_over_time_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tokens_over_time = true\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_tokens_over_time is True
+
+
+def test_default_show_tokens_over_time_is_false(tmp_path: Path) -> None:
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_tokens_over_time is False
+
+
+@requires_tomllib
+def test_toml_show_tokens_over_time_must_be_real_bool(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tokens_over_time = "yes"\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.show_tokens_over_time is False  # rejected to default
+    assert 'show_tokens_over_time' in cfg.errors
+
+
+def test_env_show_tokens_over_time_falsy_values(tmp_path: Path) -> None:
+    for val in ('0', 'false', 'FALSE'):
+        cfg = config.Config.load(env={'YAS_SHOW_TOKENS_OVER_TIME': val}, config_dir=tmp_path)
+        assert cfg.show_tokens_over_time is False, f'expected False for YAS_SHOW_TOKENS_OVER_TIME={val!r}'
+
+
+def test_env_show_tokens_over_time_truthy_values(tmp_path: Path) -> None:
+    for val in ('1', 'true', 'TRUE'):
+        cfg = config.Config.load(env={'YAS_SHOW_TOKENS_OVER_TIME': val}, config_dir=tmp_path)
+        assert cfg.show_tokens_over_time is True, f'expected True for YAS_SHOW_TOKENS_OVER_TIME={val!r}'
+
+
+@requires_tomllib
+def test_env_show_tokens_over_time_overrides_toml_true(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nshow_tokens_over_time = true\n')
+    cfg = config.Config.load(env={'YAS_SHOW_TOKENS_OVER_TIME': '0'}, config_dir=tmp_path)
+    assert cfg.show_tokens_over_time is False
 
 
 # show_day_stats (seventh knob)

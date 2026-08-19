@@ -75,10 +75,14 @@ def _kinds(spec: layout.LayoutSpec) -> list[str]:
 
 
 def _tokens_row_indices(spec: layout.LayoutSpec) -> list[int]:
-    """Content rows that carry the tokens/cost/rate line (the rate label 't/m')."""
+    """Content rows that carry the tokens/cost line.
+
+    The rate label ('t/m') used to live inline in this row but now renders
+    in its own standalone `tokens_over_time` row (off by default) -- '$' (the
+    cost figure) is the stable marker for this row instead."""
     from helper import strip_ansi
     return [i for i, row in enumerate(spec.rows)
-            if row.kind == 'content' and 't/m' in strip_ansi(row.content)]
+            if row.kind == 'content' and '$' in strip_ansi(row.content)]
 
 
 def test_tokens_row_is_single_content_line(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,8 +103,10 @@ def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPat
     separator above and ┴ on the separator below at the same visual column.
 
     At width=160 (>= LINES_SEGMENT_MIN_WIDTH=103) the lines read/changed
-    segment (design.md Decision 8) is included, so there are 3 interior │
-    (lines | cost | rate) instead of the pre-Decision-8 2."""
+    segment (design.md Decision 8) is included, and the trailing "skills +
+    plugins" divider is always present once the box has room (even with no
+    skills/plugins loaded) -- so there are 3 interior │ (tokens | lines |
+    cost | skills+plugins)."""
     from helper import strip_ansi
     _silence_dynamic(monkeypatch)
     # A dynamic section below ensures the row below tokens is a (seam) separator,
@@ -261,18 +267,28 @@ def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_only_first_dynamic_separator_is_seam(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Two dynamic sections (skills + subagents): first separator is the seam,
-    # the separator between them stays a normal dotted-dim separator.
+    # Two dynamic sections (subagents + a workflow run): first separator is
+    # the seam, the separator between them stays a normal dotted-dim
+    # separator. (Skills/plugins no longer produce a standalone section --
+    # they merge into the tokens/cost row's trailing column instead.)
+    from yas.info.subagents import RunningSubagent as _WFAgent
+    from yas.info.workflows import RunningWorkflow, RunningWorkflows
     _silence_dynamic(monkeypatch)
-    monkeypatch.setattr(skills_mod.LoadedSkills, 'from_transcript',
-                        classmethod(lambda cls, path: skills_mod.LoadedSkills(names=['x:demo'])))
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
-    spec = layout.build_wide(_view(), _tick(), 140, _r)
+    view = _view()
+    now = time.time()
+    wf_agent = _WFAgent(
+        agent_type='wf-agent', description='', billed_in=0, output=0,
+        first_timestamp=now, total_input=0, end_ts=0.0, mtime=now, agent_id='wa1',
+    )
+    run = RunningWorkflow(run_id='wf_x', name='wf_x', phase='', agents=[wf_agent])
+    view.__dict__['workflows'] = RunningWorkflows(workflows=[run])
+    spec = layout.build_wide(view, _tick(), 140, _r)
     kinds = _kinds(spec)
     assert kinds.count('separator_seam') == 1
     seam_idx = kinds.index('separator_seam')
-    # A later separator (between skills and subagents) is normal, not a seam.
+    # A later separator (between subagents and the workflow run) is normal, not a seam.
     assert 'separator_dim' in kinds[seam_idx + 1:]
 
 
@@ -745,16 +761,16 @@ def test_wide_bottom_band_drops_three_segment_tokens_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Below the fit floor (TOKENS_COST_MIN_WIDTH == MEDIUM_WIDTH == 80) the
-    three-segment tokens │ cost │ rate row is dropped (no 't/m' content row);
-    at/above it the row is present. TOKENS_COST_MIN_WIDTH is now pinned to
-    MEDIUM_WIDTH, so the floor sits below build_wide's own box >= 80 entry
-    point — passing a sub-80 width directly to build_wide (as this seam test
-    does) is the only way left to observe the dropped row."""
+    tokens │ cost row is dropped (no '$' cost content row); at/above it the
+    row is present. TOKENS_COST_MIN_WIDTH is now pinned to MEDIUM_WIDTH, so
+    the floor sits below build_wide's own box >= 80 entry point — passing a
+    sub-80 width directly to build_wide (as this seam test does) is the only
+    way left to observe the dropped row."""
     from helper import strip_ansi
     _silence_dynamic(monkeypatch)
 
     def has_tokens_row(spec: layout.LayoutSpec) -> bool:
-        return any(row.kind == 'content' and 't/m' in strip_ansi(row.content)
+        return any(row.kind == 'content' and '$' in strip_ansi(row.content)
                    for row in spec.rows)
 
     assert not has_tokens_row(layout.build_wide(_view(), _tick(), 75, _r))
@@ -838,9 +854,10 @@ def test_workflow_two_column_pairing_threshold() -> None:
 # ---------------------------------------------------------------------------
 
 def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A plugin list far wider than the box is clipped to the inner content
-    width with a trailing ellipsis instead of overflowing past the right
-    border — every rendered row stays exactly box-wide."""
+    """A plugin list far wider than its column (now the trailing segment of
+    the tokens/cost row, not a standalone full-width row) is clipped with a
+    trailing ellipsis instead of overflowing past the right border — every
+    rendered row stays exactly box-wide."""
     from helper import strip_ansi
     from yas.constants import ELLIPSIS
     from yas.render.text import _visible_width
@@ -848,14 +865,16 @@ def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) 
     plugins = ','.join(f'plugin-{i:02d}' for i in range(40))  # ~440 visible cols
     monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: plugins))
 
-    width = 140
+    # Wide enough for the tokens/cost columns to leave meaningful room for the
+    # (still-clipped) trailing plugins content alongside them.
+    width = 400
     spec  = layout.build_wide(_view(), _tick(), width, _r)
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
     for ln in lines:
         assert _visible_width(ln) == width, f'row overflows the box: {_visible_width(ln)} != {width}'
     plugins_lines = [ln for ln in lines if 'plugin-00' in ln]
-    assert plugins_lines, 'plugins row should render'
-    assert ELLIPSIS in plugins_lines[0], 'clipped plugins row should end with an ellipsis'
+    assert plugins_lines, 'plugins content should render in the tokens/cost row'
+    assert ELLIPSIS in plugins_lines[0], 'clipped plugins content should end with an ellipsis'
 
 
 def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1047,13 +1066,15 @@ def test_clear_timer_sheds_entire_cell_on_path_protection(
 
 def test_tokens_row_three_elbows_at_wide_width(monkeypatch: pytest.MonkeyPatch) -> None:
     """At width=140 (>= LINES_SEGMENT_MIN_WIDTH=103) the lines read/changed
-    segment is included, so the tokens/cost separator row threads 3 elbows
-    (3-tuple downs/ups) instead of the pre-change 2."""
+    segment is included, and the trailing "skills + plugins" divider is
+    always present once the box has room (even with no skills/plugins
+    loaded): the tokens/cost separator row threads 3 elbows (3-tuple
+    downs/ups: tokens|lines, lines|cost, cost|skills+plugins)."""
     from helper import strip_ansi
     _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), 140, _r)
     # The tokens/cost separator is the separator_dim row immediately above the
-    # first tokens content row (the one carrying the 't/m' rate label).
+    # first tokens content row (the one carrying the '$' cost figure).
     t_idx = _tokens_row_indices(spec)[0]
     tokens_sep = spec.rows[t_idx - 1]
     assert tokens_sep.kind == 'separator_dim'
@@ -1072,9 +1093,10 @@ def test_tokens_row_three_elbows_at_wide_width(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_tokens_row_two_elbows_in_85_102_band(monkeypatch: pytest.MonkeyPatch) -> None:
-    """At width=95 (85 <= width < 103) the lines segment is shed: the
-    tokens/cost separator row threads only 2 elbows, identical to before this
-    change."""
+    """At width=95 (85 <= width < 103) the lines segment is shed, but the
+    trailing "skills + plugins" divider is still present (always shown once
+    the box has room): the tokens/cost separator row threads 2 elbows
+    (tokens|cost, cost|skills+plugins)."""
     _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), 95, _r)
     t_idx = _tokens_row_indices(spec)[0]

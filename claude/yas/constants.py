@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Keep in sync with pyproject.toml's [project] version — pyproject isn't
 # shipped with the runtime copy under ~/.claude, so the value lives here too.
-VERSION    = '0.7.1'
+VERSION    = '0.7.2'
 
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
@@ -25,6 +25,7 @@ DEFAULT_TOKEN_WINDOW = 60.0
 DEFAULT_THEME        = 'claude-dark'
 DEFAULT_SHOW_DAY_STATS = True
 DEFAULT_SHOW_TOOL_USES = False
+DEFAULT_SHOW_TOKENS_OVER_TIME = False
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
 # Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so
@@ -120,6 +121,17 @@ TOPROW_JUSTIFY_OUTER_CAP = 8
 # into the compact context line (losing the cost/rate row entirely, not just
 # the lines).
 LINES_SEGMENT_MIN_WIDTH = 103
+# Upper bound, in visible columns, on the "skills + plugins" content fed into
+# the tokens/cost row's trailing column (`tokens_cost`'s `trailing_content`).
+# That column shares the row with the tokens/lines/cost segments, so it never
+# gets anywhere near a full row's width -- pre-clipping to this fixed,
+# realistic-widest cap (rather than the box's own width-3) keeps
+# `tokens_cost`'s own include/shed gate satisfiable even at very wide boxes:
+# without a fixed cap, clipping to `width - 3` makes the trailing content's
+# measured width scale with the box itself, so the row's own min-width-with-
+# leader gate (tokens + cost + trailing + vseps <= box_width) could never be
+# satisfied for a long plugin/skill list at ANY width.
+PLUGINS_TRAILING_MAX_W = 60
 
 # Minimum gap between the narrow tasks-header's left cluster (glyph + done/total)
 # and its right-anchored active-task timer. The timer is flush to the content

@@ -117,7 +117,7 @@ from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
 from yas.info.workflows import RunningWorkflow
 from yas.info.tasks import TaskList
-from yas.render.text import _middle_ellipsis, _visible_width, fmt_tok, fmt_tok_fixed, strike
+from yas.render.text import _ansi_byte_offset, _middle_ellipsis, _visible_width, fmt_tok, fmt_tok_fixed, strike
 from yas.tokens import TokenRate
 
 if TYPE_CHECKING:
@@ -1698,32 +1698,31 @@ class Renderer:
     # after every cap is met still feeds the rate/sparkline leader (as before).
     JUSTIFY_PAD_CAP = 4
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True, justify: bool = False, lines: tuple[int, int] | None = None, show_icons: bool = True) -> tuple[list[str], tuple[int, ...], int, int]:
-        """One content line: tokens │ [lines │] cost │ rate-and-sparkline.
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, trailing_content: str = '', session_id: str = '', box_width: int = 80, fill: float = 1.0, show_day_stats: bool = True, justify: bool = False, lines: tuple[int, int] | None = None, show_icons: bool = True) -> tuple[list[str], tuple[int, ...], int, int, bool]:
+        """One content line: tokens │ [lines │] cost │ [trailing_content].
 
         With ``show_day_stats`` (default), session and day figures merge per
         field as ``session/day`` with a paired cache parenthetical. When off,
         the row is session-only and keeps the original per-field justification.
 
-        When ``justify`` is on (and day stats are shown), horizontal slack that
-        would otherwise all flow to the sparkline leader is first spent as
-        breathing room *inside* the sections — widening the two inter-group gaps
-        in the tokens column and padding the cost/leader edges, each capped at
-        ``JUSTIFY_PAD_CAP`` spaces. ``min_width`` is unchanged: the optional
-        padding only consumes genuine slack, so at the tight floor the gaps
-        collapse to 1 and the row fits exactly as with ``justify`` off.
+        When ``justify`` is on (and day stats are shown), horizontal slack is
+        spent as breathing room *inside* the sections — widening the two
+        inter-group gaps in the tokens column and padding the cost edges, each
+        capped at ``JUSTIFY_PAD_CAP`` spaces. ``min_width`` is unchanged: the
+        optional padding only consumes genuine slack, so at the tight floor the
+        gaps collapse to 1 and the row fits exactly as with ``justify`` off.
         The tokens and cost columns are sized to the *measured* content (floored
         at a realistic-widest budget), so the two ``│`` dividers always land on
         the rendered content's divider column — they never detach from the
         ┬/┴ elbows above/below.
 
         ``show_icons`` (default on) gates every per-number glyph in this row —
-        the in/out token arrows, the cost icon, the lines read/changed icons,
-        and the rate-label gauge icon. When off, each icon (and its trailing
-        gap) is simply omitted from the builder closures below; every width
-        (``tokens_w``, ``cost_w``, ``lines_w``, ``rate_label_w``) is measured
-        from the *built* string via ``_visible_width``, so the column/vsep
-        math downstream adapts automatically — no separate width branch needed.
+        the in/out token arrows, the cost icon, and the lines read/changed
+        icons. When off, each icon (and its trailing gap) is simply omitted
+        from the builder closures below; every width (``tokens_w``, ``cost_w``,
+        ``lines_w``) is measured from the *built* string via ``_visible_width``,
+        so the column/vsep math downstream adapts automatically — no separate
+        width branch needed.
 
         ``lines``, when given, is a ``(read, changed)`` session-total pair
         rendered as a third segment between tokens and cost — but only when
@@ -1734,22 +1733,35 @@ class Renderer:
         checked by the caller) is unaffected by this shed rule — it is
         computed from the without-segment ``min_width`` only.
 
-        Shed ladder (highest-retained first): tokens sess/day, then loc r/w,
-        then cost, then tokens-over-time (the rate label + sparkline leader).
-        The richest form (everything the box has room for, per the existing
-        gates above) is tried first; if IT overflows ``box_width``, the row
-        falls through progressively leaner rungs that each drop exactly one
-        segment in shed order (tokens-over-time first, then cost, then loc)
-        until only tokens sess/day remains — the protected segment that is
-        never shed. ``vsep_cols`` shrinks by one column per rung dropped.
+        ``trailing_content`` is pre-rendered content (e.g. "skills + plugins")
+        appended as a fourth, content-measured segment after cost — included
+        whenever the box has room for it, *even when empty*: this segment's
+        divider/border must not disappear just because there's nothing to
+        show (blank-padded to the leader column's width in that case). This
+        replaces the old in-row rate/sparkline leader, which is now its own
+        standalone row (see ``tokens_over_time``).
 
-        Returns ``([line], vsep_cols, 0, min_width)``: ``vsep_cols`` has 0-3
-        entries depending on which rung was used — the divider columns for
-        the builder's elbow threading — the dead mark_col (the old 60s tick
-        marker is gone, =0), and ``min_width`` — the smallest box width at
-        which this row fits without overflow, i.e. the floor of the
+        Shed ladder (highest-retained first): tokens sess/day, then loc r/w,
+        then cost, then the trailing content. The richest form (everything the
+        box has room for, per the existing gates above) is tried first; if IT
+        overflows ``box_width``, the row falls through progressively leaner
+        rungs that each drop exactly one segment in shed order (trailing
+        content first, then cost, then loc) until only tokens sess/day
+        remains — the protected segment that is never shed. ``vsep_cols``
+        shrinks by one column per rung dropped.
+
+        Returns ``([line], vsep_cols, 0, min_width, has_lines)``: ``vsep_cols``
+        has 0-3 entries depending on which rung was used — the divider
+        columns for the builder's elbow threading — the dead mark_col (the
+        old 60s tick marker is gone, =0), ``min_width`` — the smallest box
+        width at which this row fits without overflow, i.e. the floor of the
         surviving-minimum form (tokens sess/day alone), independent of
-        whether ``lines``/cost/the leader end up shown at a given width.
+        whether ``lines``/cost/the trailing content end up shown at a given
+        width — and ``has_lines`` — whether the loc r/w segment survived into
+        the returned ``line`` (both the initial width gate AND the shed
+        ladder), so the caller can anchor labels to it without re-deriving
+        the same decision by sniffing the rendered content for a glyph that
+        ``show_icons=False`` would hide.
         """
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
@@ -1771,7 +1783,6 @@ class Renderer:
         # widens them from genuine slack only (see the pad block after min_width).
         gap1 = gap2 = ' '   # ↓in/day | (cache) | ↑out/day inter-group gaps
         cost_lpad = cost_rpad = ''
-        leader_lpad = ''
 
         if show_day_stats:
             # Merged session/day per field; variable width, no fixed rjust (D2)
@@ -1843,10 +1854,9 @@ class Renderer:
         vsep_w        = 4
         vsep_leader_w = 4
         vsep_lines_w  = 4
-        label_w       = 15
 
         content_w = box_width - 3
-        inner     = content_w - vsep_w - vsep_leader_w  # tokens + cost + leader budget
+        inner     = content_w - vsep_w  # tokens + cost budget (lines/trailing subtracted below when included)
 
         # Section widths track the *measured* content so each column hugs its
         # content and the two │ dividers sit directly after it (only the vsep's
@@ -1864,22 +1874,16 @@ class Renderer:
         # tokens sess/day is the protected survivor of the shed ladder below,
         # so `min_width` is derived from THIS, not from the richest form.
         tokens_base_w = tokens_w
-        # The rate/spark leader can never compress below its bare ``<rate> t/m``
-        # label; measure it here so the budget split and min_width are exact (when
-        # bar_w<=0 below, the leader is the bare label, which may exceed label_w+1).
-        rate_icon    = f'{self.TOK_ICON}{ICON_TOK_RATE}  ' if show_icons else ''
-        rate_label   = f'{rate_icon}{self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
-        rate_label_w = _visible_width(rate_label)
-        leader_min   = max(label_w + 1, rate_label_w)
 
-        # The smallest box that holds both columns at their measured size plus the
-        # two vseps and the leader. Derived from the measured content, so it tracks
-        # token/cost/rate magnitude rather than being hardcoded. The leader floor
-        # here is the bare ``rate_label_w``, not ``leader_min``: at the tightest
-        # box the sparkline is omitted (bar_w<10) and the leader collapses to the
-        # bare ``<rate> t/m`` label, so the row genuinely fits at that narrower
-        # width. The builder only emits this row when ``box_width >= min_width``.
-        min_width = tokens_w + cost_w + vsep_w + vsep_leader_w + rate_label_w + 3
+        # The trailing column is content-measured only, with no minimum reserve
+        # of its own (unlike the old rate/spark leader) -- it either fits at its
+        # full measured width or is shed entirely (see include_leader below).
+        trailing_w = _visible_width(trailing_content)
+
+        # The smallest box that holds both columns at their measured size plus
+        # the tokens│cost vsep. Derived from the measured content, so it tracks
+        # token/cost magnitude rather than being hardcoded.
+        min_width = tokens_w + cost_w + vsep_w + 3
 
         # The lines segment's own measured width and the with-segment floor.
         # Included only when the box clears both this floor and the fixed
@@ -1890,30 +1894,41 @@ class Renderer:
         min_width_with_lines = min_width + lines_w + vsep_lines_w
         include_lines = lines is not None and box_width >= max(min_width_with_lines, LINES_SEGMENT_MIN_WIDTH)
         if include_lines:
-            inner -= vsep_lines_w  # the lines segment's own vsep, alongside vsep_w/vsep_leader_w above
+            inner -= vsep_lines_w  # the lines segment's own vsep
+
+        # The trailing segment's own gate, mirroring include_lines: only shown
+        # when the box has genuine room for it at its full measured width.
+        min_width_with_leader = min_width + trailing_w + vsep_leader_w
+        # Included whenever the box has room -- unlike `include_lines`, this
+        # is NOT gated on `trailing_content` being non-empty: the "skills +
+        # plugins" section is always shown, blank-padded when there is
+        # nothing to display, so its border (divider + ┬/┴ elbows + label)
+        # never disappears just because no skills/plugins are loaded.
+        include_leader = box_width >= min_width_with_leader
+        if include_leader:
+            inner -= vsep_leader_w  # the trailing segment's own vsep
 
         # Justify breathing room: spend genuine slack as padding *inside* the
-        # sections before it flows to the sparkline. ``free`` is the room beyond
-        # the tight minimum (min-gap content + min leader); it is exactly the
-        # slack that today all lands in the leader. We never touch ``min_width``,
-        # so at the floor ``free`` is 0, the gaps stay at 1, and the row is
-        # byte-for-byte the justify-off layout. Slots fill toward their caps via
-        # an even round-robin; whatever is consumed shrinks the leader by the
-        # same amount, and the remainder still feeds the sparkline.
-        # NOTE: the lines segment (when included) does NOT get a slot here —
-        # it is content-measured only (see w_lines below), same as tokens_col/
-        # cost_col before padding. This is deliberate, not an oversight: giving
-        # it justify breathing room would make its width (and therefore col2/
-        # col3) depend on `justify`, which no other content-measured segment
-        # in this row does.
+        # sections. ``free`` is the room beyond the tight minimum (min-gap
+        # content only -- the trailing segment never competes for this slack,
+        # see the NOTE below). We never touch ``min_width``, so at the floor
+        # ``free`` is 0, the gaps stay at 1, and the row is byte-for-byte the
+        # justify-off layout. Slots fill toward their caps via an even
+        # round-robin.
+        # NOTE: neither the lines segment nor the trailing segment gets a slot
+        # here — both are content-measured only (see w_lines/leader_w below),
+        # same as tokens_col/cost_col before padding. This is deliberate, not
+        # an oversight: giving them justify breathing room would make their
+        # width (and therefore the divider columns) depend on `justify`, which
+        # no other content-measured segment in this row does.
         cap = self.JUSTIFY_PAD_CAP
         if justify and show_day_stats:
-            free = max(0, inner - tokens_w - cost_w - leader_min)
+            free = max(0, inner - tokens_w - cost_w)
             # (slot extra above its 1-space/0-space minimum, per-slot cap).
             #  gap1, gap2 sit at 1 already → extra cap is cap-1; the edge pads
             #  sit at 0 → extra cap is the full cap.
-            slots = [cap - 1, cap - 1, cap, cap, cap]  # gap1, gap2, cost_l, cost_r, leader_l
-            give  = [0, 0, 0, 0, 0]
+            slots = [cap - 1, cap - 1, cap, cap]  # gap1, gap2, cost_l, cost_r
+            give  = [0, 0, 0, 0]
             budget = min(free, sum(slots))
             while budget > 0 and any(give[i] < slots[i] for i in range(len(slots))):
                 for i in range(len(slots)):
@@ -1926,11 +1941,10 @@ class Renderer:
             gap2 = ' ' * (1 + give[1])
             cost_lpad = ' ' * give[2]
             cost_rpad = ' ' * give[3]
-            leader_lpad = ' ' * give[4]
             # Rebuild the padded strings and grow the measured widths by the
             # injected pad so the budget split and col1/col2 follow the new
-            # divider positions exactly (the leader pad is accounted separately
-            # below). min_width above stays on the unpadded floor.
+            # divider positions exactly. min_width above stays on the unpadded
+            # floor.
             tokens_col = build_tokens()
             cost_col   = build_cost()
             tokens_w  += give[0] + give[1]
@@ -1940,17 +1954,15 @@ class Renderer:
         # sizing and col1/col2 always land on the rendered │.
         TOKENS_BUDGET = tokens_w
         COST_BUDGET   = cost_w
-        leader_lpad_w = len(leader_lpad)
 
-        avail = inner - leader_min                 # room left after the leader minimum
-        if TOKENS_BUDGET + COST_BUDGET <= avail:
+        if TOKENS_BUDGET + COST_BUDGET <= inner:
             w_middle, w_end = TOKENS_BUDGET, COST_BUDGET
         else:
             # Over budget: give each column at least its measured content, then
             # share any slack proportionally. Clamping at content (not the inflated
             # proportional share) keeps the cell sum from spilling past col1/col2.
-            w_middle = max(tokens_w, avail * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
-            w_end    = max(cost_w, avail - w_middle)
+            w_middle = max(tokens_w, inner * TOKENS_BUDGET // (TOKENS_BUDGET + COST_BUDGET))
+            w_end    = max(cost_w, inner - w_middle)
 
         # Honest floor: never allocate a cell narrower than its own content. This
         # keeps the trailing pad >= 0 so the │ lands exactly at col1/col2.
@@ -1968,56 +1980,58 @@ class Renderer:
         tokens_col += ' ' * max(0, w_middle - tokens_w)
         cost_col   += ' ' * max(0, w_end   - cost_w)
 
-        leader_w = max(label_w + 1, inner - w_middle - w_lines - w_end)
-
         col1 = w_middle + 5                                          # 1-indexed position of the tokens│ vsep
         if include_lines:
             col2 = col1 + vsep_w + w_lines                           # 1-indexed position of the lines│ vsep
-            col3 = col2 + vsep_lines_w + w_end                       # 1-indexed position of the vsep_leader │
+            col_after_lines = col2 + vsep_lines_w + w_end            # 1-indexed position of the vsep_leader │
         else:
-            col2 = w_middle + vsep_w + w_end + 5                     # 1-indexed position of the vsep_leader │ (today's shape)
-        vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
-        vsep_leader = self.vsep_block(col3 if include_lines else col2, box_width, fill=fill, leader=True)
+            col_after_lines = w_middle + vsep_w + w_end + 5          # 1-indexed position of the vsep_leader │ (today's shape)
+        vsep = self.vsep_block(col1, box_width, fill=fill, leader=True)
         if include_lines:
-            lines_col   = build_lines()
-            vsep_lines  = self.vsep_block(col2, box_width, fill=fill, leader=True)
+            lines_col  = build_lines()
+            vsep_lines = self.vsep_block(col2, box_width, fill=fill, leader=True)
 
-        # The justify leader pad sits between the vsep_leader │ and the rate
-        # label; it eats from the leader budget so the sparkline shrinks by the
-        # same amount it grew the breathing room.
-        bar_w = leader_w - rate_label_w - leader_lpad_w
-
-        if bar_w < 10:
-            leader = f'{leader_lpad}{rate_label}'
-        else:
-            if session_id:
-                # 1 second per char (D4): span the most recent bar_w seconds, one
-                # char each (window == bar_w → 1s buckets). History is
-                # oldest→newest, so reverse it to put the newest (live) bucket on
-                # the LEFT, next to the t/m label — sparkline_1row dims that
-                # now-leftmost cell.
-                spark_history = TokenRate.history(session_id, bar_w, float(bar_w))[::-1]
-                spark = self.sparkline_1row(spark_history, live=True)
+        if include_leader:
+            vsep_leader = self.vsep_block(col_after_lines, box_width, fill=fill, leader=True)
+            leader_w    = max(0, inner - w_middle - w_lines - w_end)
+            if trailing_w <= leader_w:
+                leader = trailing_content + ' ' * (leader_w - trailing_w)
+            elif leader_w > 0:
+                cut    = _ansi_byte_offset(trailing_content, max(0, leader_w - 1))
+                leader = f'{trailing_content[:cut]}{ELLIPSIS}{RESET}'
             else:
-                spark = ' ' * bar_w
-            leader = f'{leader_lpad}{rate_label}{spark}'
+                leader = ''
 
         vsep_cols: tuple[int, ...]
-        if include_lines:
-            line = f'{tokens_col}{vsep}{lines_col}{vsep_lines}{cost_col}{vsep_leader}{leader}'
-            vsep_cols = (col1, col2, col3)
-        else:
-            line = f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'
+        if include_leader:
+            if include_lines:
+                line = f'{tokens_col}{vsep}{lines_col}{vsep_lines}{cost_col}{vsep_leader}{leader}'
+                vsep_cols = (col1, col2, col_after_lines)
+            else:
+                line = f'{tokens_col}{vsep}{cost_col}{vsep_leader}{leader}'
+                vsep_cols = (col1, col_after_lines)
+        elif include_lines:
+            line = f'{tokens_col}{vsep}{lines_col}{vsep_lines}{cost_col}'
             vsep_cols = (col1, col2)
+        else:
+            line = f'{tokens_col}{vsep}{cost_col}'
+            vsep_cols = (col1,)
 
         # Shed ladder (highest-retained first): tokens sess/day -> loc r/w ->
-        # cost -> tokens-over-time (rate label + sparkline). The richest form
-        # built above is tried first; if it overflows the box, fall through
-        # progressively leaner rungs that each drop exactly one segment, in
-        # the order tokens-over-time -> cost -> loc, until we land on tokens
-        # sess/day alone, which is the protected survivor and is never shed.
-        # `min_width` (below) reflects THIS floor, not the richest form's.
+        # cost -> trailing content. The richest form built above is tried
+        # first; if it overflows the box, fall through progressively leaner
+        # rungs that each drop exactly one segment, in the order trailing
+        # content -> cost -> loc, until we land on tokens sess/day alone,
+        # which is the protected survivor and is never shed. `min_width`
+        # (below) reflects THIS floor, not the richest form's.
         content_w = box_width - 3
+        # Tracks whether the lines segment survives into the FINAL rung
+        # actually used below -- the caller needs this to anchor the 'loc r/w'
+        # and 'cost sess/day' labels correctly, and can't reliably re-derive
+        # it by sniffing the rendered content for the read-glyph, since
+        # `show_icons=False` omits that glyph even when the segment is
+        # present (see layout.py's tok_labels build).
+        has_lines_final = include_lines
         if _visible_width(line) > content_w:
             if include_lines:
                 rung_b = f'{tokens_col}{vsep}{lines_col}{vsep_lines}{cost_col}'
@@ -2031,10 +2045,38 @@ class Renderer:
                 line, vsep_cols = f'{tokens_col}{vsep}{lines_col}', (col1,)
             else:
                 line, vsep_cols = tokens_col, ()
+                has_lines_final = False
 
         min_width = tokens_base_w + 3
 
-        return [line], vsep_cols, 0, min_width
+        return [line], vsep_cols, 0, min_width, has_lines_final
+
+    def tokens_over_time(self, tok_rate: int, session_id: str, box_width: int, fill: float = 1.0, show_icons: bool = True) -> str:
+        """Full-width content line: rate label + live sparkline leader.
+
+        Formerly the trailing segment of ``tokens_cost`` ("tokens over time");
+        now its own standalone row so ``tokens_cost``'s trailing column is free
+        for other content (e.g. "skills + plugins"). ``session_id`` empty (no
+        history available) renders a blank span instead of a sparkline.
+        """
+        rate_icon    = f'{self.TOK_ICON}{ICON_TOK_RATE}  ' if show_icons else ''
+        rate_label   = f'{rate_icon}{self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label_w = _visible_width(rate_label)
+
+        bar_w = (box_width - 3) - rate_label_w
+        if bar_w < 10:
+            return rate_label
+        if session_id:
+            # 1 second per char (D4): span the most recent bar_w seconds, one
+            # char each (window == bar_w → 1s buckets). History is
+            # oldest→newest, so reverse it to put the newest (live) bucket on
+            # the LEFT, next to the t/m label — sparkline_1row dims that
+            # now-leftmost cell.
+            spark_history = TokenRate.history(session_id, bar_w, float(bar_w))[::-1]
+            spark = self.sparkline_1row(spark_history, live=True)
+        else:
+            spark = ' ' * bar_w
+        return f'{rate_label}{spark}'
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
