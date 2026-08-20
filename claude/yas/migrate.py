@@ -1,12 +1,4 @@
-"""One-shot migration from the pre-0.9 flat ~/.claude layout to the yas/
-cache+state layout defined in yas.constants.
-
-# REMOVE AFTER 0.11.0
-This module (and the `app.main` startup guard that calls it) exists only to
-carry users forward from the flat pre-0.9 layout onto the new yas/cache,
-yas/state tree. Once a few releases have passed and the flat layout is no
-longer expected in the wild, delete this module and its call site.
-"""
+"""One-shot migration from the pre-0.9 flat ~/.claude layout to the yas/cache+state layout in yas.constants."""
 
 from __future__ import annotations
 import json
@@ -34,20 +26,14 @@ from yas.constants import (
     version_file,
 )
 
-# Legacy basename -> new-path callable (not a precomputed Path) so a patched
-# constants.CLAUDE_DIR is honoured both for the legacy source (resolved at
-# call time in migrate() below) and the destination.
+# legacy basename -> new-path callable, resolved at call time so a patched CLAUDE_DIR is honoured
 _MOVES: tuple[tuple[str, Callable[[], Path]], ...] = (
     ('statusline-tokens.log', tokens_log),
     ('yas-last-prompt.json', last_prompt_path),
     ('terminal-width', terminal_width_path),
 )
 
-# Legacy files with no new-layout home — deleted outright. Note:
-# 'statusline-theme' is handled separately below (guarded on yas.toml already
-# carrying the folded value): folding its value into yas.toml is the
-# installer's job, not this module's, and this module must never delete the
-# only copy of a theme choice that failed to fold.
+# legacy files with no new-layout home, deleted outright ('statusline-theme' is handled separately below)
 _DELETE_FILES: tuple[str, ...] = (
     'statusline-token-rate.log',
     'statusline-render.log',
@@ -60,7 +46,7 @@ _DELETE_DIRS: tuple[str, ...] = (
 
 
 def _move(src: Path, dst: Path, *, verbose: bool = False) -> None:
-    """Move src to dst, skipping (never clobbering) when dst already exists."""
+    """Move src to dst; never clobbers an existing dst."""
     if dst.exists():
         return
     if not src.exists():
@@ -75,16 +61,8 @@ def _move(src: Path, dst: Path, *, verbose: bool = False) -> None:
 
 
 def migrate(verbose: bool = False) -> bool:
-    """Convert a pre-0.9 flat ~/.claude layout into the yas/cache, yas/state
-    tree. Every step is individually idempotent (mkdir exist_ok, moves skip
-    an existing destination, deletes tolerate a missing source), so this is
-    safe to call on every startup. Returns True only if every step succeeded;
-    on any OSError, version.json is left unwritten so the next run retries.
-
-    When verbose is True, each move/delete that actually acts on an existing
-    legacy path prints a one-line summary to stdout; no-ops (legacy path
-    absent) stay silent. Defaults to False so the lazy first-render call in
-    app.py never spams a normal user's statusline.
+    """Convert a pre-0.9 flat ~/.claude layout into the yas/cache, yas/state tree; every step is idempotent.
+    Returns True only if every step succeeded; on any OSError, version.json is left unwritten so the next run retries.
     """
     ok = True
 
@@ -95,11 +73,6 @@ def migrate(verbose: bool = False) -> bool:
         except OSError:
             ok = False
 
-    # Legacy sources are resolved from constants.CLAUDE_DIR at call time
-    # (rather than a precomputed module-level Path) so this module respects
-    # test/tooling patches of constants.CLAUDE_DIR the same way the new-path
-    # callables above do — the sanctioned exception to the "no module
-    # imports CLAUDE_DIR" rule, since this is a call-time attribute read.
     for name, dst_fn in _MOVES:
         try:
             _move(constants.CLAUDE_DIR / name, dst_fn(), verbose=verbose)
@@ -126,11 +99,7 @@ def migrate(verbose: bool = False) -> bool:
         except OSError:
             ok = False
 
-    # Only retire the legacy statusline-theme file once yas.toml already
-    # carries a `theme =` line — ops/install.sh's fold_legacy_theme() writes
-    # that line before this runs. If yas.toml has no theme line (fold failed
-    # its parse-validation, or no yas.toml exists), keep the legacy file in
-    # place rather than losing the user's theme choice outright.
+    # only retire statusline-theme once yas.toml already carries a `theme =` line (installer folds it first)
     toml_path = constants.CLAUDE_DIR / 'yas.toml'
     try:
         has_theme = toml_path.exists() and bool(

@@ -87,13 +87,8 @@ def _parse_bool(raw: object, origin: str) -> bool:
 
 
 def _parse_show_day_stats(raw: object, origin: str) -> bool:
-    """Boolean knob with lenient env form.
-
-    A real TOML boolean is taken as-is. From CLI/env, ``0``/``false``/``no``
-    (case-insensitive) are false and any other non-empty value is true (empty
-    env values are already filtered out upstream as "absent"). A non-boolean
-    TOML value raises so it falls back to the default and is recorded.
-    """
+    """Boolean knob with lenient env form: 0/false/no (case-insensitive) are
+    false from CLI/env, any other non-empty value is true."""
     if isinstance(raw, bool):
         return raw
     if origin == 'cli' or origin.startswith('env'):
@@ -140,11 +135,8 @@ def _resolve(
     debug: list[str],
 ) -> _T:
     """Walk precedence sources; first that parses wins, else the default.
-
-    Records every present-but-invalid value in ``debug``; records the knob name
-    in ``errors`` only for yas.toml-sourced rejections (the visible row is
-    titled "yas.toml" so env/CLI failures stay debug-only).
-    """
+    Records rejections in ``debug``; toml-sourced rejections also go to
+    ``errors`` (the visible row)."""
     for origin, raw in sources:
         try:
             return parse(raw, origin)
@@ -180,21 +172,14 @@ def _parse_argv(argv: Sequence[str]) -> dict[str, str]:
     return out
 
 
-# Bump to invalidate every on-disk yas.toml.cache (e.g. if the cached shape ever
-# changes). A stamp mismatch — including this version — silently reparses.
+# Bump to invalidate every on-disk yas.toml.cache.
 CACHE_VERSION = 1
 
 
 def _read_toml_cache(cache_path: Path, mtime_ns: int, size: int) -> dict[str, object] | None:
-    """Return the cached parsed dict iff fresh, else None.
-
-    The cache is keyed on (CACHE_VERSION, mtime_ns, size) of yas.toml. ANY
-    mismatch — stale, a backwards mtime jump (restore/checkout), or a version
-    bump — is treated as a miss. A corrupt/unreadable cache or a marshal error
-    is swallowed and also reported as a miss; the cache is a pure optimization,
-    so correctness never depends on it. A hit lets the caller skip importing
-    tomllib and re-reading/parsing yas.toml entirely.
-    """
+    """Return the cached parsed dict keyed on (CACHE_VERSION, mtime_ns, size)
+    iff fresh, else None. Any mismatch or corruption is treated as a miss —
+    the cache is a pure optimization."""
     import marshal  # builtin: zero marginal import cost
     try:
         blob = cache_path.read_bytes()
@@ -211,13 +196,8 @@ def _read_toml_cache(cache_path: Path, mtime_ns: int, size: int) -> dict[str, ob
 
 
 def _write_toml_cache(cache_path: Path, mtime_ns: int, size: int, data: dict[str, object]) -> None:
-    """Atomically write the parsed dict to the cache, swallowing any failure.
-
-    Writes to a temp file in the same dir then os.replace()s it into place so a
-    concurrent reader never sees a torn file. A read-only dir, a marshal error
-    (shouldn't happen — TOML primitives are all marshal-safe), or any OSError is
-    swallowed: a failed write just means the next run reparses.
-    """
+    """Atomically write the parsed dict to the cache (temp file + os.replace),
+    swallowing any failure — a failed write just means the next run reparses."""
     import marshal
     tmp = cache_path.with_name(f'{cache_path.name}.{os.getpid()}.tmp')
     try:
@@ -234,22 +214,10 @@ def _write_toml_cache(cache_path: Path, mtime_ns: int, size: int, data: dict[str
 
 
 def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
-    """Read config_dir/yas.toml.
-
-    Returns (data, error). Missing file → ({}, None), i.e. silently skipped.
-    On Python 3.10 (no stdlib tomllib) the tomli backport is used instead, so
-    TOML is still parsed. A parse failure → ({}, "yas.toml: parse error").
-
-    A binary (marshal) cache of the parsed dict lives under
-    config_dir/yas/cache/config.toml.cache, no longer beside the source file.
-    Derived from config_dir (not the module-global constants.toml_cache_path())
-    so a caller that passes a sandboxed config_dir (e.g. tests using tmp_path)
-    never touches the real ~/.claude/yas/cache/ — the cache always lives next
-    to the yas.toml it was parsed from. On a warm, unchanged file the dict is
-    returned straight from the cache, skipping BOTH `import tomllib` and the
-    read+parse. Any cache miss/staleness/corruption falls through to the live
-    parse below, which then refreshes the cache.
-    """
+    """Read config_dir/yas.toml. Returns (data, error); missing file → ({},
+    None). Uses the tomli backport on Python 3.10. A binary cache under
+    config_dir/yas/cache/config.toml.cache lets a warm, unchanged file skip
+    both the import and the read+parse."""
     toml_path = config_dir / 'yas.toml'
     cache_path = config_dir / 'yas' / 'cache' / 'config.toml.cache'
     try:
@@ -266,8 +234,7 @@ def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
         text = toml_path.read_text()
     except OSError:
         return {}, None
-    # Deferred: tomllib (parser + regex tables) is imported only on a cache miss
-    # when a yas.toml actually exists — warm hits and the no-config path skip it.
+    # Deferred: tomllib imported only on a cache miss with a yas.toml present.
     if sys.version_info >= (3, 11):
         import tomllib
     else:  # Python 3.10 — use the tomli backport

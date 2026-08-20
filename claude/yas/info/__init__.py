@@ -1,10 +1,4 @@
-"""SessionView — lazy gather seam for all derived session state.
-
-All I/O is deferred to first access via @cached_property. Callers
-construct a SessionView and read only the fields they need; unread
-fields never touch the filesystem. SessionView may hold a loaded
-transcript parse cache for deduplication but never writes it.
-"""
+"""SessionView — lazy gather seam for all derived session state; I/O deferred to first access via @cached_property."""
 
 from __future__ import annotations
 
@@ -31,10 +25,7 @@ from yas.info.parsecache import TranscriptCache
 # ---------------------------------------------------------------------------
 
 def _fmt_duration_ms(ms: int) -> str:
-    """Format a duration in milliseconds into a human-readable string.
-
-    Returns '' for zero ms, 'Nm' for under an hour, 'HhMm' for >= 1 h.
-    """
+    """'' for zero ms, 'Nm' under an hour, 'HhMm' for >= 1h."""
     if ms <= 0:
         return ''
     total_m = ms // 60_000
@@ -46,11 +37,7 @@ def _fmt_duration_ms(ms: int) -> str:
 
 
 def _fmt_elapsed_clock(ms: int) -> str:
-    """Format a duration in milliseconds as a clock string.
-
-    Returns '' for zero or negative ms. Under an hour returns MM:SS (e.g.
-    '13:27'); one hour or more returns H:MM:SS or HH:MM:SS (e.g. '1:13:27').
-    """
+    """'' for <= 0 ms, MM:SS under an hour, H:MM:SS at or above."""
     if ms <= 0:
         return ''
     s   = ms // 1000
@@ -63,11 +50,7 @@ def _fmt_elapsed_clock(ms: int) -> str:
 
 
 def _fmt_elapsed(mtime: float | None, now: float) -> str:
-    """Format seconds-since-mtime as a human-readable string.
-
-    Kept as a wrapper around _fmt_duration_ms for backward-compatible callers.
-    Returns '' for None mtime, 'Nm' for under an hour, 'HhMm' for >= 1 h.
-    """
+    """Seconds-since-mtime as a human-readable string; '' for None mtime."""
     if mtime is None:
         return ''
     return _fmt_duration_ms(int(max(0, now - mtime) * 1000))
@@ -125,18 +108,7 @@ class SessionView:
 
     @cached_property
     def tool_counts(self) -> ToolCounts:
-        """Per-tool (main, sub) tool_use counts, plus session and per-agent line totals.
-
-        In a single pass through the main and all subagent transcripts, computes:
-        - per-tool (main, sub) tool_use counts since the last /clear;
-        - session totals for lines_read and lines_changed (sum of main + all subagents);
-        - per_agent breakdown of lines_read and lines_changed for each subagent.
-
-        Reopens the main transcript and each subagent transcript — no I/O beyond
-        the files already scanned this render. A cached, unchanged transcript is
-        not reopened at all. Lazy: a narrow/medium render that never reads this
-        never pays for the aggregation.
-        """
+        """Per-tool (main, sub) tool_use counts since last /clear, plus session and per-agent line totals."""
         return ToolCounts.gather(
             self.session.transcript_path,
             self.subagents.subagents,
@@ -162,16 +134,7 @@ class SessionView:
 
     @cached_property
     def cache_countdown(self) -> tuple[float, int] | None:
-        """Remaining cache TTL as (seconds_remaining, elapsed_pct) or None.
-
-        Returns None when there is no cache anchor, the cache has already
-        expired, or the TTL is unknown. elapsed_pct is clamped to [0, 100]
-        and represents how much of the TTL has been consumed (0 = fresh,
-        100 = expired). Holds no ANSI or render geometry.
-
-        This is inspired/taken directly from the implementation by @rodboev here:
-        https://gist.github.com/rodboev/108ae70ea338bebd7e96304bc797d9b8
-        """
+        """Remaining cache TTL as (seconds_remaining, elapsed_pct); None if no anchor/expired/unknown TTL."""
         u = self.transcript_usage
         cache_anchor_epoch = u.cache_anchor_epoch
         cache_ttl = u.cache_ttl
@@ -185,10 +148,7 @@ class SessionView:
 
     @cached_property
     def clear_epoch(self) -> float | None:
-        """Epoch of the most-recent /clear marker in this transcript, or None.
-
-        Holds no ANSI or render geometry; cached for the view's lifetime.
-        """
+        """Epoch of the most-recent /clear marker in this transcript, or None."""
         return read_clear_epoch(self.session.transcript_path)
 
     @cached_property

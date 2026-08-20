@@ -9,6 +9,7 @@ import shutil
 import signal
 import sys
 import traceback
+from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 
@@ -54,7 +55,7 @@ def _age_label(age_secs: int, width: int) -> str:
     return f'{_DIM}{text}{"─" * fill}{_RESET}'
 
 
-def tick(args) -> None:
+def tick(args: Namespace) -> None:
     sz = shutil.get_terminal_size(fallback=(120, 40))
     cols, rows = sz.columns, sz.lines
 
@@ -64,15 +65,13 @@ def tick(args) -> None:
     sessions = discover(args.include_after, now)
     theme    = resolve_theme(args.theme)
 
-    # Filter to bright/dim only (remove 'removed' sessions).
-    active = []
+    active = []  # bright/dim only, 'removed' sessions filtered out
     for s in sessions:
         tier = classify(s.jsonl_mtime, now_ts, args.idle_after, args.remove_after)
         if tier != 'removed':
             active.append((s, tier))
 
-    # Header and footer each take 1 row.
-    available_body = max(0, rows - 2)
+    available_body = max(0, rows - 2)  # header + footer take 1 row each
 
     if cols < MIN_WIDTH:
         header = format_header(0, None, None, 0.0, cols)
@@ -83,7 +82,6 @@ def tick(args) -> None:
         sys.stdout.flush()
         return
 
-    # Render each session box; prepend an age label; apply dim post-processing.
     width = max(MIN_WIDTH, min(160, cols - 6))
     rendered_boxes: list[str] = []
     for s, tier in active:
@@ -96,11 +94,9 @@ def tick(args) -> None:
                 box = apply_dim(box)
             rendered_boxes.append(box)
 
-    # Clip to available body height.
     visible_boxes, hidden_count = clip_to_height(rendered_boxes, available_body)
     n_sessions = len(visible_boxes)
 
-    # Aggregate header data.
     visible_sessions = [s for (s, _), box in zip(active, rendered_boxes) if box in visible_boxes]
     five_h, seven_d = aggregate_rate_limits(visible_sessions)
     day_cost        = aggregate_day_cost(visible_sessions)

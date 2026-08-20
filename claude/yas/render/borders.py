@@ -30,11 +30,7 @@ from yas.render.text import _visible_width, superscript
 
 
 def _shrink_to_boundary(text: str, run_len: int) -> str | None:
-    """Longest whole-word prefix of `text` (splitting on spaces, so a `/`
-    surrounded by spaces is its own token) that, plus a trailing `ELLIPSIS`,
-    fits within `run_len` visible columns. Returns `None` if not even the
-    first token fits — this is a last-resort shrink, never a mid-word cut.
-    """
+    """Longest whole-word prefix of `text` + `ELLIPSIS` that fits `run_len` columns, or `None`."""
     tokens = text.split(' ')
     for i in range(len(tokens), 0, -1):
         prefix = ' '.join(tokens[:i])
@@ -45,17 +41,7 @@ def _shrink_to_boundary(text: str, run_len: int) -> str | None:
 
 
 def _fit_label(text: str, run_len: int) -> str | None:
-    """Best renderable form of `text` that fits in `run_len` columns, or
-    `None` if the label should be dropped. Tried in order:
-
-    1. The label in full (no shrink needed).
-    2. A caller-recognised abbreviation (`LABEL_ABBREVIATIONS`), in full.
-    3. A word/separator-boundary-safe shrink of the abbreviation (if one
-       exists) or, failing that, of the original text — a shortened prefix
-       plus `ELLIPSIS`, built only from whole tokens so it never cuts a word
-       in half.
-    4. Dropped — no readable form fits this run.
-    """
+    """Best renderable form of `text` fitting `run_len` columns: full, abbreviation, shrunk, or `None` to drop."""
     sup = superscript(text)
     if len(sup) <= run_len:
         return sup
@@ -71,45 +57,13 @@ def _fit_label(text: str, run_len: int) -> str | None:
 
 
 def _overlay_labels(chars: list[str], fills: list[bool], labels: tuple[tuple[str, int], ...]) -> None:
-    """Overlay superscript labels onto fill-only columns of a 0-indexed buffer.
-
-    Each label is `(text, start_col)` with `start_col` 1-indexed — the column
-    it names, not a fixed print position. Elbows, corners, session id, and
-    pill columns are never fill, so they split the border into runs of
-    contiguous fill columns that a label can never cross into or overwrite.
-
-    A label whose anchor doesn't sit in a fill run is dropped outright (its
-    named column carries no border dash to write on). Otherwise, resolving a
-    label happens in two independent steps:
-
-    - **Fit** (`_fit_label`): pick the best renderable form of the label —
-      full text, a caller-supplied abbreviation, or a whole-word-boundary
-      shrink of either — that fits within the anchor's *containing* fill
-      run, or drop the label if nothing readable fits. This never produces a
-      mid-word fragment: every candidate is either the complete label/
-      abbreviation or a prefix built from whole tokens plus a trailing
-      `ELLIPSIS` marker.
-    - **Place**: if the fitted text is longer than would remain from the
-      anchor to the run's end, shift the write position left (never past the
-      run's start, and never past the anchor itself, so the label always
-      still covers the column it names) just far enough for the whole thing
-      to land inside the run. A label that already fits at its anchor is
-      never shifted.
-
-    A column a label writes is itself marked non-fill, so a later label in
-    the same call is confined to whatever run remains — it shrinks, shifts,
-    or drops against an already-placed label exactly as it would against an
-    elbow. Labels are processed in the given order, so anchors should be
-    left-to-right. Placement is a pure function of the run's fixed boundaries
-    and the label's own text, so it is deterministic and never jitters as
-    surrounding widths change by one column.
-    """
+    """Overlay superscript labels onto fill-only columns; elbows/corners/pill columns are never fill."""
     n = len(chars)
     for text, start_col in labels:
         idx = start_col - 1
         if idx < 0 or idx >= n or not fills[idx]:
-            continue  # anchor itself isn't on a fill column -> drop
-        # Contiguous fill run containing the anchor.
+            continue  # anchor not on a fill column -> drop
+        # contiguous fill run containing the anchor
         run_start = idx
         while run_start - 1 >= 0 and fills[run_start - 1]:
             run_start -= 1
@@ -119,16 +73,15 @@ def _overlay_labels(chars: list[str], fills: list[bool], labels: tuple[tuple[str
         run_len = run_end - run_start + 1
         out = _fit_label(text, run_len)
         if out is None:
-            continue  # nothing readable fits this run; drop it
+            continue  # nothing fits; drop
         length = len(out)
-        # Shift left just enough to fit, never past the run's start and
-        # never past the anchor (the label must still cover its column).
+        # shift left to fit, never past run_start or the anchor
         start = min(idx, run_end - length + 1)
         start = max(start, run_start)
         for offset, g in enumerate(out):
             i = start + offset
             chars[i] = g
-            fills[i] = False  # claim the column so later labels yield to it
+            fills[i] = False  # claim column so later labels yield to it
 
 
 class BorderRenderer:
@@ -150,13 +103,9 @@ class BorderRenderer:
             if p.active and p.start <= col <= p.end:
                 return p.border_fg(col)
             return self.gradient.grad_at(pos, width, fill=fill)
-        # Per-column base glyph + fill-only mask (1..width stored 0-indexed). A
-        # column is fill only when it is plain '─' (overwritable by a label);
-        # corners, elbows, session id, and pill columns are never fill.
+        # per-column glyph + fill mask, 1..width stored 0-indexed; corners/elbows/session id/pill are never fill
         chars: list[str] = [''] * width
         fills: list[bool] = [False] * width
-        # Colour prefix per column; session-id run is emitted as one block on
-        # its first column so the ordered pass stays byte-identical to before.
         prefix: list[str] = [''] * width
         suffix: list[str] = [''] * width
 
@@ -172,8 +121,6 @@ class BorderRenderer:
                 avail = max(0, min(avail, p.start - 5))
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + ELLIPSIS
             sid_w = _visible_width(sid)
-            # cols 2 and 3 are fill-form '─'/'┬'/pill; the session id occupies
-            # the next sid_w columns as a single coloured italic run.
             for col in (2, 3):
                 prefix[col - 1] = _clr(col, col - 1)
                 chars[col - 1] = _ch(col)
@@ -210,9 +157,7 @@ class BorderRenderer:
         parts.append(self.R)
         return ''.join(parts)
 
-    # Version-tag glyphs sweep from the theme grey (first char) to a
-    # brighter-but-still-muted grey (last char) — a quiet ramp that stays
-    # legible without shouting pure white against the border.
+    # version-tag glyphs sweep theme grey -> brighter grey, left to right
     VERSION_BRIGHT_RGB = (160, 160, 160)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0, timing: str = '', version: str = '') -> str:
@@ -221,14 +166,7 @@ class BorderRenderer:
         for i in range(width - 2):
             chars.append(BOX_T_UP if (i + 2) in ups_set else BOX_H)
         chars.append(BOX_ARC_BR)
-        # Overlay the annotation (`[timing ]version`) right-aligned into the
-        # bottom edge, leaving two fill cells before the corner
-        # (`…47.2ms┈v0.6.2┈┄╌─╯` — a dashed cell separates the two). Glyphs
-        # land only on plain fill columns, so an
-        # elbow or the corner is never disturbed and the visible width stays
-        # exactly `width`. Version glyphs are remembered so the paint loop can
-        # style them (bold, grey→muted-grey gradient, merging into the
-        # border's own fill colour once it reaches them) apart from the timing.
+        # `[timing ]version` overlaid right-aligned into the bottom edge; glyphs only land on plain fill columns
         annotation = f'{timing}{BOX_H_DASH4}{version}' if timing and version else (timing or version)
         version_cols: set[int] = set()
         if annotation:
@@ -241,11 +179,7 @@ class BorderRenderer:
                         chars[idx] = g
                         if off >= version_from:
                             version_cols.add(idx)
-                # Dashed lead-in/out: up to three fill cells on each side of
-                # the annotation ramp between the solid rule and the glyphs
-                # (`──╌┄┈47.2ms┈v0.6.2┈┄╌──`, densest dash nearest the text).
-                # Only plain fill cells are converted, so an elbow or corner
-                # inside the ramp zone stops it short.
+                # dashed lead-in/out ramp on each side of the annotation, only over plain fill cells
                 for dist, dash in enumerate((BOX_H_DASH4, BOX_H_DASH, BOX_H_DASH2), 1):
                     left, right = start - dist, start + len(annotation) - 1 + dist
                     if left >= 1 and chars[left] == BOX_H:
@@ -253,18 +187,12 @@ class BorderRenderer:
                     if right < width - 1 and chars[right] == BOX_H:
                         chars[right] = dash
         parts: list[str] = []
-        # Same denom/t formula `grad_at` uses internally to decide fill vs
-        # off -- reusing it (rather than re-deriving a separate boundary)
-        # guarantees the version tag's per-character fill/grey split lands on
-        # exactly the same column the border's own fill reaches, no off-by-one.
+        # same fill/off boundary formula as grad_at, so the version tag lands on the exact same column
         denom = max(1, width - 1)
         for i in range(width):
             if i in version_cols:
                 if (i / denom) <= fill:
-                    # The border's own fill has already reached/passed this
-                    # column -- let the glyph merge into the fill colour
-                    # instead of the grey sweep, staying bold.
-                    clr = self.gradient.grad_at(i, width, fill=fill)
+                    clr = self.gradient.grad_at(i, width, fill=fill)  # already inside the fill -> merge with it
                 else:
                     lo, hi = min(version_cols), max(version_cols)
                     u = (i - lo) / max(1, hi - lo)
@@ -350,8 +278,7 @@ class BorderRenderer:
                     ch = BOX_T_UP
                 else:
                     ch = BOX_H_DASH
-                # Per-column dim factor stays baked into the colour prefix, so an
-                # overlaid label glyph inherits the same dim for free.
+                # dim factor baked into the colour prefix, so an overlaid label glyph inherits it for free
                 prefix[col - 1] = self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill)
                 chars[col - 1] = ch
                 fills[col - 1] = (ch == BOX_H_DASH)

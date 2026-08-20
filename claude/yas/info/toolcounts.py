@@ -1,66 +1,17 @@
 """Per-tool tool_use counting with a main-vs-sub split, plus lines read/changed.
 
-Counts ``tool_use`` blocks per tool name across the main transcript and the
-session's subagent transcripts, windowed to the last ``/clear`` and split into a
-``main`` column (the session's own transcript) and a ``sub`` column (summed over
-every subagent transcript). Also counts lines read and changed per transcript.
+Dedup keeps the LAST occurrence per message.id (opposite of transcript.py/subagents.py's
+first-wins) since streamed writes to the same id can grow more tool_use blocks over time.
 
-Dedup differs from the sibling readers on purpose. ``transcript.py`` and
-``subagents.py`` keep the FIRST occurrence per ``message.id`` — correct for token
-accounting, where usage is stable across the streamed writes and first-wins
-avoids double-counting. Here we keep the LAST occurrence per ``message.id``:
-``tool_use`` blocks carry no stable id of their own, and streaming writes the
-same ``message.id`` several times where earlier partial writes may contain FEWER
-``tool_use`` blocks than the final write. To count the true number of tool calls
-we must count the content of the last write per id. Do NOT "fix" this to match
-the sibling parsers — first-wins would undercount.
+In-scope tools for line counts: Read, Write, Edit, and DesignSync's get_file method.
+NotebookEdit and others are excluded.
 
-## In-scope tools
+Edit lines_changed = max(newlines(old_string), newlines(new_string)); Write = newlines(content).
+replace_all:true counts once regardless of replacement count.
 
-Four tools contribute to line counts: ``Read``, ``Write``, ``Edit``, and the MCP
-``DesignSync`` tool's ``get_file`` method (all other ``DesignSync`` methods,
-e.g. ``list_files``, are not reads). Others (``Bash``, ``NotebookEdit``, etc.)
-are excluded. ``NotebookEdit`` is excluded because its cell model does not map
-cleanly to line counts.
-
-## Lines read measurement
-
-For each ``Read`` ``tool_use``, ``lines_read`` accumulates the newline count of
-the paired ``tool_result.content``, but only when that content is a string
-whose first line starts with a numeric ``cat -n``-style prefix (one or more
-digits followed by a tab). The numbering starts at the ``offset`` argument
-when one is given, not necessarily at line 1 — ``Read(offset=500)`` yields
-content beginning ``"500\t..."``, which still counts. Image and document
-reads have list-valued content and are skipped. This is the canonical sniff
-test for text-shaped reads.
-
-For each ``DesignSync`` ``tool_use`` with ``input.method == 'get_file'``,
-``lines_read`` accumulates the newline count of the ``.content`` field inside
-the paired ``tool_result``, whose content is a JSON *string* shaped like
-``{"method":"get_file","path":...,"content":"<file text>"}`` rather than a
-``cat -n`` blob. If the result content doesn't parse as that shape (e.g. a
-harness-truncated ``<persisted-output>`` wrapper), the entry is skipped, not
-raised.
-
-## Lines changed measurement
-
-- ``Edit``: counted as ``max(newlines(old_string), newlines(new_string))``, the
-  size of the touched hunk.
-- ``Write``: counted as ``newlines(content)``, the whole file written.
-
-``replace_all: true`` is counted **once regardless of the number of replacements**,
-so a bulk rename undercounts. This is accepted — the alternative requires
-re-reading the edited file for every ``Edit``, which adds I/O cost.
-
-## Main vs subagent sidechain asymmetry
-
-Records with ``isSidechain: true`` in the **main** transcript are skipped;
-``agent-*.jsonl`` files are counted in full with no sidechain filter. This is
-deliberate: some dispatch conventions emit ``isSidechain: true`` for every
-subagent record, so applying the skip to subagents would silently zero their
-entire contribution, breaking the by-construction invariant
-``session_total == main + Σ(subagents)``. The main-transcript skip alone suffices
-because tool_use ids are fully disjoint between the two files.
+isSidechain:true records are skipped in the main transcript only, not subagent files —
+some dispatch conventions tag every subagent record as sidechain, which would zero their
+contribution if the skip applied there too. Safe because tool_use ids are disjoint between files.
 """
 
 from __future__ import annotations
@@ -74,13 +25,9 @@ from yas.constants import META_EXCLUDE_TOOLS
 from yas.info.parsecache import TranscriptCache
 from yas.info.subagents import RunningSubagent, _parse_iso_to_epoch
 
-# Matches a cat -n style leading line number (any starting offset, not just
-# line 1 — Read(offset=N) numbers its cat -n blob starting at N).
+# cat -n style leading line number, any starting offset (Read(offset=N) numbers from N)
 _CAT_N_PREFIX_RE = re.compile(r'^\d+\t')
-# Byte-level equivalent of the above, for the pre-filter below (cheaper than
-# json.loads; must not assume the numbering starts at 1). Matched against the
-# raw JSON-encoded line, where a tab is escaped as the two-byte sequence
-# b'\t' (backslash, t), not a literal tab byte.
+# byte-level equivalent for the raw-line pre-filter (JSON-escaped tab is the 2 bytes \t)
 _CAT_N_PREFIX_BYTES_RE = re.compile(rb'\d\\t')
 
 
@@ -101,23 +48,10 @@ def count_transcript(
     cache: TranscriptCache | None = None,
     st: os.stat_result | None = None,
 ) -> TranscriptToolStats:
-    """Count tool_use blocks and line activity in one transcript file.
-
-    Returns a ``TranscriptToolStats`` with tool counts, lines read, and lines
-    changed for ``tool_use`` blocks at or after ``clear_epoch`` (whole file when
-    ``clear_epoch`` is None), deduped by ``message.id`` keeping the LAST
-    occurrence, meta-excluded, MCP-normalized.
-
-    When ``skip_sidechain`` is True, records with ``isSidechain: true`` are
-    skipped; when False, they are counted in full. This asymmetry is deliberate:
-    see the module docstring.
-
-    Never raises; an unreadable/malformed file yields empty counts and zeros.
-    """
+    """Count tool_use blocks and line activity in one transcript, at or after clear_epoch. Never raises."""
     if not path:
         return TranscriptToolStats(counts={}, lines_read=0, lines_changed=0)
 
-    # Attempt cache hit when cache is present (Task 4.1).
     if cache is not None:
         try:
             st = st or os.stat(path)
@@ -141,47 +75,28 @@ def count_transcript(
                     )
 
     def _nl(s: object) -> int:
-        """Count newlines in a string, or 0 if not a string."""
         return s.count('\n') if isinstance(s, str) else 0
 
-    # message.id -> tool names from the most recent line seen for that id.
-    per_id: dict[str, list[str]] = {}
-    # message.id -> total lines_changed from all Edit/Write in that id.
-    per_id_changed: dict[str, int] = {}
-    # tool_use id -> True for each Read seen; used to match tool_result.
-    read_ids: set[str] = set()
-    # tool_use id -> True for each DesignSync get_file call seen; matched
-    # against tool_result the same way, but the result is a JSON string
-    # rather than a cat -n blob (see the DesignSync branch below).
-    designsync_read_ids: set[str] = set()
-    # tool_use_id -> True once its tool_result has contributed to lines_read,
-    # so a retransmitted/duplicate tool_result can't double-count.
-    counted_read_ids: set[str] = set()
+    per_id: dict[str, list[str]] = {}          # message.id -> tool names, most recent line wins
+    per_id_changed: dict[str, int] = {}        # message.id -> total lines_changed
+    read_ids: set[str] = set()                 # tool_use id -> seen Read, for matching tool_result
+    designsync_read_ids: set[str] = set()      # tool_use id -> seen DesignSync get_file
+    counted_read_ids: set[str] = set()         # tool_use_id already counted, guards duplicate tool_result
     lines_read = 0
     lines_changed = 0
 
     try:
         with open(path, 'rb') as fh:
             for raw in fh:
-                # V2 pre-filters (Decision 6): filter before json.loads.
-
-                # (a) skip lines lacking both tool_use and tool_result
+                # pre-filter before json.loads
                 if b'"tool_use"' not in raw and b'"tool_result"' not in raw:
                     continue
-
-                # (b) if line has tool_result but not tool_use, require either
-                #     a cat -n style digit-tab marker (JSON-escaped as e.g.
-                #     '500\t', native Read — numbering may start at any
-                #     offset, not just line 1) or the DesignSync get_file
-                #     marker before decoding.
                 if b'"tool_result"' in raw and b'"tool_use"' not in raw:
                     if (
                         not _CAT_N_PREFIX_BYTES_RE.search(raw)
                         and b'get_file' not in raw
                     ):
                         continue
-
-                # (c) if skip_sidechain, reject sidechain records before decoding.
                 if skip_sidechain:
                     if b'"isSidechain":true' in raw or b'"isSidechain": true' in raw:
                         continue
@@ -190,23 +105,14 @@ def count_transcript(
                     d = json.loads(raw)
                     msg = d.get('message') or {}
 
-                    # Clear_epoch guard: the single window for both tool counts
-                    # and line counts (Decision 4). Applied to every record,
-                    # tool_use and tool_result alike, before either walk below.
                     if clear_epoch is not None:
                         ts = d.get('timestamp', '') or ''
                         if _parse_iso_to_epoch(ts) < clear_epoch:
                             continue
 
-                    # Walk tool_result blocks to extract lines_read (Decision 6).
-                    # This runs unconditionally, independent of message.id: a
-                    # tool_result always lives on a user-role message, which in
-                    # real transcripts never carries a message.id at all — gating
-                    # this walk on `mid` (as tool_use accounting does) would skip
-                    # every tool_result, unconditionally. Keyed only on
-                    # tool_use_id membership in read_ids, which the tool_use walk
-                    # below populates from assistant-role lines that always
-                    # precede the matching tool_result in the file (Decision 7).
+                    # tool_result lives on a user-role message with no message.id, so this
+                    # walk is unconditional; keyed on tool_use_id membership from the tool_use
+                    # walk below (which always precedes it in the file).
                     for block in msg.get('content') or []:
                         if not isinstance(block, dict):
                             continue
@@ -217,22 +123,13 @@ def count_transcript(
                             continue
                         content = block.get('content')
                         if tool_use_id in read_ids:
-                            # Only count if content is a string starting with
-                            # a cat -n style digit-tab prefix (Decision 2).
-                            # The numbering may start at any offset, not just
-                            # line 1 (Read(offset=N) numbers from N).
                             if isinstance(content, str) and _CAT_N_PREFIX_RE.match(
                                 content
                             ):
                                 lines_read += content.count('\n')
                             counted_read_ids.add(tool_use_id)
                         elif tool_use_id in designsync_read_ids:
-                            # DesignSync's result is a JSON string shaped like
-                            # {"method":"get_file","path":...,"content":...}
-                            # rather than a cat -n blob. Parse it and count
-                            # newlines in the .content field; skip (don't
-                            # crash) on any shape mismatch, e.g. a
-                            # <persisted-output> wrapper from truncation.
+                            # result is JSON {"method":"get_file",...,"content":...}, not a cat -n blob
                             if isinstance(content, str):
                                 try:
                                     parsed = json.loads(content)
@@ -324,7 +221,6 @@ def count_transcript(
         lines_changed=lines_changed,
     )
 
-    # Cache the result when cache is present and we have stat info (Task 4.1).
     if cache is not None and st is not None:
         cache.put_counts(
             path, st, clear_epoch, skip_sidechain,
@@ -346,21 +242,17 @@ class ToolCounts:
         lines_changed: int = 0,
         per_agent: dict[str, tuple[int, int]] | None = None,
     ) -> None:
-        # tool name (MCP-normalized) -> (main_count, sub_count)
-        self.counts = counts if counts is not None else {}
-        # Session totals: main + all subagents.
-        self.lines_read = lines_read
+        self.counts = counts if counts is not None else {}  # tool name -> (main_count, sub_count)
+        self.lines_read = lines_read        # session total: main + all subagents
         self.lines_changed = lines_changed
-        # Per-subagent breakdown: transcript path -> (lines_read, lines_changed)
-        self.per_agent = per_agent if per_agent is not None else {}
+        self.per_agent = per_agent if per_agent is not None else {}  # transcript path -> (lines_read, lines_changed)
 
     @property
     def total_types(self) -> int:
         """Number of distinct tool types counted (for +k overflow math)."""
         return len(self.counts)
 
-    # Backwards-compatible alias.
-    type_count = total_types
+    type_count = total_types  # alias
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ToolCounts):
@@ -391,21 +283,12 @@ class ToolCounts:
         clear_epoch: float | None,
         cache: TranscriptCache | None = None,
     ) -> ToolCounts:
-        """Build the merged ``(main, sub)`` counts and session line totals.
-
-        Also computes per-subagent line counts. The sidechain skip is asymmetric
-        (main only, not subagents) — if applied to subagents, some dispatch
-        conventions would zero the entire subagent contribution, breaking the
-        by-construction invariant ``session_total == main + Σ(subagents)``.
-        The id-disjointness verified in design.md Context makes this safe.
-        """
-        # Gather main transcript with sidechain skip (Decision 4).
+        """Build the merged (main, sub) counts, session line totals, and per-subagent line counts."""
         main_stats = count_transcript(
             main_path, clear_epoch, skip_sidechain=True, cache=cache
         )
         main_counts = main_stats.counts
 
-        # Gather subagents with NO sidechain skip (Decision 4).
         sub_counts: dict[str, int] = {}
         per_agent_lines: dict[str, tuple[int, int]] = {}
         total_lines_read = main_stats.lines_read
@@ -415,10 +298,8 @@ class ToolCounts:
             agent_stats = count_transcript(
                 agent.jsonl_path, clear_epoch, skip_sidechain=False, cache=cache
             )
-            # Accumulate tool counts across subagents.
             for name, n in agent_stats.counts.items():
                 sub_counts[name] = sub_counts.get(name, 0) + n
-            # Record per-subagent line counts and accumulate to session total.
             per_agent_lines[agent.jsonl_path] = (
                 agent_stats.lines_read,
                 agent_stats.lines_changed,
@@ -426,7 +307,6 @@ class ToolCounts:
             total_lines_read += agent_stats.lines_read
             total_lines_changed += agent_stats.lines_changed
 
-        # Build the final (main, sub) tool counts.
         counts: dict[str, tuple[int, int]] = {}
         for name in main_counts.keys() | sub_counts.keys():
             counts[name] = (main_counts.get(name, 0), sub_counts.get(name, 0))

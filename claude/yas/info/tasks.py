@@ -25,8 +25,8 @@ class Task:
         subject:      str,
         active_form:  str,
         status:       str,  # 'pending' | 'in_progress' | 'completed'
-        started_at:   float | None = None,    # epoch secs of latest → in_progress (D1)
-        completed_at: float | None = None,    # epoch secs of latest → completed (D1)
+        started_at:   float | None = None,    # epoch secs of latest -> in_progress
+        completed_at: float | None = None,    # epoch secs of latest -> completed
     ) -> None:
         self.id           = id
         self.subject      = subject
@@ -51,7 +51,7 @@ class Task:
 class TaskList:
     __slots__ = ('tasks', 'last_event_ts')
 
-    FRESHNESS_CAP = 120.0  # 2 min — see docs/adr/0004
+    FRESHNESS_CAP = 120.0  # 2 min
     GRACE_SECONDS = 20.0   # matches RunningSubagents.STALE_SECONDS
 
     def __init__(self, tasks: list[Task] | None = None, last_event_ts: float = 0.0) -> None:
@@ -97,9 +97,7 @@ class TaskList:
                         name = c.get('name', '')
                         inp  = c.get('input') or {}
                         if name == 'TaskCreate':
-                            # D2: a TaskCreate folded while all known tasks are
-                            # completed (and at least one exists) opens a new
-                            # generation — discard prior tasks, restart ids at 1.
+                            # TaskCreate while all known tasks are completed opens a new generation
                             if by_id and all(t.status == 'completed' for t in by_id.values()):
                                 by_id = {}
                                 next_id = 1
@@ -118,7 +116,6 @@ class TaskList:
                                 continue
                             new_status = inp.get('status')
                             if new_status in ('pending', 'in_progress', 'completed'):
-                                # D1: capture per-task timestamps on transitions.
                                 if new_status == 'in_progress':
                                     t.started_at = ts
                                     t.completed_at = None
@@ -162,9 +159,7 @@ class TaskList:
             return False
         if now is None:
             now = time.time()
-        # D5: pinned visible while any task is in_progress, regardless of cap —
-        # a long-running step emits no event but its live timer proves freshness.
-        if any(t.status == 'in_progress' for t in self.tasks):
+        if any(t.status == 'in_progress' for t in self.tasks):  # pinned visible regardless of freshness cap
             return True
         age = now - self.last_event_ts
         if age > self.FRESHNESS_CAP:

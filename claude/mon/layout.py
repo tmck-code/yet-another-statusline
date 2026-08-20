@@ -20,8 +20,7 @@ def _pad_or_clip(s: str, width: int) -> str:
     if vis < width:
         return s + ' ' * (width - vis)
     if vis > width:
-        # Clip: remove characters from the raw string until visible width == width
-        # Walk the raw string, skipping escape sequences.
+        # walk the raw string, skipping escape sequences, until visible width == width
         import re
         _ESC = re.compile(r'\033\[[0-9;]*m')
         result = []
@@ -138,8 +137,7 @@ def clip_to_height(
     for box in rendered_boxes:
         n_lines = box.count('\n') + 1
         if used + n_lines > available_height:
-            # This box doesn't fit; all remaining boxes are hidden.
-            break
+            break  # doesn't fit; all remaining boxes are hidden
         visible.append(box)
         used += n_lines
     hidden_count = len(rendered_boxes) - len(visible)

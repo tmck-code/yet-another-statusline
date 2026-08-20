@@ -53,9 +53,7 @@ def model_key(name: str) -> str:
     return 'other'
 
 
-# Trailing bracket suffix on a model string, e.g. 'sonnet[1m]' -> '[1m]'.
-# Agent frontmatter (and some raw model ids) can carry a context-window
-# variant this way; keep it visible instead of letting `model_key` swallow it.
+# trailing bracket suffix, e.g. 'sonnet[1m]' -> '[1m]'
 _MODEL_SUFFIX_RE = re.compile(r'\[[^\]]*\]$')
 
 
@@ -65,7 +63,7 @@ def model_suffix(name: str) -> str:
 
 
 def model_display(name: str) -> str:
-    """Short model key plus any bracketed context-size suffix (e.g. 'sonnet[1m]')."""
+    """Short model key plus bracketed context-size suffix, e.g. 'sonnet[1m]'."""
     return model_key(name) + model_suffix(name)
 
 
@@ -77,13 +75,7 @@ _MODEL_VERSION_RE = re.compile(r'^(\d+)')
 
 
 def model_form_short(name: str) -> str:
-    """Semantic abbreviation for the top-right pill's 'short' model_form.
-
-    'Opus 5 1M' -> 'O5-1m'. First letter of the family, the major version
-    number if present, and a '-1m' suffix when the 1M-context variant is
-    named. Unlike model_key(), this keeps the version digit instead of
-    collapsing to a bare family name.
-    """
+    """Top-right pill abbreviation, e.g. 'Opus 5 1M' -> 'O5-1m'."""
     tokens = name.split()
     if not tokens:
         return '?'
@@ -103,11 +95,7 @@ def model_form_short(name: str) -> str:
 
 
 def thinking_form_short(thinking: str) -> str:
-    """First-letter abbreviation of a thinking/effort string, e.g. 'low' -> 'l'.
-
-    Compound forms like 'low/fast' abbreviate each '/'-separated part, e.g.
-    'l/f'.
-    """
+    """First-letter abbreviation, e.g. 'low' -> 'l', 'low/fast' -> 'l/f'."""
     if not thinking:
         return ''
     return '/'.join(part[0].lower() for part in thinking.split('/') if part)
@@ -273,17 +261,7 @@ class GradientEngine:
         return ''.join(parts)
 
     def sparkline_1row(self, history: list[int], live: bool = False) -> str:
-        """Single-row block-element sparkline.
-
-        Each value maps to a level in [0, 8] by ``round(ratio * 8)`` against the
-        window peak, indexing ``' ▁▂▃▄▅▆▇█'`` (a leading blank for zero, then the
-        eight rising block elements U+2581–U+2588). Each cell is coloured by that
-        same ratio via :meth:`spark_color`. ``history`` is drawn left-to-right in
-        index order, so the *first* (leftmost) cell is the live/in-flight bucket
-        and is the one dimmed when ``live`` — callers that want the newest sample
-        on the left feed the bucket history newest-first. Returns ``''`` for
-        empty history.
-        """
+        """Block-element sparkline; history is drawn left-to-right, index 0 is dimmed when live."""
         if not history:
             return ''
         peak  = max(history) or 1

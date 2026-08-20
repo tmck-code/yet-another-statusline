@@ -1,8 +1,7 @@
 """Transcript parse cache — per-session persistence of transcript parses and derived counts.
 
-This is a pure performance cache; every stored value is re-derivable from the
-transcript. Any doubt about validity resolves to a miss. Nothing here may
-ever change rendered output.
+Pure performance cache: every value is re-derivable from the transcript. Any
+doubt about validity resolves to a miss.
 """
 
 from __future__ import annotations
@@ -25,25 +24,14 @@ from yas.constants import (
 
 
 def cache_path(session_id: str) -> Path:
-    """Return the cache file path for a session.
-
-    Delegates to yas.constants.transcript_cache_path(), which resolves
-    CLAUDE_DIR at call time — so a test's monkeypatch of
-    yas.constants.CLAUDE_DIR reaches this too. Path lives under the
-    consolidated yas/cache/ tree (see yas.constants.cache_dir()), not the
-    old top-level yas-cache/ directory.
-    """
     return transcript_cache_path(session_id)
 
 
 class TranscriptCache:
-    """Cached parses and derived stats from a transcript.
-
-    Entries are keyed by str(path) and sub-keyed by parse inputs (resume_after,
-    clear_epoch, skip_sidechain) or tail-state identifiers. Each entry tracks
-    (mtime, size) to detect stale data. Whole-file results (parse, counts) are
-    validated by exact (mtime, size) match; tail-state results (notif, tres)
-    are returned regardless and the CALLER validates.
+    """Cached parses and derived stats from a transcript, keyed by str(path) and
+    sub-keyed by parse inputs. Whole-file results (parse, counts) are validated
+    by exact (mtime, size) match; tail-state results (notif, tres) are returned
+    regardless and the CALLER validates.
     """
 
     __slots__ = ('session_id', '_entries', '_dirty')
@@ -55,12 +43,8 @@ class TranscriptCache:
 
     @classmethod
     def load(cls, session_id: str) -> TranscriptCache:
-        """Load the cache for a session, or return an empty instance on any failure.
-
-        Returns an empty instance when the file is missing, unreadable, non-JSON,
-        not a dict, has v != TRANSCRIPT_CACHE_VERSION, has a session field that
-        does not match, or any entry is malformed. Blanket except Exception.
-        """
+        """Load the cache for a session; empty instance on any failure (missing,
+        unreadable, bad version/session, malformed entries)."""
         cache = cls(session_id)
         path = cache_path(session_id)
 
@@ -84,15 +68,13 @@ class TranscriptCache:
             if not isinstance(entries, dict):
                 return cache
 
-            # Load entries; drop any that are malformed.
+            # Drop malformed entries.
             for path_key, entry in entries.items():
                 if not isinstance(entry, dict):
                     continue
-                # Validate top-level entry shape.
                 try:
                     cache._entries[path_key] = entry
                 except Exception:
-                    # Drop malformed entry.
                     continue
 
             cache._dirty = False
@@ -102,12 +84,7 @@ class TranscriptCache:
             return cache
 
     def _entry(self, path: str, st: os.stat_result) -> dict[str, object] | None:
-        """Return the stored entry if (mtime, size) match; else drop stale results.
-
-        Exact float comparison, no epsilon. Drops parse and counts but preserves
-        mtime/size so a changed file is always re-read. Returns None when absent
-        or stale.
-        """
+        """Entry if (mtime, size) match exactly; else drop stale parse/counts and return None."""
         if path not in self._entries:
             return None
 
@@ -116,7 +93,6 @@ class TranscriptCache:
         stored_size = entry.get('size')
 
         if stored_mtime != st.st_mtime or stored_size != st.st_size:
-            # Stale: drop whole-file results but keep entry structure.
             entry.pop('parse', None)
             entry.pop('counts', None)
             return None
@@ -126,13 +102,8 @@ class TranscriptCache:
     def get_parse(
         self, path: str, st: os.stat_result, resume_after: float
     ) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float] | None:
-        """Return cached parse result for (path, resume_after) or None.
-
-        On load, re-tuple the stored 8-list into
-        (int, int, int, float, str, (str, str, dict), float, float).
-        Validates shape (length 8, element 5 a 3-sequence) and returns None
-        on any mismatch.
-        """
+        """Cached parse result for (path, resume_after), re-tupled to the 8-field
+        shape, or None on absence/shape mismatch."""
         entry = self._entry(path, st)
         if entry is None:
             return None
@@ -177,11 +148,7 @@ class TranscriptCache:
         resume_after: float,
         result: tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float],
     ) -> None:
-        """Cache a parse result.
-
-        Sub-key is repr(float(resume_after)). Trims the sub-map to the newest
-        TRANSCRIPT_CACHE_SUBKEY_MAX entries.
-        """
+        """Cache a parse result, sub-keyed by repr(float(resume_after))."""
         if path not in self._entries:
             self._entries[path] = {}
 
@@ -199,7 +166,6 @@ class TranscriptCache:
         parses = cast('dict[str, object]', entry['parse'])
         subkey = repr(float(resume_after))
 
-        # Convert tuple to list for JSON serialization.
         if len(result) == 8 and isinstance(result[5], tuple) and len(result[5]) == 3:
             stored = [
                 result[0],
@@ -213,10 +179,9 @@ class TranscriptCache:
             ]
             parses[subkey] = stored
         else:
-            # Invalid shape; don't cache.
             return
 
-        # Trim to newest TRANSCRIPT_CACHE_SUBKEY_MAX entries.
+        # Trim sub-map to TRANSCRIPT_CACHE_SUBKEY_MAX entries, sorted by key (not recency).
         if len(parses) > TRANSCRIPT_CACHE_SUBKEY_MAX:
             keys = sorted(parses.keys())
             for old_key in keys[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:
@@ -229,11 +194,7 @@ class TranscriptCache:
         clear_epoch: float | None,
         skip_sidechain: bool,
     ) -> dict[str, object] | None:
-        """Return cached counts result or None.
-
-        Shape is {'counts': {...}, 'lines_read': int, 'lines_changed': int}.
-        Returns None on shape mismatch or stale entry.
-        """
+        """Cached {'counts', 'lines_read', 'lines_changed'} result, or None on mismatch/staleness."""
         entry = self._entry(path, st)
         if entry is None:
             return None
@@ -262,7 +223,6 @@ class TranscriptCache:
 
             if not isinstance(counts, dict) or not isinstance(lines_read, int) or not isinstance(lines_changed, int):
                 return None
-
             return {
                 'counts': counts,
                 'lines_read': lines_read,
@@ -279,12 +239,7 @@ class TranscriptCache:
         skip_sidechain: bool,
         result: dict[str, object],
     ) -> None:
-        """Cache a counts result.
-
-        Shape is {'counts': {...}, 'lines_read': int, 'lines_changed': int}.
-        Sub-key is f'{clear_epoch!r}|{int(skip_sidechain)}'. Trims the sub-map
-        to the newest TRANSCRIPT_CACHE_SUBKEY_MAX entries.
-        """
+        """Cache a counts result, sub-keyed by f'{clear_epoch!r}|{int(skip_sidechain)}'."""
         if path not in self._entries:
             self._entries[path] = {}
 
@@ -304,24 +259,18 @@ class TranscriptCache:
 
         counts_map[subkey] = result
 
-        # Trim to newest TRANSCRIPT_CACHE_SUBKEY_MAX entries.
+        # Trim sub-map to TRANSCRIPT_CACHE_SUBKEY_MAX entries, sorted by key (not recency).
         if len(counts_map) > TRANSCRIPT_CACHE_SUBKEY_MAX:
             keys = sorted(counts_map.keys())
             for old_key in keys[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:
                 del counts_map[old_key]
 
     def _notif_to_json(self, n: '_Notification') -> list[object]:
-        """Convert a _Notification to a JSON-serializable list.
-
-        Format: [task_id, tool_use_id, status, ts].
-        """
+        """[task_id, tool_use_id, status, ts]."""
         return [n.task_id, n.tool_use_id, n.status, n.ts]
 
     def _notif_from_json(self, seq: object) -> '_Notification | None':
-        """Convert a JSON list back to a _Notification, or None on mismatch.
-
-        Format: [task_id, tool_use_id, status, ts].
-        """
+        """Inverse of _notif_to_json, or None on mismatch."""
         try:
             if not isinstance(seq, (list, tuple)) or len(seq) != 4:
                 return None
@@ -339,11 +288,8 @@ class TranscriptCache:
             return None
 
     def get_notif(self, path: str) -> tuple[float, int, int, list['_Notification']] | None:
-        """Return cached notification state (mtime, size, offset, items) or None.
-
-        items is a list of _Notification objects (or [] if empty).
-        Returned regardless of current (mtime, size) — the CALLER validates.
-        """
+        """Cached (mtime, size, offset, items) or None. Returned regardless of
+        current (mtime, size) — the CALLER validates."""
         if path not in self._entries:
             return None
 
@@ -369,7 +315,6 @@ class TranscriptCache:
             size = int(size)
             offset = int(offset)
 
-            # Decode items list.
             items: list['_Notification'] = []
             for item_seq in items_seq:
                 decoded = self._notif_from_json(item_seq)
@@ -383,16 +328,11 @@ class TranscriptCache:
     def put_notif(
         self, path: str, mtime: float, size: int, offset: int, items: list['_Notification']
     ) -> None:
-        """Cache notification state.
-
-        items is a list of _Notification objects.
-        """
+        """Cache notification state."""
         if path not in self._entries:
             self._entries[path] = {}
 
         entry = self._entries[path]
-
-        # Encode items.
         encoded_items = [self._notif_to_json(item) for item in items]
 
         entry['notif'] = {
@@ -406,11 +346,8 @@ class TranscriptCache:
         self._dirty = True
 
     def get_tool_results(self, path: str) -> tuple[float, int, int, dict[str, tuple[str, float]]] | None:
-        """Return cached tool results state (mtime, size, offset, results) or None.
-
-        results is a dict {tool_use_id: (status, ts), ...}.
-        Returned regardless of current (mtime, size) — the CALLER validates.
-        """
+        """Cached (mtime, size, offset, {tool_use_id: (status, ts)}) or None.
+        Returned regardless of current (mtime, size) — the CALLER validates."""
         if path not in self._entries:
             return None
 
@@ -436,7 +373,6 @@ class TranscriptCache:
             size = int(size)
             offset = int(offset)
 
-            # Decode results: convert [status, ts] back to (status, ts).
             results: dict[str, tuple[str, float]] = {}
             for tool_use_id, val in results_seq.items():
                 if not isinstance(val, (list, tuple)) or len(val) != 2:
@@ -450,16 +386,11 @@ class TranscriptCache:
     def put_tool_results(
         self, path: str, mtime: float, size: int, offset: int, results: dict[str, tuple[str, float]]
     ) -> None:
-        """Cache tool results state.
-
-        results is a dict {tool_use_id: (status, ts), ...}.
-        """
+        """Cache tool results state."""
         if path not in self._entries:
             self._entries[path] = {}
 
         entry = self._entries[path]
-
-        # Convert tuples to lists for JSON.
         encoded_results = {}
         for tool_use_id, (status, ts) in results.items():
             encoded_results[str(tool_use_id)] = [status, ts]
@@ -475,10 +406,7 @@ class TranscriptCache:
         self._dirty = True
 
     def mark_terminal(self, path: str) -> None:
-        """Mark a transcript as terminal (will not grow further).
-
-        Entries are still subject to pruning by age.
-        """
+        """Mark a transcript as terminal (will not grow further); still subject to age-pruning."""
         if path not in self._entries:
             self._entries[path] = {}
 
@@ -487,10 +415,7 @@ class TranscriptCache:
         self._dirty = True
 
     def is_terminal(self, path: str, st: os.stat_result) -> bool:
-        """Return True if the transcript is marked terminal AND (mtime, size) still match.
-
-        A changed file is always considered non-terminal (re-read required).
-        """
+        """True iff marked terminal AND (mtime, size) still match (a changed file is never terminal)."""
         if path not in self._entries:
             return False
 
@@ -499,7 +424,6 @@ class TranscriptCache:
         if not entry.get('terminal', False):
             return False
 
-        # Validate (mtime, size) match.
         stored_mtime = entry.get('mtime')
         stored_size = entry.get('size')
 
@@ -509,27 +433,19 @@ class TranscriptCache:
         return True
 
     def save(self) -> None:
-        """Save the cache to disk, with pruning and atomic write.
-
-        No-op when not _dirty. Prunes entries whose path no longer exists
-        and entries whose seen is older than TRANSCRIPT_CACHE_KEEP_SECONDS.
-        Writes to <path>.tmp then os.replace to <path> for atomicity.
-        Whole body in try/except (OSError, TypeError, ValueError).
-        """
+        """Save to disk (atomic write via .tmp + os.replace), pruning entries whose
+        path is gone or whose 'seen' exceeds TRANSCRIPT_CACHE_KEEP_SECONDS. No-op when not dirty."""
         if not self._dirty:
             return
 
         path = cache_path(self.session_id)
         now = time.time()
 
-        # Prune: drop entries whose path doesn't exist or are too old.
         entries_to_keep = {}
         for path_key, entry in self._entries.items():
-            # Skip if path no longer exists.
             if not os.path.exists(path_key):
                 continue
 
-            # Skip if entry is too old.
             seen = entry.get('seen')
             if isinstance(seen, (int, float)) and (now - float(seen) > TRANSCRIPT_CACHE_KEEP_SECONDS):
                 continue
