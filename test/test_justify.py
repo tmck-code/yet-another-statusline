@@ -16,10 +16,6 @@ import pytest
 import yas.layout as layout
 import yas.renderer as renderer_mod
 import yas.session as session_mod
-import yas.info.subagents as subagents_mod
-import yas.info.tasks as tasks_mod
-import yas.info.skills as skills_mod
-import yas.info.openspec as openspec_mod
 from yas.config import Config
 from yas.info import SessionView
 from yas.render.text import _visible_width
@@ -41,20 +37,6 @@ def _tick() -> TickRecord:
     return TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
 
 
-def _silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
-    # rainbow_step() is wall-clock-based by default, so two renders inside one
-    # test straddle a second boundary ~3-5% of the time and pick adjacent
-    # palette entries — enough to break a byte-for-byte comparison. Pin it.
-    monkeypatch.setenv('YAS_RAINBOW_STEP', '0')
-    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
-                        classmethod(lambda cls, sid, pdir, **kwargs: subagents_mod.RunningSubagents(subagents=[])))
-    monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
-                        classmethod(lambda cls, path, **kwargs: tasks_mod.TaskList(tasks=[], last_event_ts=0.0)))
-    monkeypatch.setattr(skills_mod.LoadedSkills, 'from_transcript',
-                        classmethod(lambda cls, path, **kwargs: skills_mod.LoadedSkills(names=[])))
-    monkeypatch.setattr(openspec_mod.OpenSpec, 'from_cwd',
-                        classmethod(lambda cls, cwd, max_depth=None, **kwargs: openspec_mod.OpenSpec(changes=[])))
-    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: ''))
 
 
 def _rendered_lines(view: SessionView, width: int) -> list[str]:
@@ -66,10 +48,9 @@ def _rendered_lines(view: SessionView, width: int) -> list[str]:
 
 @pytest.mark.parametrize('width', [95, 120, 140, 160])
 def test_justify_box_all_rows_uniform_width(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str], width: int
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str], width: int
 ) -> None:
     """With cfg.justify=True every rendered row is exactly `width` columns wide."""
-    _silence_dynamic(monkeypatch)
     view = _view(Config(justify=True))
     lines = _rendered_lines(view, width)
     widths = {_visible_width(strip_ansi(ln)) for ln in lines}
@@ -77,10 +58,9 @@ def test_justify_box_all_rows_uniform_width(
 
 
 def test_justify_top_content_row_is_width_wide(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """The top content row (index 1) rendered with justify=True is exactly ``width`` columns."""
-    _silence_dynamic(monkeypatch)
     width = 160
     view = _view(Config(justify=True))
     lines = [strip_ansi(ln) for ln in _rendered_lines(view, width)]
@@ -90,7 +70,7 @@ def test_justify_top_content_row_is_width_wide(
 # 4.3 – total_slack == 0 produces output identical to justify-disabled
 
 def test_justify_slack_zero_matches_unjustified(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """When fit_path fills the entire target width (slack=0), justify=True output
     is byte-for-byte identical to justify=False for the path/model row.
@@ -98,7 +78,6 @@ def test_justify_slack_zero_matches_unjustified(
     The tokens │ cost │ rate row carries its *own* justify slack pool (the row's
     internal breathing room — see test_tokens_cost), independent of the path
     row's slack, so it is excluded from this path-row equivalence check."""
-    _silence_dynamic(monkeypatch)
     # The top-row shed loop (build_wide) now tries the dir-full path forms
     # itself (via `path_git`) before ever calling `fit_path` — so patch
     # `path_git` to never fit (forcing every lower-priority section: 7d,
@@ -129,12 +108,11 @@ def test_justify_slack_zero_matches_unjustified(
 # 4.4 – N=3 distribution (no elapsed, no cache)
 
 def test_justify_n3_path_wider_than_unjustified(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """With N=3 sections and positive slack, the path section in the justify=True
     render is wider than in the justify=False render (slack is shared, not all
     concentrated in the gap before the right pill/text)."""
-    _silence_dynamic(monkeypatch)
     width = 160
     view_on  = _view(Config(justify=True))
     view_off = _view(Config(justify=False))
@@ -156,10 +134,9 @@ def test_justify_n3_path_wider_than_unjustified(
 
 
 def test_justify_n3_box_intact(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """N=3 distribution (no elapsed, no cache) keeps the box intact."""
-    _silence_dynamic(monkeypatch)
     width = 160
     view = _view(Config(justify=True))
     lines = [strip_ansi(ln) for ln in _rendered_lines(view, width)]
@@ -170,14 +147,13 @@ def test_justify_n3_box_intact(
 # 4.5 – path_extra distributed around the git block
 
 def test_justify_path_extra_split_around_git_block(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """With justify=True and git info present, path_extra is distributed around
     the ∈ git block: there are spaces *before* ∈ that were not present in the
     unjustified render, and spaces before the dirty-status indicator (or at the
     git-block end). The trailing-only append fallback must not be used when a
     branch separator is visible."""
-    _silence_dynamic(monkeypatch)
     width = 160
 
     # Render unjustified first so we know the natural position of ∈.
@@ -207,7 +183,7 @@ def test_justify_path_extra_split_around_git_block(
 # Inter-stat breathing room inside the 5h/7d helper sections
 
 def test_justify_elapsed_field_balanced(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """The elapsed/session-timer cell is a right-justified fixed-width atom
     baked in by ``Renderer.elapsed_section`` (``rjust(8)``). The justify pass
@@ -215,7 +191,6 @@ def test_justify_elapsed_field_balanced(
     total LHS/RHS whitespace around the visible digits is balanced (diff <=1)
     rather than stacking a fair added-slack split on top of an already
     right-justified string (which produced a diff of 2+, e.g. ``'   +13:27 '``)."""
-    _silence_dynamic(monkeypatch)
     import re
 
     tested = 0
@@ -237,7 +212,7 @@ def test_justify_elapsed_field_balanced(
 
 
 def test_justify_elapsed_field_balanced_at_zero_slack(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """Regression for the residual centering defect found at widths 102/112
     (kitchen-sink demo scenario, YAS_JUSTIFY=1): when a sibling section (e.g.
@@ -254,7 +229,6 @@ def test_justify_elapsed_field_balanced_at_zero_slack(
     the elapsed cell is still active -- picked by sweeping the fixture rather
     than forcing it, so this exercises the real shed/slack interaction
     instead of an artificial mock."""
-    _silence_dynamic(monkeypatch)
     import re
 
     tested = 0
@@ -277,12 +251,11 @@ def test_justify_elapsed_field_balanced_at_zero_slack(
 
 
 def test_justify_widens_helper_inter_stat_gap(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str],
 ) -> None:
     """With justify=True the 5h section's inter-stat separator widens beyond the
     single space the unjustified render uses (the example session's 5h limit is
     in its ``pct ∞`` form, so the pct↔∞ separator is the one that grows)."""
-    _silence_dynamic(monkeypatch)
     width = 160
 
     def _gap(lines: list[str]) -> int:
@@ -306,11 +279,10 @@ def test_justify_widens_helper_inter_stat_gap(
 
 @pytest.mark.parametrize('justify', [True, False])
 def test_no_digit_adjacent_to_border(
-    monkeypatch: pytest.MonkeyPatch, strip_ansi: Callable[[str], str], justify: bool,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, strip_ansi: Callable[[str], str], justify: bool,
 ) -> None:
     """Sweep widths 60-130 (ascii glyph mode, the reported failure's glyph mode)
     and assert no rendered row ever has a digit immediately touching `│`."""
-    _silence_dynamic(monkeypatch)
     monkeypatch.setenv('YAS_GLYPH_MODE', 'ascii')
     import re
     digit_touches_border = re.compile(r'\d[│|]|[│|]\d')

@@ -27,9 +27,15 @@ def _seed_legacy(claude_dir):
         (d / 'marker').write_text('dead weight')
 
 
-def test_full_migration_moves_land_with_contents(tmp_home):
+def _legacy_home(tmp_home):
+    '''tmp_home's .claude dir, pre-seeded with all nine legacy paths.'''
     claude_dir = tmp_home / '.claude'
     _seed_legacy(claude_dir)
+    return claude_dir
+
+
+def test_full_migration_moves_land_with_contents(tmp_home):
+    claude_dir = _legacy_home(tmp_home)
 
     assert migrate() is True
 
@@ -41,8 +47,7 @@ def test_full_migration_moves_land_with_contents(tmp_home):
 
 
 def test_full_migration_deletes_are_gone(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    claude_dir = _legacy_home(tmp_home)
 
     assert migrate() is True
 
@@ -53,8 +58,7 @@ def test_full_migration_deletes_are_gone(tmp_home):
 
 
 def test_full_migration_creates_six_dirs(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     assert migrate() is True
 
@@ -64,8 +68,7 @@ def test_full_migration_creates_six_dirs(tmp_home):
 
 
 def test_migration_is_idempotent(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     assert migrate() is True
     assert migrate() is True  # second run: nothing left to move/delete, still succeeds
@@ -77,8 +80,7 @@ def test_migration_is_idempotent(tmp_home):
 
 
 def test_move_skipped_when_destination_exists(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     # Pre-create every destination with sentinel content so a clobber is
     # observable, then confirm the legacy source content never lands.
@@ -95,8 +97,7 @@ def test_move_skipped_when_destination_exists(tmp_home):
 
 
 def test_version_file_shape(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     before = time.time()
     assert migrate() is True
@@ -111,8 +112,7 @@ def test_version_file_shape(tmp_home):
 
 
 def test_crash_resume(tmp_home):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    claude_dir = _legacy_home(tmp_home)
 
     assert migrate() is True
     version_file().unlink()  # simulate a crash between the writes and the version stamp
@@ -197,16 +197,14 @@ def test_empty_config_dir_writes_marker_without_error(tmp_home):
 
 
 def test_migrate_silent_by_default(tmp_home, capsys):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     assert migrate() is True
     assert capsys.readouterr().out == ''
 
 
 def test_migrate_verbose_prints_each_move_and_delete(tmp_home, capsys):
-    claude_dir = tmp_home / '.claude'
-    _seed_legacy(claude_dir)
+    _legacy_home(tmp_home)
 
     assert migrate(verbose=True) is True
     out = capsys.readouterr().out

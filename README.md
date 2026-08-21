@@ -205,8 +205,7 @@ Bad config never crashes the statusline. A malformed `yas.toml` is ignored
 wholesale, and a single bad / out-of-range / wrong-type value drops only that
 one knob back to its default. When any `yas.toml` value is rejected, a compact
 warning row — `⚠ yas.toml: N values ignored (...)` — appears at the bottom of
-the box listing the rejected knob names. Detailed per-value reasons go to stderr
-only when `YAS_DEBUG` is set.
+the box listing the rejected knob names.
 
 ### Per-model `soft_limit` overrides
 
@@ -239,7 +238,6 @@ model = [
 | var | default | description |
 |-----|---------|-------------|
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | base dir for `yas.toml` and the `yas/` state/cache subtree (logs, width file, session payloads) |
-| `YAS_DEBUG` | _(unset)_ | when set, prints detailed per-value config-rejection reasons to stderr |
 | `COLUMNS` | _(unset)_ | terminal-width fallback when tmux / width-file detection fail |
 
 ### Terminal width

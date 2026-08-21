@@ -147,6 +147,40 @@ def test_cli_theme_beats_env(tmp_path: Path) -> None:
     assert cfg.theme == 'nord'
 
 
+# Bool-knob env-value matrix: every YAS_* boolean knob accepts the same
+# truthy/falsy string vocabulary. One parametrised case per (attr, values,
+# expected) group folds what used to be a same-shaped test per knob.
+class TestBoolKnobEnvValues:
+
+    @pytest.mark.parametrize(('attr', 'env_var', 'values', 'expected'), [
+        ('full_width',       'YAS_FULL_WIDTH',         ('1', 'true', 'True', 'TRUE'),   True),
+        ('full_width',       'YAS_FULL_WIDTH',         ('0', 'false', 'False', 'FALSE'), False),
+        ('show_render_time', 'YAS_SHOW_RENDER_TIME',   ('1', 'true', 'TRUE'),            True),
+        ('show_render_time', 'YAS_SHOW_RENDER_TIME',   ('0', 'false', 'FALSE'),          False),
+        ('show_tool_uses',   'YAS_SHOW_TOOL_USES',     ('0', 'false', 'FALSE'),          False),
+        ('show_tool_uses',   'YAS_SHOW_TOOL_USES',     ('1', 'true', 'TRUE'),            True),
+        ('transcript_cache', 'YAS_TRANSCRIPT_CACHE',   ('1', 'true', 'TRUE'),            True),
+        ('transcript_cache', 'YAS_TRANSCRIPT_CACHE',   ('0', 'false', 'FALSE'),          False),
+        ('single_width',     'YAS_GLYPH_SINGLE_WIDTH', ('1', 'true', 'True', 'TRUE'),    True),
+        ('single_width',     'YAS_GLYPH_SINGLE_WIDTH', ('0', 'false', 'False', 'FALSE'), False),
+        ('show_icons',       'YAS_SHOW_ICONS',         ('0', 'false', 'False'),          False),
+    ], ids=[
+        'full_width-truthy', 'full_width-falsy',
+        'show_render_time-truthy', 'show_render_time-falsy',
+        'show_tool_uses-falsy', 'show_tool_uses-truthy',
+        'transcript_cache-truthy', 'transcript_cache-falsy',
+        'single_width-truthy', 'single_width-falsy',
+        'show_icons-falsy',
+    ])
+    def test_env_value_resolves_to_expected_bool(
+        self, tmp_path: Path, attr: str, env_var: str, values: tuple[str, ...], expected: bool,
+    ) -> None:
+        for val in values:
+            cfg = config.Config.load(env={env_var: val}, config_dir=tmp_path)
+            result = getattr(cfg, attr)
+            assert result == expected, f'expected {expected} for {env_var}={val!r}'
+
+
 # 4.3 Per-knob validation / fallback + error recording
 
 @requires_tomllib
@@ -199,18 +233,6 @@ def test_toml_full_width_true(tmp_path: Path) -> None:
     assert cfg.full_width is True
 
 
-def test_env_full_width_truthy_values(tmp_path: Path) -> None:
-    for val in ('1', 'true', 'True', 'TRUE'):
-        cfg = config.Config.load(env={'YAS_FULL_WIDTH': val}, config_dir=tmp_path)
-        assert cfg.full_width is True, f'expected True for YAS_FULL_WIDTH={val!r}'
-
-
-def test_env_full_width_falsy_values(tmp_path: Path) -> None:
-    for val in ('0', 'false', 'False', 'FALSE'):
-        cfg = config.Config.load(env={'YAS_FULL_WIDTH': val}, config_dir=tmp_path)
-        assert cfg.full_width is False, f'expected False for YAS_FULL_WIDTH={val!r}'
-
-
 def test_env_full_width_invalid_falls_through_to_default(tmp_path: Path) -> None:
     cfg = config.Config.load(env={'YAS_FULL_WIDTH': 'yes'}, config_dir=tmp_path)
     assert cfg.full_width is False  # invalid env value → default
@@ -240,18 +262,6 @@ def test_toml_show_render_time_must_be_real_bool(tmp_path: Path) -> None:
     assert 'show_render_time' in cfg.errors
 
 
-def test_env_show_render_time_truthy_values(tmp_path: Path) -> None:
-    for val in ('1', 'true', 'TRUE'):
-        cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': val}, config_dir=tmp_path)
-        assert cfg.show_render_time is True, f'expected True for YAS_SHOW_RENDER_TIME={val!r}'
-
-
-def test_env_show_render_time_falsy_values(tmp_path: Path) -> None:
-    for val in ('0', 'false', 'FALSE'):
-        cfg = config.Config.load(env={'YAS_SHOW_RENDER_TIME': val}, config_dir=tmp_path)
-        assert cfg.show_render_time is False, f'expected False for YAS_SHOW_RENDER_TIME={val!r}'
-
-
 @requires_tomllib
 def test_env_show_render_time_zero_overrides_toml_true(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_render_time = true\n')
@@ -276,18 +286,6 @@ def test_toml_show_tool_uses_must_be_real_bool(tmp_path: Path) -> None:
     assert 'show_tool_uses' in cfg.errors
 
 
-def test_env_show_tool_uses_falsy_values(tmp_path: Path) -> None:
-    for val in ('0', 'false', 'FALSE'):
-        cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': val}, config_dir=tmp_path)
-        assert cfg.show_tool_uses is False, f'expected False for YAS_SHOW_TOOL_USES={val!r}'
-
-
-def test_env_show_tool_uses_truthy_values(tmp_path: Path) -> None:
-    for val in ('1', 'true', 'TRUE'):
-        cfg = config.Config.load(env={'YAS_SHOW_TOOL_USES': val}, config_dir=tmp_path)
-        assert cfg.show_tool_uses is True, f'expected True for YAS_SHOW_TOOL_USES={val!r}'
-
-
 @requires_tomllib
 def test_env_show_tool_uses_overrides_toml_false(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_tool_uses = false\n')
@@ -305,18 +303,6 @@ def test_transcript_cache_default_is_true(tmp_path: Path) -> None:
 def test_env_transcript_cache_false(tmp_path: Path) -> None:
     cfg = config.Config.load(env={'YAS_TRANSCRIPT_CACHE': '0'}, config_dir=tmp_path)
     assert cfg.transcript_cache is False
-
-
-def test_env_transcript_cache_truthy_values(tmp_path: Path) -> None:
-    for val in ('1', 'true', 'TRUE'):
-        cfg = config.Config.load(env={'YAS_TRANSCRIPT_CACHE': val}, config_dir=tmp_path)
-        assert cfg.transcript_cache is True, f'expected True for YAS_TRANSCRIPT_CACHE={val!r}'
-
-
-def test_env_transcript_cache_falsy_values(tmp_path: Path) -> None:
-    for val in ('0', 'false', 'FALSE'):
-        cfg = config.Config.load(env={'YAS_TRANSCRIPT_CACHE': val}, config_dir=tmp_path)
-        assert cfg.transcript_cache is False, f'expected False for YAS_TRANSCRIPT_CACHE={val!r}'
 
 
 @requires_tomllib
@@ -576,12 +562,6 @@ def test_toml_show_icons_false(tmp_path: Path) -> None:
     assert cfg.show_icons is False
 
 
-def test_env_show_icons_falsy_values(tmp_path: Path) -> None:
-    for v in ('0', 'false', 'False'):
-        cfg = config.Config.load(env={'YAS_SHOW_ICONS': v}, config_dir=tmp_path)
-        assert cfg.show_icons is False, v
-
-
 def test_env_show_icons_overrides_toml_false(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[appearance.glyphs]\nshow_icons = false\n')
     cfg = config.Config.load(env={'YAS_SHOW_ICONS': '1'}, config_dir=tmp_path)
@@ -628,18 +608,6 @@ def test_invalid_toml_glyph_mode_falls_back_and_records_error(tmp_path: Path) ->
 def test_single_width_default_is_false(tmp_path: Path) -> None:
     cfg = config.Config.load(env={}, config_dir=tmp_path)
     assert cfg.single_width is False
-
-
-def test_env_single_width_truthy_values(tmp_path: Path) -> None:
-    for val in ('1', 'true', 'True', 'TRUE'):
-        cfg = config.Config.load(env={'YAS_GLYPH_SINGLE_WIDTH': val}, config_dir=tmp_path)
-        assert cfg.single_width is True, f'expected True for {val!r}'
-
-
-def test_env_single_width_falsy_values(tmp_path: Path) -> None:
-    for val in ('0', 'false', 'False', 'FALSE'):
-        cfg = config.Config.load(env={'YAS_GLYPH_SINGLE_WIDTH': val}, config_dir=tmp_path)
-        assert cfg.single_width is False, f'expected False for {val!r}'
 
 
 def test_cli_single_width_equals_form(tmp_path: Path) -> None:

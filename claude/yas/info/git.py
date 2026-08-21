@@ -82,9 +82,7 @@ class GitInfo:
                 branch = target.rsplit('/', 1)[-1]
         elif head:
             branch = f'd:{head[:7]}'
-        # .git/HEAD is repo-supplied (attacker-controlled for a cloned repo);
-        # strip control chars so a crafted branch name can't inject escapes.
-        branch = _sanitize(branch)
+        branch = _sanitize(branch)  # HEAD is repo-supplied; strip control chars
         commit = ''
         if branch and not branch.startswith('d:'):
             ref = Path(gitdir) / 'refs' / 'heads' / branch
@@ -110,8 +108,6 @@ class GitInfo:
         try:
             import subprocess
             r = subprocess.run(
-                # --no-optional-locks: skip the index refresh write, so a
-                # SIGKILL on timeout can't leave a stray .git/index.lock.
                 ['git', '--no-optional-locks', '-C', repo, 'status',
                  '--porcelain=v1', '-z', '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,

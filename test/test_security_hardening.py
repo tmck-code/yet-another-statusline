@@ -28,10 +28,6 @@ OSC52 = '\x1b]52;c;cGF5bG9hZA==\x07'   # clipboard-write hijack
 OSC0  = '\x1b]0;PWNED\x07'              # window-title spoof
 
 
-# ---------------------------------------------------------------------------
-# 1.2 — focused unit tests for _sanitize
-# ---------------------------------------------------------------------------
-
 def test_sanitize_strips_esc_and_bel() -> None:
     """ESC (0x1b) and BEL (0x07) — the OSC/CSI delimiters — are removed."""
     assert _sanitize(OSC52) == ']52;c;cGF5bG9hZA=='
@@ -63,10 +59,6 @@ def test_sanitize_leaves_printable_and_cjk_unchanged() -> None:
     for s in ('hello world', 'café', '世界', 'main', 'feature/x-1', '日本語テスト'):
         assert _sanitize(s) == s
 
-
-# ---------------------------------------------------------------------------
-# 4.1 — SEC-1 sinks: model display_name (OSC-52) and git branch (OSC-0)
-# ---------------------------------------------------------------------------
 
 def test_model_display_name_osc52_neutralized() -> None:
     """An OSC-52 payload in a model display_name is stripped at capture."""
@@ -115,10 +107,6 @@ def test_render_emits_no_osc_for_model_and_branch(tmp_home: Path, tmp_path: Path
     assert '\x1b]52' not in out
     assert '\x1b]0;' not in out
 
-
-# ---------------------------------------------------------------------------
-# 4.2 — SEC-1 transcript sinks: task subject, subagent desc/tool-input, skill
-# ---------------------------------------------------------------------------
 
 def test_task_subject_control_bytes_stripped(tmp_path: Path) -> None:
     """Control bytes in a TaskCreate subject/activeForm are stripped."""
@@ -197,10 +185,6 @@ def test_skill_name_control_bytes_stripped(tmp_path: Path) -> None:
     assert all('\x1b' not in n and '\x07' not in n for n in ls.names)
 
 
-# ---------------------------------------------------------------------------
-# 4.3 — SEC-1 no-op: legitimate plain/CJK values survive end-to-end
-# ---------------------------------------------------------------------------
-
 def test_legitimate_cjk_model_name_unchanged() -> None:
     """A CJK/non-ASCII display name is captured byte-for-byte (no over-strip)."""
     model = session.Model.from_dict({'id': 'claude-x', 'display_name': '世界 café'})
@@ -218,10 +202,6 @@ def test_render_preserves_legitimate_cjk(tmp_home: Path) -> None:
     out = render(payload, 160)
     assert '世界café' in out
 
-
-# ---------------------------------------------------------------------------
-# 4.4 — SEC-2: project_dir settings are ignored; the user's own still drive it
-# ---------------------------------------------------------------------------
 
 def test_sec2_project_settings_ignored_via_session(tmp_home: Path, tmp_path: Path) -> None:
     """A cloned repo's settings contribute nothing; the user's own still do.

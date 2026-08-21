@@ -1,10 +1,4 @@
-"""Clear-epoch reader — finds the most-recent /clear marker in a transcript.
-
-A /clear in Claude Code forks a new transcript and writes a user message
-containing ``<command-name>/clear</command-name>`` near the top.  We scan
-only the first CLEAR_SCAN_MAX_LINES lines so the lookup is O(1) on any
-transcript length.
-"""
+"""Clear-epoch reader — finds the most-recent /clear marker in a transcript."""
 
 from __future__ import annotations
 
@@ -16,12 +10,7 @@ from yas.constants import CLEAR_SCAN_MAX_LINES
 
 
 def read_clear_epoch(transcript_path: str) -> float | None:
-    """Return the epoch of the most-recent /clear marker, or None.
-
-    Returns None on: empty/missing path, OSError, JSON parse error,
-    timestamp parse error, or no matching marker found within the first
-    CLEAR_SCAN_MAX_LINES lines of the transcript.
-    """
+    """Epoch of the most-recent /clear marker within the first CLEAR_SCAN_MAX_LINES lines, or None."""
     if not transcript_path:
         return None
     p = Path(transcript_path)

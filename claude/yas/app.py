@@ -30,11 +30,7 @@ def record_tick(session: SessionInfo, usage: TranscriptUsage) -> TickRecord:
 
 
 def resolve_theme(cli_name: str | None) -> Theme:
-    """Layered theme selection: CLI -> YAS_THEME -> CLAUDE_STATUSLINE_THEME
-    -> [appearance].theme -> CLAUDE_DARK.
-
-    Resolves live (fresh Config.load) so callers see the current environment and
-    CLAUDE_DIR; the import-time CONFIG singleton is for the module constants."""
+    """Layered theme selection: CLI -> YAS_THEME -> CLAUDE_STATUSLINE_THEME -> [appearance].theme -> CLAUDE_DARK."""
     if cli_name and cli_name in THEMES:
         return THEMES[cli_name]
     return THEMES.get(Config.load().theme, CLAUDE_DARK)
@@ -60,9 +56,6 @@ def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm
     else:
         tick = record_tick(session, view.transcript_usage)
         spec = build_wide(view, tick, width, r, soft_limit)
-    # The bottom-right border annotation: the version tag always (bold,
-    # grey→muted-grey gradient), preceded by the previous run's wall-clock
-    # when the show_render_time knob supplies it (`…47.2ms v0.6.2──╯`).
     out = '\n'.join(render_layout(spec, r, timing, f'v{VERSION}'))
     if parse_cache is not None:
         parse_cache.save()
@@ -70,42 +63,20 @@ def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm
 
 
 def main(t0: float | None = None) -> None:
-    # Wall-clock start for the bottom-border run-time annotation. The entry
-    # shim passes a perf_counter() stamped before importing the app so the
-    # measured duration covers import cost too; a None default keeps `main`
-    # callable bare (tests) by stamping here instead.
     if t0 is None:
-        t0 = time.perf_counter()
-    # Force UTF-8 on stdout so the script renders correctly on Windows
-    # (cp1252 default codec can't encode box-drawing or Nerd Font glyphs,
-    # crashes with UnicodeEncodeError on the first border char). Python's
-    # PEP 540 UTF-8 mode and PYTHONIOENCODING env var both fix this from
-    # the outside; reconfiguring stdout here removes the requirement that
-    # callers set either. No-op on platforms whose default codec is
-    # already UTF-8 (most Unix systems since Python 3.7).
+        t0 = time.perf_counter()  # entry shim normally passes this, stamped before import
     if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
-    # Lazy one-time migration to the yas/{cache,state}/ layout. The `stat()`
-    # here is the whole steady-state cost once migrated; the import stays
-    # inside the guard so it's never paid on the hot path after that.
-    # REMOVE AFTER 0.11.0
+        sys.stdout.reconfigure(encoding='utf-8')  # cp1252 default on Windows can't encode box/Nerd Font glyphs
     if not version_file().exists():
-        from yas.migrate import migrate
+        from yas.migrate import migrate  # lazy one-time migration to the yas/{cache,state}/ layout
         migrate()
-    # Resolve config live so a freshly-set env var (e.g. YAS_FULL_WIDTH) or an
-    # edited yas.toml takes effect on this invocation; CLI flags are top priority.
     cfg      = Config.load(argv=sys.argv[1:], config_dir=config_path().parent)
     bg_shift = cfg.bg_shift
     theme    = THEMES.get(cfg.theme, CLAUDE_DARK)
 
     info = json.loads(sys.stdin.read())
 
-    # Write payload so the multi-session observer can index it. Keyed by
-    # session_id and overwritten in place under yas/state/sessions/, so the
-    # dir holds one file per session rather than one per render tick. The
-    # observer already collapses to the newest payload per session
-    # (mon/discovery.index_payloads_by_session), so the old timestamped
-    # filenames only ever accumulated dead weight.
+    # write payload for the multi-session observer, keyed by session_id and overwritten in place
     session_id = _as_str(info.get('session_id')) or 'unknown'
     try:
         sessions_dir().mkdir(parents=True, exist_ok=True)
@@ -113,12 +84,6 @@ def main(t0: float | None = None) -> None:
     except OSError:
         pass
 
-    # Previous run's wall-clock, shown in the bottom-right border when the
-    # show_render_time knob is on (off by default). A run can't know its own
-    # total before it has drawn, so each run displays the last one's value
-    # (absent on the very first render of a session). When off, the cache is
-    # never touched and `timing` stays empty — i.e. as if the feature did not
-    # exist.
     timing = ''
     if cfg.show_render_time:
         prev_ms = RenderTiming.read(session_id)

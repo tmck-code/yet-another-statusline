@@ -8,10 +8,6 @@ import yas.constants as constants
 from yas.render.text import terminal_width
 
 
-# ---------------------------------------------------------------------------
-# Scenario 3.1 — COLUMNS=160 is returned immediately; tmux is never called
-# ---------------------------------------------------------------------------
-
 def test_columns_env_returned_immediately(monkeypatch):
     monkeypatch.setenv('COLUMNS', '160')
     # Ensure TMUX_PANE is absent so tmux would only be attempted if COLUMNS
@@ -24,10 +20,6 @@ def test_columns_env_returned_immediately(monkeypatch):
 
     assert result == 160
 
-
-# ---------------------------------------------------------------------------
-# Scenario 3.2 — COLUMNS not set, tmux responds with 120 within timeout
-# ---------------------------------------------------------------------------
 
 def test_tmux_returns_width_when_columns_absent(monkeypatch):
     monkeypatch.delenv('COLUMNS', raising=False)
@@ -47,10 +39,6 @@ def test_tmux_returns_width_when_columns_absent(monkeypatch):
     assert result == 120
 
 
-# ---------------------------------------------------------------------------
-# Scenario 3.3 — tmux subprocess times out; function continues to next source
-# ---------------------------------------------------------------------------
-
 def test_tmux_timeout_falls_through_without_raising(monkeypatch, tmp_path):
     monkeypatch.delenv('COLUMNS', raising=False)
     monkeypatch.setenv('TMUX_PANE', '%1')
@@ -67,10 +55,6 @@ def test_tmux_timeout_falls_through_without_raising(monkeypatch, tmp_path):
     # Must not raise; should fall through to the file fallback.
     assert result == 88
 
-
-# ---------------------------------------------------------------------------
-# Scenario 3.4 — COLUMNS=0 is treated as absent; falls through to next source
-# ---------------------------------------------------------------------------
 
 def test_columns_zero_falls_through(monkeypatch, tmp_path):
     monkeypatch.setenv('COLUMNS', '0')

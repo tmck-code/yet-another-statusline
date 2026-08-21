@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import re
 import unicodedata
 
 from yas.constants import (
@@ -19,9 +20,7 @@ from yas.constants import (
 
 
 def terminal_width() -> int:
-    # Deferred: only sessions running under tmux pay the subprocess import +
-    # fork/exec; a plain terminal never touches subprocess at all.
-    if 'TMUX_PANE' in os.environ:
+    if 'TMUX_PANE' in os.environ:  # deferred import: only tmux sessions pay the subprocess cost
         import subprocess
         try:
             w = int(subprocess.run([
@@ -46,9 +45,6 @@ def terminal_width() -> int:
     except ValueError:
         pass
 
-    # os.get_terminal_size (stdout) replaces shutil.get_terminal_size: same
-    # probe minus the COLUMNS check already done above, and it avoids pulling
-    # shutil -> bz2/lzma/zlib at import time.
     try:
         w = os.get_terminal_size().columns
     except OSError:
@@ -76,9 +72,7 @@ def terminal_width() -> int:
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
-    # Supplemental Arrows-C (U+1F800-U+1F8FF) are EAW=N despite being in the
-    # emoji range — exclude them so arrow icons like 🡅/🡇 count as 1 col.
-    if 0x1F800 <= cp <= 0x1F8FF:
+    if 0x1F800 <= cp <= 0x1F8FF:  # Supplemental Arrows-C is EAW=N; exclude despite being in the emoji range
         return False
     return 0x1F300 <= cp <= 0x1FAFF
 
@@ -89,16 +83,7 @@ def _visible_width(s: str) -> int:
 
 
 def strike(s: str) -> str:
-    """Wrap ``s``'s non-blank core in SGR 9 (strikethrough), padding excluded.
-
-    Used to mark every text field of a finished subagent. Leading/trailing
-    spaces are left OUTSIDE the escape so a right-justified or ljust-padded
-    field doesn't draw a rule across its own padding cells, and an all-blank
-    field (a shed lines/tok column) is returned untouched. SGR 9/29 are
-    zero-width and stripped by ``_visible_width``, so this never moves a
-    column; it must therefore be applied only at paint time, after the width
-    math has measured the raw text.
-    """
+    """Wrap `s`'s non-blank core in SGR 9 (strikethrough); leading/trailing spaces stay outside the escape."""
     core = s.strip(' ')
     if not core:
         return s
@@ -108,10 +93,7 @@ def strike(s: str) -> str:
 
 
 def to_ascii(s: str) -> str:
-    """Replace every Nerd Font PUA glyph with its single-char ASCII fallback.
-
-    Width-preserving (1 PUA col -> 1 ASCII col), so applying it to a finished
-    render leaves every border/elbow column exactly where it was."""
+    """Replace every Nerd Font PUA glyph with its single-char ASCII fallback (width-preserving)."""
     return s.translate(ASCII_TRANSLATE)
 
 
@@ -119,13 +101,7 @@ SINGLEWIDTH_PLACEHOLDER = MIDDLE_DOT  # width-1 stand-in for an unfoldable wide 
 
 
 def to_singlewidth(s: str) -> str:
-    """Fold every double-width char in ``s`` to a width-1 equivalent.
-
-    Walks char-by-char (ANSI escape bytes are ASCII, so ``_is_wide`` is False for
-    them and they pass through untouched). For each wide char, try an NFKC
-    single-char narrow form (e.g. Fullwidth Forms -> ASCII); if none exists, emit
-    SINGLEWIDTH_PLACEHOLDER. Already-width-1 chars (including the statusline's own
-    PUA glyphs) are left unchanged, so only genuinely wide dynamic content folds."""
+    """Fold every double-width char in `s` to a width-1 equivalent (NFKC narrow form, else placeholder)."""
     out: list[str] = []
     for ch in s:
         if not _is_wide(ch):
@@ -140,13 +116,7 @@ def to_singlewidth(s: str) -> str:
 
 
 def apply_glyph_mode(s: str, mode: str) -> str:
-    """Apply the selected glyph mode as a single final pass over a finished render.
-
-    nerdfont -> identity (no pass); ascii -> PUA+frame ASCII fallback table;
-    unicode -> PUA-only non-PUA Unicode table; github -> browser-wide+PUA fold to
-    EAW-narrow/ASCII (paste-safe). An unknown mode is treated as nerdfont
-    (identity) — defensive; config already validates the value upstream.
-    Single-width folding is orthogonal (see ``apply_glyphs``)."""
+    """Final pass over a finished render: nerdfont=identity, ascii/unicode/github swap PUA glyphs per table."""
     if mode == 'ascii':
         return s.translate(ASCII_TRANSLATE).translate(_SUPERSCRIPT_TO_ASCII)
     if mode == 'unicode':
@@ -157,11 +127,7 @@ def apply_glyph_mode(s: str, mode: str) -> str:
 
 
 def apply_glyphs(s: str, mode: str, single_width: bool) -> str:
-    """Combine the glyph ``mode`` with the orthogonal ``single_width`` fold.
-
-    Runs ``apply_glyph_mode`` first, then folds double-width chars to width-1
-    when ``single_width`` is set, so single-width folding can pair with any
-    mode (nerdfont, ascii, or unicode)."""
+    """Apply glyph `mode`, then fold double-width chars to width-1 if `single_width`."""
     out = apply_glyph_mode(s, mode)
     if single_width:
         out = to_singlewidth(out)
@@ -216,15 +182,8 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
     return ''.join(prefix) + ELLIPSIS + ''.join(suffix)
 
 
-# ASCII -> Unicode superscript glyphs for section labels. Every glyph is a
-# non-PUA, width-1 character (modifier letters + the superscript block), so
-# `_visible_width(superscript(s)) == len(s)` holds. Characters with no standard
-# superscript form (e.g. 'q', and capitals F/Q/S/X/Y/Z) are intentionally
-# absent and pass through unchanged — substituting a wrong-letter or wide glyph
-# would break the width-equals-length invariant the label overlay relies on.
-# 'C' uses U+A7F2 MODIFIER LETTER CAPITAL C (Latin Extended-D) — the only
-# standard superscript-style capital C; it is not in the Private Use Area, so
-# it is exempt from the PUA hoist rule, but it's still narrow (width 1).
+# ASCII -> Unicode superscript glyphs, all width-1 so _visible_width(superscript(s)) == len(s).
+# Letters with no standard superscript form pass through unchanged.
 _SUPERSCRIPT = {
     'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ', 'f': 'ᶠ', 'g': 'ᵍ',
     'h': 'ʰ', 'i': 'ⁱ', 'j': 'ʲ', 'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'n': 'ⁿ',
@@ -240,47 +199,23 @@ _SUPERSCRIPT = {
 
 
 def superscript(s: str) -> str:
-    # Map each character to its superscript glyph, passing unmapped characters
-    # through unchanged. Every mapped glyph is width-1, so the result keeps the
-    # same visible column width as the input.
     return ''.join(_SUPERSCRIPT.get(ch, ch) for ch in s)
 
 
-# Inverse of _SUPERSCRIPT: fold the wide-layout section-label superscripts back to
-# plain ASCII for the paste-safe glyph modes. The superscript/modifier-letter block
-# is non-ASCII (so `ascii` mode would leak it) and partly EAW-ambiguous/browser-wide
-# (e.g. ⁿ U+207F, so `github` mode would render it double-width). Every value is a
-# distinct width-1 glyph, so this {codepoint: ascii} map is a clean width-preserving
-# str.translate table. `unicode` mode keeps the superscripts — they render fine there.
+# inverse of _SUPERSCRIPT, width-preserving, for paste-safe glyph modes (ascii/github)
 _SUPERSCRIPT_TO_ASCII = {ord(v): k for k, v in _SUPERSCRIPT.items()}
 
 
-def _token_offsets(plain: str) -> list[int]:
-    """0-indexed start positions of each whitespace-separated run in `plain`.
+_TOKEN_RE = re.compile(r'[^ ]+')  # NOT \S+ -- a tab must not split a token, only a literal space does
 
-    Used to anchor section labels over the value they name: the caller strips
-    ANSI from a rendered content string, finds the value token's start here, and
-    adds the section's absolute start column. The glyphs that precede/compose the
-    measured values (Nerd-Font PUA icons, arrows) are all width-1, so a codepoint
-    position equals a column position for the content this is used on."""
-    offs: list[int] = []
-    i, n = 0, len(plain)
-    while i < n:
-        if plain[i] != ' ':
-            offs.append(i)
-            while i < n and plain[i] != ' ':
-                i += 1
-        else:
-            i += 1
-    return offs
+
+def _token_offsets(plain: str) -> list[int]:
+    """0-indexed start positions of each space-separated run in `plain`."""
+    return [m.start() for m in _TOKEN_RE.finditer(plain)]
 
 
 def fmt_tok(n: int) -> str:
-    # Promote at the rounding boundary (>= 999.95 rounds to 1000.0 at .1f) so the
-    # result never exceeds 6 visible chars ("999.9B") and stays within the token
-    # column budget (IN_W/CACHE_W/OUT_W = 6). Without the billions tier, a
-    # multi-billion day total renders as "4660.5M" (7 chars) and pushes that
-    # row's dividers one cell out of alignment.
+    # promotes at the .1f rounding boundary so output never exceeds 6 visible chars (token column budget)
     if n >= 999_950_000:
         return f'{n/1_000_000_000:.1f}B'
     if n >= 999_950:
@@ -291,20 +226,7 @@ def fmt_tok(n: int) -> str:
 
 
 def fmt_tok_fixed(n: int) -> str:
-    """3-significant-figure `fmt_tok` variant for constant-width subagent-row columns.
-
-    `fmt_tok` always uses 1 decimal ('.1f'), so a single-digit mantissa ('7.5M')
-    and a double-digit one ('56.8K') land at different visible widths once the
-    unit suffix is added. Subagent-row columns (the tok/share cluster and the
-    lines-read/-written pair) stack many rows in a cohort and need every value
-    at the SAME width so the trailing '%'/unit glyphs line up — this variant
-    fixes that by using 2 decimals when the mantissa has 1 digit and 0 when it
-    has 3, so every value renders at 3 significant figures.
-
-    Deliberately NOT used by the session-level input/cache/output row or day
-    totals (`fmt_tok` unchanged there) — only per-subagent columns need
-    cross-row alignment; a single session/day row has nothing to align against.
-    """
+    """3-significant-figure `fmt_tok` variant for constant-width subagent-row columns (not used for session/day totals)."""
     if n >= 999_950_000:
         div, suf = 1_000_000_000, 'B'
     elif n >= 999_950:

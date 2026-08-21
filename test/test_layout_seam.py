@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
+from helper import strip_ansi
 import yas.layout as layout
 import yas.renderer as renderer_mod
 import yas.session as session_mod
 import yas.info.subagents as subagents_mod
 import yas.info.tasks as tasks_mod
 import yas.info.skills as skills_mod
-import yas.info.openspec as openspec_mod
 from yas.config import Config
 from yas.info import SessionView
 from yas.tokens import TickRecord, TokenLog
@@ -50,24 +50,6 @@ def _make_sub() -> subagents_mod.RunningSubagent:
     )
 
 
-def _silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strip every conditional (dynamic) section so token stats are last.
-
-    Each dynamic section below the token stats reads the real machine (the
-    transcript, ~/.claude/settings.json, the cwd's openspec dir, ...). Left
-    alone, the host's own plugins/skills/tasks leak in and synthesise a
-    dynamic row + seam, so neutralise every source — including
-    Workspace.plugins, which reads CLAUDE_DIR/settings.json directly.
-    """
-    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
-                        classmethod(lambda cls, sid, pdir, now=None, **kwargs: subagents_mod.RunningSubagents(subagents=[])))
-    monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
-                        classmethod(lambda cls, path: tasks_mod.TaskList(tasks=[], last_event_ts=0.0)))
-    monkeypatch.setattr(skills_mod.LoadedSkills, 'from_transcript',
-                        classmethod(lambda cls, path: skills_mod.LoadedSkills(names=[])))
-    monkeypatch.setattr(openspec_mod.OpenSpec, 'from_cwd',
-                        classmethod(lambda cls, cwd, max_depth=None: openspec_mod.OpenSpec(changes=[])))
-    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: ''))
 
 
 def _kinds(spec: layout.LayoutSpec) -> list[str]:
@@ -76,33 +58,28 @@ def _kinds(spec: layout.LayoutSpec) -> list[str]:
 
 def _tokens_row_indices(spec: layout.LayoutSpec) -> list[int]:
     """Content rows that carry the tokens/cost/rate line (the rate label 't/m')."""
-    from helper import strip_ansi
     return [i for i, row in enumerate(spec.rows)
             if row.kind == 'content' and 't/m' in strip_ansi(row.content)]
 
 
-def test_tokens_row_is_single_content_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_tokens_row_is_single_content_line(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     spec = layout.build_wide(_view(), _tick(), 160, _r)
     assert len(_tokens_row_indices(spec)) == 1
 
 
-def test_tokens_row_session_only_single_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_tokens_row_session_only_single_line(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     view = SessionView(_session(), Config(show_day_stats=False))
     spec = layout.build_wide(view, _tick(), 160, _r)
     assert len(_tokens_row_indices(spec)) == 1
 
 
-def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tokens_row_dividers_align_with_separators(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Every interior │ in the single tokens line has a matching ┬ on the
     separator above and ┴ on the separator below at the same visual column.
 
     At width=160 (>= LINES_SEGMENT_MIN_WIDTH=103) the lines read/changed
     segment (design.md Decision 8) is included, so there are 3 interior │
     (lines | cost | rate) instead of the pre-Decision-8 2."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     # A dynamic section below ensures the row below tokens is a (seam) separator,
     # not the bottom border — so we can check ┴ elbows both sides.
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
@@ -136,12 +113,10 @@ def _make_sub_labelled(label: str, started: float) -> subagents_mod.RunningSubag
     )
 
 
-def test_subagent_cohort_caps_at_six_most_recent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subagent_cohort_caps_at_six_most_recent(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Eight live subagents collapse to the six most recently started, shown
     in chronological (first_timestamp ascending) order."""
-    from helper import strip_ansi
     from yas.constants import SUBAGENT_DISPLAY_CAP
-    _silence_dynamic(monkeypatch)
     now  = time.time()
     subs = [_make_sub_labelled(f'sub-{i}', now - (8 - i)) for i in range(8)]
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
@@ -153,23 +128,20 @@ def test_subagent_cohort_caps_at_six_most_recent(monkeypatch: pytest.MonkeyPatch
     assert shown == [2, 3, 4, 5, 6, 7]  # oldest two (0, 1) dropped, chronological
 
 
-def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir, now=None, **kwargs: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
     spec = layout.build_wide(_view(), _tick(), 140, _r)
     assert _kinds(spec).count('separator_seam') == 1
 
 
-def test_no_seam_without_dynamic_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_no_seam_without_dynamic_rows(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     spec = layout.build_wide(_view(), _tick(), 140, _r)
     assert 'separator_seam' not in _kinds(spec)
     assert _kinds(spec)[-1] == 'bottom_border'
 
 
-def test_seam_is_first_separator_below_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_seam_is_first_separator_below_tokens(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir, now=None, **kwargs: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
     spec = layout.build_wide(_view(), _tick(), 140, _r)
@@ -180,9 +152,7 @@ def test_seam_is_first_separator_below_tokens(monkeypatch: pytest.MonkeyPatch) -
     assert spec.rows[seam_idx + 1].kind == 'content'
 
 
-def test_seam_renders_solid_not_heavy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
+def test_seam_renders_solid_not_heavy(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir, now=None, **kwargs: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
     spec = layout.build_wide(_view(), _tick(), 140, _r)
@@ -193,10 +163,9 @@ def test_seam_renders_solid_not_heavy(monkeypatch: pytest.MonkeyPatch) -> None:
     assert '━' not in seam and '┷' not in seam  # not the heavy variant
 
 
-def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """When cache_countdown is None the top border and separator_dim carry elbows for
     path + elapsed + sep_rate (the ┆ between 5h and 7d rate-limit segments) but NOT cache."""
-    _silence_dynamic(monkeypatch)
     view = _view()
     view.__dict__['cache_countdown'] = None
     spec = layout.build_wide(view, _tick(), 160, _r)
@@ -209,7 +178,7 @@ def test_cache_countdown_none_single_elbow(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(separator_dim.ups) == 3, f'expected 3 ups (path + elapsed + sep_rate), got {separator_dim.ups}'
 
 
-def test_cache_countdown_outranks_branch_dir_and_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cache_countdown_outranks_branch_dir_and_timer(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Cache countdown is priority 2 in the declarative top-row precedence —
     higher than branch (3), dir (4), the session timer (5), 7d (6), changes
     (7), and commit (8). So even with a pathologically long branch name that
@@ -217,7 +186,6 @@ def test_cache_countdown_outranks_branch_dir_and_timer(monkeypatch: pytest.Monke
     section is still retained across the whole wide tier (width >= 80)."""
     from yas.constants import GLYPH_CACHE, MEDIUM_WIDTH
     from yas.info.git import GitInfo
-    _silence_dynamic(monkeypatch)
 
     countdown = (187.0, 38)
     long_git  = GitInfo(branch='x' * 200, commit='abcdef1', modified=3)
@@ -242,10 +210,9 @@ def test_cache_countdown_outranks_branch_dir_and_timer(monkeypatch: pytest.Monke
         f'cache glyph absent at width={MEDIUM_WIDTH} with a normal-length branch name'
 
 
-def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Neither narrow nor medium layouts ever render the cache countdown glyph."""
     from yas.constants import GLYPH_CACHE
-    _silence_dynamic(monkeypatch)
 
     view_n = _view()
     view_n.__dict__['cache_countdown'] = (187.0, 38)
@@ -260,10 +227,9 @@ def test_narrow_and_medium_no_cache_countdown(monkeypatch: pytest.MonkeyPatch) -
         assert GLYPH_CACHE not in ln, f'cache glyph found in medium render: {ln!r}'
 
 
-def test_only_first_dynamic_separator_is_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_first_dynamic_separator_is_seam(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     # Two dynamic sections (skills + subagents): first separator is the seam,
     # the separator between them stays a normal dotted-dim separator.
-    _silence_dynamic(monkeypatch)
     monkeypatch.setattr(skills_mod.LoadedSkills, 'from_transcript',
                         classmethod(lambda cls, path: skills_mod.LoadedSkills(names=['x:demo'])))
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
@@ -276,16 +242,10 @@ def test_only_first_dynamic_separator_is_seam(monkeypatch: pytest.MonkeyPatch) -
     assert 'separator_dim' in kinds[seam_idx + 1:]
 
 
-# ---------------------------------------------------------------------------
-# Cache countdown section tests (6.4)
-# ---------------------------------------------------------------------------
-
 def test_cache_countdown_content_row_contains_glyph_and_time(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
-    from helper import strip_ansi
     from yas.constants import GLYPH_CACHE
-    _silence_dynamic(monkeypatch)
     view = _view()
     # Inject a known cache_countdown bypassing the cached_property.
     view.__dict__['cache_countdown'] = (187.0, 38)
@@ -300,9 +260,8 @@ def test_cache_countdown_content_row_contains_glyph_and_time(
 
 
 def test_cache_countdown_divider_threaded_into_borders(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
-    _silence_dynamic(monkeypatch)
     view = _view()
     view.__dict__['cache_countdown'] = (187.0, 38)
     spec = layout.build_wide(view, _tick(), 160, _r)
@@ -325,7 +284,7 @@ def test_cache_countdown_divider_threaded_into_borders(
     assert cache_div_col in sep_row.ups
 
 
-def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The │ separator between 5h and 7d rate-limit segments in the wide path/model
     row must have matching ┬/┴ elbows in the top border and separator_dim at the
     same visual column.
@@ -334,8 +293,6 @@ def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -
     is present in the content row. Uses render_layout to verify glyphs land at the
     correct column position after border painting.
     """
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     # The example session has both 5h and 7d buckets active, so the 7d vsep │ appears.
     spec  = layout.build_wide(_view(), _tick(), 160, _r)
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
@@ -382,12 +339,10 @@ def test_sep_rate_elbow_threaded_into_borders(monkeypatch: pytest.MonkeyPatch) -
     assert sep_rate_col in sep_row.ups,   f'sep_rate_col {sep_rate_col} not in separator_dim.ups {sep_row.ups}'
 
 
-def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """When the 7-day bucket is absent (used_percentage=0, resets_at=0), the 7d vsep
     does not appear in the content row and no stray ┬/┴ elbows are added for it."""
-    from helper import strip_ansi
     from yas.session import RateBucket, RateLimits, SessionInfo
-    _silence_dynamic(monkeypatch)
 
     # Build a session with no 7-day bucket active.
     sess = _session()
@@ -414,10 +369,6 @@ def test_sep_rate_no_elbow_when_seven_day_absent(monkeypatch: pytest.MonkeyPatch
     # No elbow gap: every ┬ has a │ below and every ┴ has a │ above.
     assert _elbow_gaps(lines) == 0, 'stray ┬/┴ elbows with no matching │ when 7-day absent'
 
-
-# ---------------------------------------------------------------------------
-# Side-by-side composition (Group 6: tasks ⟷ subagents columns)
-# ---------------------------------------------------------------------------
 
 def _make_tasklist(long_subject: bool = False) -> tasks_mod.TaskList:
     """A visible checklist (one task in_progress pins it visible).
@@ -485,7 +436,6 @@ def _divider_content_idx(spec: layout.LayoutSpec) -> list[int]:
     detection is scoped to content rows *below the static→dynamic seam* — only
     a side-by-side block puts a divider there.
     """
-    from helper import strip_ansi
     seam_idx = next(
         (i for i, row in enumerate(spec.rows) if row.kind == 'separator_seam'),
         None,
@@ -501,7 +451,6 @@ def _divider_content_idx(spec: layout.LayoutSpec) -> list[int]:
 def _both_sections(monkeypatch: pytest.MonkeyPatch, *, long_subject: bool = False) -> None:
     """Silence host-derived dynamic sections, then inject BOTH a checklist and
     a one-subagent cohort so the wide builder can compose side-by-side."""
-    _silence_dynamic(monkeypatch)
     tl = _make_tasklist(long_subject=long_subject)
     monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
                         classmethod(lambda cls, path: tl))
@@ -515,7 +464,6 @@ def _both_sections_narrow_stress(monkeypatch: pytest.MonkeyPatch) -> None:
     (see its docstring). Use this for any narrow-tier side-by-side assertion
     that needs to catch the interior-divider-drift class of bug; the plain
     `_make_tasklist()` fixture does not stress that code path."""
-    _silence_dynamic(monkeypatch)
     tl = _make_tasklist_narrow_stress()
     monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
                         classmethod(lambda cls, path: tl))
@@ -527,7 +475,6 @@ def test_side_by_side_continuous_divider_when_both_present(monkeypatch: pytest.M
     """Wide + both sections + room → one block with a divider column that runs
     ┬ (separator above) → │ (every combined row) → ┴ (separator/border below).
     Column positions asserted via _visible_width."""
-    from helper import strip_ansi
     from yas.render.text import _visible_width
     _both_sections(monkeypatch, long_subject=True)
 
@@ -570,7 +517,6 @@ def test_side_by_side_continuous_divider_when_both_present(monkeypatch: pytest.M
 def test_side_by_side_falls_back_to_stacked_when_narrow(monkeypatch: pytest.MonkeyPatch) -> None:
     """At a width where right_w < 40 the composition is abandoned and the two
     sections stack full-width (no divider in any content row)."""
-    from helper import strip_ansi
     _both_sections(monkeypatch, long_subject=True)
 
     # width 80: inner=76, left_w=min(longest, 34)=34, right_w=76-3-34=39 (<40).
@@ -593,7 +539,6 @@ def test_side_by_side_plan_column_capped_in_tree_mode(monkeypatch: pytest.Monkey
     """Tree mode + wide box + a plan longer than the cap: the plan column stops
     at SUBAGENT_TREE_PLAN_WIDTH (not the old 45%-of-inner even split), so the
     subagent tree gets the rest."""
-    from helper import strip_ansi
     from yas.constants import SUBAGENT_TREE_PLAN_WIDTH
     _both_sections(monkeypatch, long_subject=True)
 
@@ -614,7 +559,6 @@ def test_side_by_side_plan_column_sized_to_content_in_tree_mode(monkeypatch: pyt
     """Tree mode + a plan shorter than the cap: the plan column is sized to the
     longest rendered plan line plus SUBAGENT_TREE_PLAN_PAD — no trailing band of
     padding before the divider — and every reclaimed column goes to the tree."""
-    from helper import strip_ansi
     from yas.constants import SUBAGENT_TREE_PLAN_PAD, SUBAGENT_TREE_PLAN_WIDTH
     _both_sections(monkeypatch, long_subject=False)
 
@@ -647,7 +591,6 @@ def test_side_by_side_plan_column_degrades_at_narrow_width(monkeypatch: pytest.M
     """Tree mode on with a plan longer than the ceiling, but the box is too
     narrow for a SUBAGENT_TREE_PLAN_WIDTH-col plan column: the ceiling falls
     back to the old 45%-of-inner cap (still side-by-side)."""
-    from helper import strip_ansi
     from yas.constants import SUBAGENT_TREE_PLAN_WIDTH
     _both_sections(monkeypatch, long_subject=True)
 
@@ -665,11 +608,9 @@ def test_side_by_side_plan_column_degrades_at_narrow_width(monkeypatch: pytest.M
     assert left_w == inner * 45 // 100, 'must degrade to the 45%-of-inner cap, not the fixed width'
 
 
-def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Single-section: checklist present, no subagents → full-width, no divider."""
-    from helper import strip_ansi
     from yas.constants import GLYPH_TASKS
-    _silence_dynamic(monkeypatch)
     tl = _make_tasklist(long_subject=True)
     monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
                         classmethod(lambda cls, path: tl))
@@ -680,10 +621,8 @@ def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) 
         'task checklist should render'
 
 
-def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Single-section: subagents present, no checklist → full-width, no divider."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
                         classmethod(lambda cls, sid, pdir, now=None, **kwargs: subagents_mod.RunningSubagents(subagents=[_make_sub()])))
 
@@ -693,10 +632,6 @@ def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPat
     assert any(row.kind == 'content' and 'Explore' in strip_ansi(row.content) for row in spec.rows), \
         'subagent cohort should render'
 
-
-# ---------------------------------------------------------------------------
-# Bottom-of-wide-band tokens row (the box 80-84 overflow / detached-divider bug)
-# ---------------------------------------------------------------------------
 
 def _elbow_gaps(lines: list[str]) -> int:
     """Count ┬/┴ that lack a │ (or other vertical) in the adjacent row/column."""
@@ -723,7 +658,7 @@ def _elbow_gaps(lines: list[str]) -> int:
 
 @pytest.mark.parametrize('width', [80, 81, 82, 83, 84, 85])
 def test_wide_bottom_band_no_overflow_no_detached_elbows(
-    monkeypatch: pytest.MonkeyPatch, width: int,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, width: int,
 ) -> None:
     """At the bottom of the wide band (box 80-84) the three-segment tokens row
     used to overflow the box and detach its two │ from the ┬/┴ elbows. The
@@ -731,9 +666,7 @@ def test_wide_bottom_band_no_overflow_no_detached_elbows(
     the wide layout's own entry point, so the row is present across this whole
     band; regardless, at EVERY width: no rendered row is wider than the box,
     and every ┬/┴ is backed by a │ in the adjacent row."""
-    from helper import strip_ansi
     from yas.render.text import _visible_width
-    _silence_dynamic(monkeypatch)
     spec  = layout.build_wide(_view(), _tick(), width, _r)
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
     for ln in lines:
@@ -742,7 +675,7 @@ def test_wide_bottom_band_no_overflow_no_detached_elbows(
 
 
 def test_wide_bottom_band_drops_three_segment_tokens_row(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """Below the fit floor (TOKENS_COST_MIN_WIDTH == MEDIUM_WIDTH == 80) the
     three-segment tokens │ cost │ rate row is dropped (no 't/m' content row);
@@ -750,8 +683,6 @@ def test_wide_bottom_band_drops_three_segment_tokens_row(
     MEDIUM_WIDTH, so the floor sits below build_wide's own box >= 80 entry
     point — passing a sub-80 width directly to build_wide (as this seam test
     does) is the only way left to observe the dropped row."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
 
     def has_tokens_row(spec: layout.LayoutSpec) -> bool:
         return any(row.kind == 'content' and 't/m' in strip_ansi(row.content)
@@ -766,7 +697,6 @@ def test_workflow_two_column_pairing_threshold() -> None:
     """Section 6: at width >= TWO_COL_WF_WIDTH (120) workflow agents pair
     two-per-row; just below it each agent gets its own row. Two agents -> one
     paired row vs two stacked rows."""
-    from helper import strip_ansi
     from yas.info.subagents import RunningSubagent
     from yas.info.workflows import RunningWorkflow, RunningWorkflows
 
@@ -833,18 +763,12 @@ def test_workflow_two_column_pairing_threshold() -> None:
     assert any('agent-1' in row.content for row in stacked)
 
 
-# ---------------------------------------------------------------------------
-# Plugins row truncation (#91 — long plugin list overflowed the box)
-# ---------------------------------------------------------------------------
-
-def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """A plugin list far wider than the box is clipped to the inner content
     width with a trailing ellipsis instead of overflowing past the right
     border — every rendered row stays exactly box-wide."""
-    from helper import strip_ansi
     from yas.constants import ELLIPSIS
     from yas.render.text import _visible_width
-    _silence_dynamic(monkeypatch)
     plugins = ','.join(f'plugin-{i:02d}' for i in range(40))  # ~440 visible cols
     monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: plugins))
 
@@ -858,11 +782,9 @@ def test_long_plugins_row_clipped_to_box_width(monkeypatch: pytest.MonkeyPatch) 
     assert ELLIPSIS in plugins_lines[0], 'clipped plugins row should end with an ellipsis'
 
 
-def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """A plugin list that fits the box renders in full, with no ellipsis."""
-    from helper import strip_ansi
     from yas.constants import ELLIPSIS
-    _silence_dynamic(monkeypatch)
     monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: 'foo,bar'))
 
     spec = layout.build_wide(_view(), _tick(), 140, _r)
@@ -871,27 +793,17 @@ def test_short_plugins_row_not_truncated(monkeypatch: pytest.MonkeyPatch) -> Non
     assert ELLIPSIS not in plugins_lines[0]
 
 
-# ---------------------------------------------------------------------------
-# Task 6.4 — cache_section sub-hour and over-hour format
-# ---------------------------------------------------------------------------
-
 def test_cache_section_sub_hour_format() -> None:
-    from helper import strip_ansi
     text, _w = _r.cache_section(187.0, 38)
     stripped = strip_ansi(text)
     assert '03:07' in stripped
 
 
 def test_cache_section_over_hour_format() -> None:
-    from helper import strip_ansi
     text, _w = _r.cache_section(3905.0, 38)
     stripped = strip_ansi(text)
     assert '1:05:05' in stripped
 
-
-# ---------------------------------------------------------------------------
-# Task 6.3 — Clear-timer degradation ladder and fresh-session preservation
-# ---------------------------------------------------------------------------
 
 def _inject_clear_epoch(view: SessionView, epoch: float | None) -> SessionView:
     """Inject a clear_epoch value into a SessionView's __dict__ cache."""
@@ -899,11 +811,9 @@ def _inject_clear_epoch(view: SessionView, epoch: float | None) -> SessionView:
     return view
 
 
-def test_clear_timer_both_shown_at_ample_width(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_clear_timer_both_shown_at_ample_width(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """At a wide terminal both clear and session timers appear in the content row."""
-    from helper import strip_ansi
     from yas.constants import GLYPH_CLEAR
-    _silence_dynamic(monkeypatch)
     now = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33  # 18:33 ago
     view = _view()
@@ -921,10 +831,8 @@ def test_clear_timer_both_shown_at_ample_width(monkeypatch: pytest.MonkeyPatch) 
     assert '13:27' in plain, 'session timer should appear'
 
 
-def test_clear_timer_clear_first_in_cell(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_clear_timer_clear_first_in_cell(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The clear timer is leftmost (lower index) in the content row plain text."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     now = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33
     view = _view()
@@ -939,12 +847,11 @@ def test_clear_timer_clear_first_in_cell(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_clear_timer_fresh_session_byte_identical(
-    monkeypatch: pytest.MonkeyPatch, frozen_clock: float,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, frozen_clock: float,
 ) -> None:
     """Fresh session (clear_epoch=None): top content row is byte-identical to the pre-change render."""
     # frozen_clock pins the rainbow palette, which rolls once a second and would
     # otherwise colour the two builds differently.
-    _silence_dynamic(monkeypatch)
     view_fresh = _view()
     view_fresh.__dict__['now'] = 1_750_000_000.0
     view_fresh.__dict__['elapsed'] = '13:27'
@@ -967,16 +874,14 @@ def test_clear_timer_fresh_session_byte_identical(
 
 
 def test_clear_timer_degrades_to_clear_only_when_both_dont_fit(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """When width is too narrow for both timers but fits clear-only, only the
     clear timer renders. Under the declarative precedence, the session timer
     is priority 5 — it degrades (both -> clear-only -> none) well before the
     path/branch/dir (priorities 3/4) are touched, so this transition happens
     at a width where the path is still rendered in full."""
-    from helper import strip_ansi
     from yas.constants import GLYPH_CLEAR
-    _silence_dynamic(monkeypatch)
 
     now         = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33
@@ -1006,12 +911,11 @@ def test_clear_timer_degrades_to_clear_only_when_both_dont_fit(
 
 
 def test_clear_timer_sheds_entire_cell_on_path_protection(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """When even clear-only doesn't protect the path (< 5 cols), the whole cell sheds."""
     from yas.constants import GLYPH_CLEAR
     from yas.render.text import _visible_width
-    _silence_dynamic(monkeypatch)
 
     sess       = _session()
     h5h, h7d, _, right_w = _r.model_right_section(
@@ -1040,17 +944,10 @@ def test_clear_timer_sheds_entire_cell_on_path_protection(
         assert GLYPH_CLEAR not in ln, 'elapsed cell should be fully shed'
 
 
-# ---------------------------------------------------------------------------
-# Task 7.8 — lines read/changed segment elbow count and TOKENS_COST_MIN_WIDTH
-# gating (design.md Decision 8)
-# ---------------------------------------------------------------------------
-
-def test_tokens_row_three_elbows_at_wide_width(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tokens_row_three_elbows_at_wide_width(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """At width=140 (>= LINES_SEGMENT_MIN_WIDTH=103) the lines read/changed
     segment is included, so the tokens/cost separator row threads 3 elbows
     (3-tuple downs/ups) instead of the pre-change 2."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), 140, _r)
     # The tokens/cost separator is the separator_dim row immediately above the
     # first tokens content row (the one carrying the 't/m' rate label).
@@ -1071,11 +968,10 @@ def test_tokens_row_three_elbows_at_wide_width(monkeypatch: pytest.MonkeyPatch) 
         assert below[col] in ('┴', '┼'), f'no ┴ below at col {col}: {below[col]!r}'
 
 
-def test_tokens_row_two_elbows_in_85_102_band(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tokens_row_two_elbows_in_85_102_band(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """At width=95 (85 <= width < 103) the lines segment is shed: the
     tokens/cost separator row threads only 2 elbows, identical to before this
     change."""
-    _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), 95, _r)
     t_idx = _tokens_row_indices(spec)[0]
     tokens_sep = spec.rows[t_idx - 1]
@@ -1085,26 +981,23 @@ def test_tokens_row_two_elbows_in_85_102_band(monkeypatch: pytest.MonkeyPatch) -
 
 @pytest.mark.parametrize('width', [80, 85, 90, 100, 103, 140])
 def test_tokens_row_present_across_lines_segment_threshold(
-    monkeypatch: pytest.MonkeyPatch, width: int,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None, width: int,
 ) -> None:
     """TOKENS_COST_MIN_WIDTH (== MEDIUM_WIDTH == 80) gating is unaffected by the
     new lines segment: the tokens/cost content row (and hence the full, not
     compact, context line) is present at every width from 80 (build_wide's own
     floor) up through and past the 103 lines-segment threshold."""
-    _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), width, _r)
     assert _tokens_row_indices(spec), f'tokens/cost row missing at width={width}'
 
 
-def test_context_row_upgrades_at_wide_layout_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_context_row_upgrades_at_wide_layout_floor(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Task threshold-alignment: TOKENS_COST_MIN_WIDTH is pinned to
     MEDIUM_WIDTH, so the rich context line (token total + fraction, e.g.
     '150.0K (75%) 100%') and the tokens/cost row's dividers both appear from
     box 80 -- the same box width build_wide itself starts at -- eliminating
     the old 80-84 band where the plugin row showed but the context row was
     still degraded to the compact '75%'-only form."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
 
     spec = layout.build_wide(_view(), _tick(), 80, _r)
     lines = [strip_ansi(ln) for ln in layout.render_layout(spec, _r)]
@@ -1114,7 +1007,7 @@ def test_context_row_upgrades_at_wide_layout_floor(monkeypatch: pytest.MonkeyPat
 
 
 def test_plugin_row_and_rich_context_row_copresent_at_wide_layout_floor(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Empirical pin for the fixed inconsistency: at box 80 (terminal 86),
     with plugin data present, the plugin row and the rich context row (token
     total + fraction, e.g. '16.0K (8%) 11%') must both render together --
@@ -1123,8 +1016,6 @@ def test_plugin_row_and_rich_context_row_copresent_at_wide_layout_floor(
     TOKENS_COST_MIN_WIDTH was aligned to MEDIUM_WIDTH, the plugin row (gated
     only by MEDIUM_WIDTH=80) could appear up to 5 box-columns ahead of the
     rich context row (previously gated at 85)."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: 'foo,bar'))
 
     spec  = layout.build_wide(_view(), _tick(), 80, _r)
@@ -1138,9 +1029,8 @@ def test_plugin_row_and_rich_context_row_copresent_at_wide_layout_floor(
         'expected the rich context line (fraction form) co-present with the plugin row at box 80'
 
 
-def test_clear_timer_no_additional_elbow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_clear_timer_no_additional_elbow(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Adding a clear timer does NOT add a new border elbow (single divider unchanged)."""
-    _silence_dynamic(monkeypatch)
     now = 1_750_000_000.0
     clear_epoch = now - 18 * 60 - 33
 
@@ -1165,12 +1055,10 @@ def test_clear_timer_no_additional_elbow(monkeypatch: pytest.MonkeyPatch) -> Non
 
 # --- Subagent Tree View column labels ('loc r/w' anchoring, 'name' offset) ---
 
-def test_tree_labels_loc_slash_stacks_over_data_slash(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tree_labels_loc_slash_stacks_over_data_slash(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The 'loc r/w' header's own '/' must land in the SAME printed column as
     the '/' in a tree row's '<read> /<changed>' data — not at the field's
     start like the (session-level) full-word 'loc read/write' label does."""
-    from helper import strip_ansi
-    _silence_dynamic(monkeypatch)
     sub = _make_sub()
     sub.jsonl_path = '/fake/ui.jsonl'
     monkeypatch.setattr(
@@ -1198,11 +1086,10 @@ def test_tree_labels_loc_slash_stacks_over_data_slash(monkeypatch: pytest.Monkey
     )
 
 
-def test_tree_labels_name_shifted_right_of_desc_col_start(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tree_labels_name_shifted_right_of_desc_col_start(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The 'name' header no longer sits flush against the desc column's exact
     start — it's nudged right so it settles under the actual name text rather
     than crowding the 'model' label to its left."""
-    _silence_dynamic(monkeypatch)
     sub = _make_sub()
     monkeypatch.setattr(
         subagents_mod.RunningSubagents, 'from_session',
@@ -1218,12 +1105,11 @@ def test_tree_labels_name_shifted_right_of_desc_col_start(monkeypatch: pytest.Mo
     assert name_col == 3 + desc_col + 2
 
 
-def test_context_labels_survive_show_icons_false(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_context_labels_survive_show_icons_false(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The `context`/`fill`/`dumb` separator labels are anchored off the
     hourglass glyph in `context_line`. With show_icons=False the glyph is
     gone, so the anchor must fall back to the first token instead of
     silently dropping the whole label row."""
-    _silence_dynamic(monkeypatch)
     view = SessionView(_session(), Config(labels=True, show_icons=False))
     spec = layout.build_wide(view, _tick(), 200, _r)
 
@@ -1235,7 +1121,7 @@ def test_context_labels_survive_show_icons_false(monkeypatch: pytest.MonkeyPatch
 
 
 def test_helper_row_show_icons_false_drops_5h7d_and_flame_when_gaps_widen(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """`build_wide` re-derives ``helper_5h``/``helper_7d`` a second time once it
     widens the inter-stat gaps to spend justification slack (``gap_5h``/
@@ -1244,9 +1130,7 @@ def test_helper_row_show_icons_false_drops_5h7d_and_flame_when_gaps_widen(
     reappear in the top row regardless of the config. Sweeps widths since the
     widen-gaps branch only fires once enough slack accumulates."""
     from yas.constants import ICON_LIMIT_5H, ICON_LIMIT_7D, GLYPH_BURN_FAST, GLYPH_BURN_SLOW
-    from helper import strip_ansi
 
-    _silence_dynamic(monkeypatch)
     view = SessionView(_session(), Config(show_icons=False))
     for width in (140, 160, 180, 200, 220):
         spec = layout.build_wide(view, _tick(), width, _r)
@@ -1256,16 +1140,14 @@ def test_helper_row_show_icons_false_drops_5h7d_and_flame_when_gaps_widen(
             assert glyph not in plain, f'{glyph!r} leaked at width={width} with show_icons=False'
 
 
-def test_path_row_show_icons_false_drops_folder_glyph(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_path_row_show_icons_false_drops_folder_glyph(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The leading folder glyph in the top-left path row is gated by
     show_icons like every other number-adjacent icon. With icons off the
     glyph must not leak into build_medium or build_wide, and the row must
     still render (box stays square — widths are always _visible_width-derived,
     so no separate shift bookkeeping is needed here)."""
     from yas.constants import GLYPH_FOLDER
-    from helper import strip_ansi
 
-    _silence_dynamic(monkeypatch)
     view = SessionView(_session(), Config(show_icons=False))
     for width in (90, 120, 160, 200):
         specs = [
@@ -1296,10 +1178,6 @@ def tree_columns_for(view: SessionView) -> tuple[int, int, int]:
     return tree_columns(sub_cells, inner, cluster_full_w=cluster_w, model_w=model_w)
 
 
-# ---------------------------------------------------------------------------
-# Narrow-tier plan + subagent side-by-side
-# ---------------------------------------------------------------------------
-
 def _narrow_divider_content_idx(spec: layout.LayoutSpec) -> list[int]:
     """Indices of content rows carrying the narrow-tier side-by-side divider │.
 
@@ -1312,7 +1190,6 @@ def _narrow_divider_content_idx(spec: layout.LayoutSpec) -> list[int]:
     rows containing a bare `│` (ANSI-stripped) — narrow's other content rows
     (rate/model header, compact plan summary, context line) never contain one.
     """
-    from helper import strip_ansi
     return [
         i for i, row in enumerate(spec.rows)
         if row.kind == 'content' and '│' in strip_ansi(row.content)
@@ -1324,7 +1201,6 @@ def test_narrow_side_by_side_below_floor_falls_back_to_stacking(
     """Below NARROW_SIDE_BY_SIDE_MIN_WIDTH (45), build_narrow keeps stacking
     plan above subagents (the old compact single-line plan header) rather
     than forcing an unreadable two-column split."""
-    from helper import strip_ansi
     from yas.constants import NARROW_SIDE_BY_SIDE_MIN_WIDTH
     _both_sections(monkeypatch)
 
@@ -1358,7 +1234,6 @@ def test_narrow_side_by_side_at_and_above_floor_has_continuous_divider(
     just the header/item content rows), so a border-vs-content drift and a
     header-vs-item drift are both caught the same way.
     """
-    from helper import strip_ansi
     from yas.render.text import _visible_width
     from yas.constants import NARROW_SIDE_BY_SIDE_MIN_WIDTH
     _both_sections_narrow_stress(monkeypatch)
@@ -1406,7 +1281,6 @@ def test_narrow_side_by_side_plan_name_sheds_before_subagent_type_model(
     there is enough total room for the subagent column's untruncated floor
     at all — i.e. plan item name (priority 4) sheds before subagent
     type/model (priority 3), never the other way around."""
-    from helper import strip_ansi
     from yas.constants import ELLIPSIS, PLAN_ONELINE_MIN_W
     _both_sections(monkeypatch)
 
@@ -1436,12 +1310,7 @@ def test_narrow_side_by_side_plan_name_sheds_before_subagent_type_model(
     )
 
 
-# ---------------------------------------------------------------------------
-# Width-gap audit fixes: top-row justify padding cap (Finding C) and the
-# skills/plugins caption's centering under justify (Finding A)
-# ---------------------------------------------------------------------------
-
-def test_top_row_justify_padding_capped_at_wide_widths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_top_row_justify_padding_capped_at_wide_widths(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """Finding C (width-gap audit): without a cap, `total_slack` (path/
     elapsed/5h/7d/cache justify breathing room) scales linearly with `width`
     once nothing is being shed, so an equal N-way split turned into several
@@ -1452,9 +1321,7 @@ def test_top_row_justify_padding_capped_at_wide_widths(monkeypatch: pytest.Monke
     be AT MOST ONE blank run wider than the cap — everything else stays
     small regardless of how wide the box gets."""
     import re
-    from helper import strip_ansi
     from yas.constants import TOPROW_JUSTIFY_OUTER_CAP
-    _silence_dynamic(monkeypatch)
     session = _session()
 
     for width in (150, 200, 250, 300, 350):
@@ -1471,7 +1338,7 @@ def test_top_row_justify_padding_capped_at_wide_widths(monkeypatch: pytest.Monke
 
 
 def test_top_row_justify_never_overflows_the_box_with_short_model_form(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """Regression for the `model_form='short'` shed-rung justify bug: at the
     last-resort rung (`build_wide` narrows the model pill instead of dropping
@@ -1485,7 +1352,6 @@ def test_top_row_justify_never_overflows_the_box_with_short_model_form(
     rendered line is exactly `width` -- never over, matching border_line's
     own "pad, never truncate" contract."""
     from yas.render.text import _visible_width
-    _silence_dynamic(monkeypatch)
     session = _session()
     long_model = session_mod.Model(
         id='claude-opus-5[1m]',
@@ -1510,13 +1376,12 @@ def test_top_row_justify_never_overflows_the_box_with_short_model_form(
 
 
 def test_top_row_justify_matches_unjustified_when_slack_absorbed_by_cap(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, silence_dynamic: None,
 ) -> None:
     """The cap only bounds each slot's OWN growth; it must not change how
     much total width the row consumes (still exactly `width`, via
     `border_line`'s pad) or which sections are present."""
     from yas.render.text import _visible_width
-    _silence_dynamic(monkeypatch)
     session = _session()
 
     for width in (150, 250, 350):

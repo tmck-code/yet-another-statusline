@@ -48,7 +48,6 @@ def _set_mtime(path: Path, ts: float) -> None:
 
 class TestFindActiveJsonls:
     def test_file_within_window_is_returned(self, tmp_path: Path) -> None:
-        # setup
         projects = _make_projects_root(tmp_path)
         now = datetime(2024, 1, 1, 12, 0, 0)
         now_ts = now.timestamp()
@@ -56,17 +55,13 @@ class TestFindActiveJsonls:
         # mtime 5 minutes ago — within 10 minute window
         _set_mtime(jsonl, now_ts - 300)
 
-        # run
         result = find_active_jsonls(timedelta(minutes=10), now, projects)
 
-        # expected
         expected = [(jsonl, now_ts - 300)]
 
-        # assert
         assert result == expected
 
     def test_file_outside_window_is_excluded(self, tmp_path: Path) -> None:
-        # setup
         projects = _make_projects_root(tmp_path)
         now = datetime(2024, 1, 1, 12, 0, 0)
         now_ts = now.timestamp()
@@ -74,13 +69,10 @@ class TestFindActiveJsonls:
         # mtime 20 minutes ago — outside 10 minute window
         _set_mtime(jsonl, now_ts - 1200)
 
-        # run
         result = find_active_jsonls(timedelta(minutes=10), now, projects)
 
-        # expected
         expected: list = []
 
-        # assert
         assert result == expected
 
     def test_file_exactly_at_boundary_is_returned(self, tmp_path: Path) -> None:
@@ -98,21 +90,16 @@ class TestFindActiveJsonls:
         assert result == expected
 
     def test_missing_projects_root_returns_empty(self, tmp_path: Path) -> None:
-        # setup
         projects = tmp_path / 'nonexistent'
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        # run
         result = find_active_jsonls(timedelta(minutes=10), now, projects)
 
-        # expected
         expected: list = []
 
-        # assert
         assert result == expected
 
     def test_multiple_files_mixed_window(self, tmp_path: Path) -> None:
-        # setup
         projects = _make_projects_root(tmp_path)
         now = datetime(2024, 1, 1, 12, 0, 0)
         now_ts = now.timestamp()
@@ -121,35 +108,28 @@ class TestFindActiveJsonls:
         _set_mtime(recent, now_ts - 300)   # 5 min ago — in window
         _set_mtime(stale, now_ts - 1200)   # 20 min ago — outside window
 
-        # run
         result = find_active_jsonls(timedelta(minutes=10), now, projects)
 
         # expected — only the recent one
         expected = [(recent, now_ts - 300)]
 
-        # assert
         assert result == expected
 
 
 class TestIndexPayloadsBySession:
     def test_single_payload_indexed_by_session_id(self, tmp_path: Path) -> None:
-        # setup
         payloads = _make_payloads_root(tmp_path)
         data = {'session_id': 'sess-abc', 'cwd': '/home/user/project'}
         pfile = _write_payload(payloads, 'payload-1', data)
         mtime = pfile.stat().st_mtime
 
-        # run
         result = index_payloads_by_session(payloads)
 
-        # expected
         expected = {'sess-abc': (pfile, mtime, data)}
 
-        # assert
         assert result == expected
 
     def test_most_recent_payload_wins_for_same_session(self, tmp_path: Path) -> None:
-        # setup
         payloads = _make_payloads_root(tmp_path)
         data_old = {'session_id': 'sess-abc', 'cwd': '/old'}
         data_new = {'session_id': 'sess-abc', 'cwd': '/new'}
@@ -161,65 +141,49 @@ class TestIndexPayloadsBySession:
         os.utime(old_file, (old_ts, old_ts))
         new_mtime = new_file.stat().st_mtime
 
-        # run
         result = index_payloads_by_session(payloads)
 
         # expected — only the newer file survives
         expected = {'sess-abc': (new_file, new_mtime, data_new)}
 
-        # assert
         assert result == expected
 
     def test_file_without_session_id_is_skipped(self, tmp_path: Path) -> None:
-        # setup
         payloads = _make_payloads_root(tmp_path)
         _write_payload(payloads, 'no-session', {'cwd': '/somewhere'})
 
-        # run
         result = index_payloads_by_session(payloads)
 
-        # expected
         expected: dict = {}
 
-        # assert
         assert result == expected
 
     def test_unparseable_json_is_skipped(self, tmp_path: Path) -> None:
-        # setup
         payloads = _make_payloads_root(tmp_path)
         (payloads / 'bad.json').write_text('{not valid json}')
 
-        # run
         result = index_payloads_by_session(payloads)
 
-        # expected
         expected: dict = {}
 
-        # assert
         assert result == expected
 
     def test_missing_payloads_root_returns_empty(self, tmp_path: Path) -> None:
-        # setup
         payloads = tmp_path / 'nonexistent'
 
-        # run
         result = index_payloads_by_session(payloads)
 
-        # expected
         expected: dict = {}
 
-        # assert
         assert result == expected
 
     def test_multiple_sessions_each_indexed(self, tmp_path: Path) -> None:
-        # setup
         payloads = _make_payloads_root(tmp_path)
         data_a = {'session_id': 'sess-a', 'cwd': '/a'}
         data_b = {'session_id': 'sess-b', 'cwd': '/b'}
         fa = _write_payload(payloads, 'payload-a', data_a)
         fb = _write_payload(payloads, 'payload-b', data_b)
 
-        # run
         result = index_payloads_by_session(payloads)
 
         # assert both keys present with correct data
@@ -284,10 +248,22 @@ class TestDiscover:
 
         return projects, payloads
 
+    def _patch_discovery(
+        self, monkeypatch: pytest.MonkeyPatch, projects: Path, payloads: Path
+    ) -> None:
+        """Redirect discover()'s finder/indexer at the fake projects/payloads dirs."""
+        monkeypatch.setattr(
+            'claude.mon.discovery.find_active_jsonls',
+            lambda include_after, now: find_active_jsonls(include_after, now, projects),
+        )
+        monkeypatch.setattr(
+            'claude.mon.discovery.index_payloads_by_session',
+            lambda: index_payloads_by_session(payloads),
+        )
+
     def test_active_session_with_payload_is_returned(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # setup
         now = datetime(2024, 6, 1, 10, 0, 0)
         sessions = [
             {
@@ -300,26 +276,16 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
-        # run
         result = discover(timedelta(minutes=10), now)
 
-        # expected
         assert len(result) == 1
         assert result[0].session_id == 'sess-1'
 
     def test_session_without_payload_is_omitted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # setup
         now = datetime(2024, 6, 1, 10, 0, 0)
         sessions = [
             {
@@ -332,22 +298,12 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
-        # run
         result = discover(timedelta(minutes=10), now)
 
-        # expected
         expected: list = []
 
-        # assert
         assert result == expected
 
     def test_stale_session_is_excluded(
@@ -366,22 +322,12 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
-        # run
         result = discover(timedelta(minutes=10), now)
 
-        # expected
         expected: list = []
 
-        # assert
         assert result == expected
 
     def test_sessions_sorted_by_cwd_then_session_id(
@@ -412,28 +358,18 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
-        # run
         result = discover(timedelta(minutes=10), now)
 
         # expected sort: (/alpha, sess-a), (/alpha, sess-m), (/beta, sess-z)
         expected_ids = ['sess-a', 'sess-m', 'sess-z']
 
-        # assert
         assert [s.session_id for s in result] == expected_ids
 
     def test_active_session_fields_are_populated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # setup
         now = datetime(2024, 6, 1, 10, 0, 0)
         now_ts = now.timestamp()
         payload_data = {'session_id': 'sess-1', 'cwd': '/home/user/proj', 'cost': {'total_cost_usd': 0.05}}
@@ -448,23 +384,14 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
-        # run
         result = discover(timedelta(minutes=10), now)
         s = result[0]
 
         # expected jsonl_mtime roughly now - 300
         expected_jsonl_mtime_approx = now_ts - 300
 
-        # assert
         assert s.session_id == 'sess-1'
         assert s.payload == payload_data
         assert abs(s.jsonl_mtime - expected_jsonl_mtime_approx) < 2.0

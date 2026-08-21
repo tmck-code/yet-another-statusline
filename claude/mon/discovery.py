@@ -85,8 +85,7 @@ def discover(
 
     sessions = []
     for jsonl_path, jsonl_mtime in active_jsonls:
-        # session_id is the stem of the jsonl filename
-        session_id = jsonl_path.stem
+        session_id = jsonl_path.stem  # filename stem
         entry = payload_index.get(session_id)
         if entry is None:
             continue

@@ -673,11 +673,6 @@ def test_structured_output_null_stop_reason_detects_done(tmp_home: Path) -> None
     assert sub.end_ts == 0.0
 
 
-# ---------------------------------------------------------------------------
-# Tier 1: toolUseResult signal in the spawning transcript. Preferred over
-# <task-notification> -- fires even when no notification was ever emitted.
-# ---------------------------------------------------------------------------
-
 def _write_agent_with_tool_use_id(
     subagents_dir: Path,
     agent_id: str,
@@ -763,15 +758,6 @@ def test_tool_use_result_non_completed_status_stays_running(tmp_home: Path) -> N
     assert sub.status == 'running'
     assert not sub.is_done
 
-
-# ---------------------------------------------------------------------------
-# Lost-notification fallback: terminal stop_reason + long silence + no
-# <task-notification> ever received. Gated on BOTH a terminal stop_reason AND
-# staleness past ABANDONED_HORIZON_SECONDS -- neither alone is sufficient, to
-# avoid reintroducing the reverted end_turn-only false positive (see the NOTE
-# in parse_transcript and the other tests in this file that assert end_turn
-# alone leaves end_ts == 0.0).
-# ---------------------------------------------------------------------------
 
 def test_lost_notification_fallback_marks_done_past_abandoned_horizon(tmp_home: Path) -> None:
     '''An agent whose transcript ends in stop_reason: end_turn, with no
@@ -891,13 +877,10 @@ class TestStaleTerminalSignal:
         )
         self._write_session(tmp_home, _notification_line('stalled', 'failed', iso_ts(notif_ts)))
 
-        # run
         sub = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR, now=now).subagents[0]
 
-        # expected
         expected = ('running', 0.0, False)
 
-        # assert
         assert (sub.status, sub.end_ts, sub.is_done) == expected
 
     def test_invalidated_terminal_signal_keeps_resumed_flag(self, tmp_home: Path) -> None:
@@ -912,10 +895,8 @@ class TestStaleTerminalSignal:
         )
         self._write_session(tmp_home, _notification_line('stalled-resumed', 'failed', iso_ts(notif_ts)))
 
-        # run
         sub = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR, now=now).subagents[0]
 
-        # assert
         assert sub.resumed
 
     def test_finished_agent_still_retires(self, tmp_home: Path) -> None:
@@ -930,14 +911,11 @@ class TestStaleTerminalSignal:
         )
         self._write_session(tmp_home, _notification_line('finished', 'completed', iso_ts(notif_ts)))
 
-        # run
         parsed = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR, now=now)
         sub = parsed.subagents[0]
 
-        # expected
         expected = ('completed', True, [])
 
-        # assert
         assert (sub.status, sub.is_done, parsed.visible(now, now - 200.0)) == expected
 
     def test_write_within_skew_tolerance_keeps_terminal_signal(self, tmp_home: Path) -> None:
@@ -952,11 +930,8 @@ class TestStaleTerminalSignal:
         )
         self._write_session(tmp_home, _notification_line('skewed', 'completed', iso_ts(notif_ts)))
 
-        # run
         sub = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR, now=now).subagents[0]
 
-        # expected
         expected = ('completed', True)
 
-        # assert
         assert (sub.status, sub.is_done) == expected
