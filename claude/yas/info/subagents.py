@@ -11,7 +11,6 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -68,13 +67,15 @@ class _TailCacheEntry(NamedTuple):
 _notif_tail_cache: dict[str, _TailCacheEntry] = {}
 
 
-@dataclass(slots=True)
 class _Notification:
     '''One parsed <task-notification> occurrence.'''
-    task_id:     str
-    tool_use_id: str
-    status:      str
-    ts:          float
+    __slots__ = ('task_id', 'tool_use_id', 'status', 'ts')
+
+    def __init__(self, task_id: str, tool_use_id: str, status: str, ts: float) -> None:
+        self.task_id     = task_id
+        self.tool_use_id = tool_use_id
+        self.status      = status
+        self.ts          = ts
 
 
 def _extract_notifications(line: str) -> list[_Notification]:
@@ -778,47 +779,107 @@ def cap_tree_groups(subs: list[RunningSubagent], cap: int) -> list[RunningSubage
     return [sub for g in ordered for sub in g]
 
 
-@dataclass(eq=True)
+_EMPTY_ACTIVITY: tuple[str, str, dict[str, object]] = ('', '', {})
+
+
 class RunningSubagent:
-    agent_type:      str
-    description:     str
-    billed_in:       int
-    output:          int
-    first_timestamp: float  # epoch seconds; baseline for live duration
-    model:           str = ''
-    cache_read_in:   int = 0
-    total_input:     int = 0
-    last_activity:   tuple[str, str, dict[str, object]] = field(default_factory=lambda: ('', '', {}))
-    end_ts:          float = 0.0  # authoritative <task-notification> ts; 0 while running
-    mtime:           float = 0.0  # transcript last-modified time (st_mtime)
-    agent_id:        str = ''     # transcript filename stem; matches run-JSON agentId (workflow cohort)
-    jsonl_path:      str = ''     # absolute path to this agent's transcript (for tool-count rescan)
-    parent_id:       str = ''     # meta.json parentAgentId — spawner's agent id ('' → top-level)
-    spawn_depth:     int = 0      # meta.json spawnDepth (1 = spawned by main; 0 when absent)
-    status:          str = 'running'  # "running"|"completed"|"killed"|"failed"|"stopped"
-    run_count:       int = 0      # <task-notification> occurrences seen for this agent; 0 while never finished
-    is_fork:         bool = False  # meta.json "isFork" (equivalently agentType == "fork")
-    resumed:         bool = False  # a later notification/activity postdates the last-seen notification
-    run_start_ts:    float | None = None  # start of the CURRENT run; see subagent_dur_str
+    __slots__ = (
+        'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
+        'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
+        'mtime', 'agent_id', 'jsonl_path', 'parent_id', 'spawn_depth',
+        'status', 'run_count', 'is_fork', 'resumed', 'run_start_ts',
+    )
+
+    def __init__(
+        self,
+        agent_type:      str,
+        description:     str,
+        billed_in:       int,
+        output:          int,
+        first_timestamp: float,  # epoch seconds; baseline for live duration
+        model:           str = '',
+        cache_read_in:   int = 0,
+        total_input:     int = 0,
+        last_activity:   tuple[str, str, dict[str, object]] | None = None,
+        end_ts:          float = 0.0,  # authoritative <task-notification> ts; 0 while running
+        mtime:           float = 0.0,  # transcript last-modified time (st_mtime)
+        agent_id:        str = '',     # transcript filename stem; matches run-JSON agentId (workflow cohort)
+        jsonl_path:      str = '',     # absolute path to this agent's transcript (for tool-count rescan)
+        parent_id:       str = '',     # meta.json parentAgentId — spawner's agent id ('' → top-level)
+        spawn_depth:     int = 0,      # meta.json spawnDepth (1 = spawned by main; 0 when absent)
+        status:          str = 'running',  # "running"|"completed"|"killed"|"failed"|"stopped"
+        run_count:       int = 0,      # <task-notification> occurrences seen for this agent; 0 while never finished
+        is_fork:         bool = False,  # meta.json "isFork" (equivalently agentType == "fork")
+        resumed:         bool = False,  # a later notification/activity postdates the last-seen notification
+        run_start_ts:    float | None = None,  # start of the CURRENT run; see subagent_dur_str
+    ) -> None:
+        self.agent_type      = agent_type
+        self.description      = description
+        self.billed_in        = billed_in
+        self.output           = output
+        self.first_timestamp  = first_timestamp
+        self.model            = model
+        self.cache_read_in    = cache_read_in
+        self.total_input      = total_input
+        self.last_activity    = last_activity if last_activity is not None else _EMPTY_ACTIVITY
+        self.end_ts           = end_ts
+        self.mtime            = mtime
+        self.agent_id         = agent_id
+        self.jsonl_path       = jsonl_path
+        self.parent_id        = parent_id
+        self.spawn_depth      = spawn_depth
+        self.status           = status
+        self.run_count        = run_count
+        self.is_fork          = is_fork
+        self.resumed          = resumed
+        # Start of the CURRENT run (not original spawn); see subagent_dur_str.
+        self.run_start_ts     = run_start_ts if run_start_ts is not None else first_timestamp
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningSubagent):
+            return NotImplemented
+        return self._key() == other._key()
+
+    def _key(self) -> tuple[object, ...]:
+        return (
+            self.agent_type, self.description, self.billed_in, self.output,
+            self.first_timestamp, self.model, self.cache_read_in, self.total_input,
+            self.last_activity, self.end_ts, self.mtime, self.agent_id,
+            self.jsonl_path, self.parent_id, self.spawn_depth,
+            self.status, self.run_count, self.is_fork, self.resumed,
+            self.run_start_ts,
+        )
 
     __hash__ = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        # Start of the CURRENT run (not original spawn); see subagent_dur_str.
-        if self.run_start_ts is None:
-            self.run_start_ts = self.first_timestamp
 
     @property
     def is_done(self) -> bool:
         '''Derived, not stored: true once an authoritative end_ts is set.'''
         return self.end_ts > 0
 
+    def __repr__(self) -> str:
+        return (f'RunningSubagent(agent_type={self.agent_type!r}, description={self.description!r}, '
+                f'billed_in={self.billed_in}, output={self.output}, first_timestamp={self.first_timestamp}, '
+                f'model={self.model!r}, cache_read_in={self.cache_read_in}, total_input={self.total_input}, '
+                f'last_activity={self.last_activity!r}, end_ts={self.end_ts}, mtime={self.mtime}, '
+                f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r}, '
+                f'parent_id={self.parent_id!r}, spawn_depth={self.spawn_depth}, '
+                f'status={self.status!r}, run_count={self.run_count}, is_fork={self.is_fork}, '
+                f'resumed={self.resumed}, run_start_ts={self.run_start_ts})')
 
-@dataclass(eq=True)
+
 class RunningSubagents:
-    subagents:       list[RunningSubagent] = field(default_factory=list)
-    # agent_id -> boundary_ts for totals_only-parsed agents; visible() uses this to re-parse full.
-    totals_only_ids: dict[str, float] = field(default_factory=dict, compare=False)
+    __slots__ = ('subagents', 'totals_only_ids')
+
+    def __init__(self, subagents: list[RunningSubagent] | None = None, totals_only_ids: dict[str, float] | None = None) -> None:
+        self.subagents = subagents if subagents is not None else []
+        # agent_id -> boundary_ts for totals_only-parsed agents; visible() uses this to re-parse full.
+        self.totals_only_ids = totals_only_ids if totals_only_ids is not None else {}
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RunningSubagents):
+            return NotImplemented
+        return self.subagents == other.subagents
 
     __hash__ = None  # type: ignore[assignment]
 

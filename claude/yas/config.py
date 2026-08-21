@@ -19,7 +19,6 @@ import json
 import os
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -306,30 +305,105 @@ def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
     return tuple(nums)
 
 
-@dataclass(frozen=True, slots=True)
 class Config:
-    max_width:           int = DEFAULT_MAX_WIDTH
-    full_width:          bool = False
-    justify:             bool = DEFAULT_JUSTIFY
-    labels:              bool = DEFAULT_LABELS
-    soft_limit:          int = DEFAULT_SOFT_LIMIT
-    token_window:        float = DEFAULT_TOKEN_WINDOW
-    theme:               str = DEFAULT_THEME
-    bg_shift:            str = 'warm'
-    glyph_mode:          str = 'nerdfont'
-    single_width:        bool = False
-    show_day_stats:      bool = DEFAULT_SHOW_DAY_STATS
-    context_state:       bool = DEFAULT_CONTEXT_STATE
-    context_labels:      tuple[str, ...] = DEFAULT_CONTEXT_LABELS
-    context_thresholds:  tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS
-    show_render_time:    bool = False
-    show_tool_uses:      bool = DEFAULT_SHOW_TOOL_USES
-    soft_limit_models:   tuple[tuple[str, int], ...] = ()
-    openspec_scan_depth: int = DEFAULT_OPENSPEC_SCAN_DEPTH
-    show_icons:          bool = True
-    transcript_cache:    bool = DEFAULT_TRANSCRIPT_CACHE
-    errors:              tuple[str, ...] = ()
-    debug_lines:         tuple[str, ...] = ()
+    __slots__ = (
+        'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
+        'token_window', 'theme', 'bg_shift', 'glyph_mode', 'single_width',
+        'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
+        'show_render_time', 'show_tool_uses', 'soft_limit_models', 'openspec_scan_depth',
+        'show_icons', 'transcript_cache', 'errors', 'debug_lines',
+    )
+
+    max_width:          int
+    full_width:         bool
+    justify:            bool
+    labels:             bool
+    soft_limit:         int
+    token_window:       float
+    theme:              str
+    bg_shift:           str
+    glyph_mode:         str
+    single_width:       bool
+    show_day_stats:     bool
+    context_state:      bool
+    context_labels:     tuple[str, ...]
+    context_thresholds: tuple[int, ...]
+    show_render_time:   bool
+    show_tool_uses:     bool
+    soft_limit_models:  tuple[tuple[str, int], ...]
+    openspec_scan_depth: int
+    show_icons:         bool
+    transcript_cache:   bool
+    errors:             tuple[str, ...]
+    debug_lines:        tuple[str, ...]
+
+    def __init__(
+        self,
+        max_width:          int = DEFAULT_MAX_WIDTH,
+        full_width:         bool = False,
+        justify:            bool = DEFAULT_JUSTIFY,
+        labels:             bool = DEFAULT_LABELS,
+        soft_limit:         int = DEFAULT_SOFT_LIMIT,
+        token_window:       float = DEFAULT_TOKEN_WINDOW,
+        theme:              str = DEFAULT_THEME,
+        bg_shift:           str = 'warm',
+        glyph_mode:         str = 'nerdfont',
+        single_width:       bool = False,
+        show_day_stats:     bool = DEFAULT_SHOW_DAY_STATS,
+        context_state:      bool = DEFAULT_CONTEXT_STATE,
+        context_labels:     tuple[str, ...] = DEFAULT_CONTEXT_LABELS,
+        context_thresholds: tuple[int, ...] = DEFAULT_CONTEXT_THRESHOLDS,
+        show_render_time:   bool = False,
+        show_tool_uses:     bool = DEFAULT_SHOW_TOOL_USES,
+        soft_limit_models:  tuple[tuple[str, int], ...] = (),
+        openspec_scan_depth: int = DEFAULT_OPENSPEC_SCAN_DEPTH,
+        show_icons:         bool = True,
+        transcript_cache:   bool = DEFAULT_TRANSCRIPT_CACHE,
+        errors:             tuple[str, ...] = (),
+        debug_lines:        tuple[str, ...] = (),
+    ) -> None:
+        s = object.__setattr__
+        s(self, 'max_width', max_width)
+        s(self, 'full_width', full_width)
+        s(self, 'justify', justify)
+        s(self, 'labels', labels)
+        s(self, 'soft_limit', soft_limit)
+        s(self, 'token_window', token_window)
+        s(self, 'theme', theme)
+        s(self, 'bg_shift', bg_shift)
+        s(self, 'glyph_mode', glyph_mode)
+        s(self, 'single_width', single_width)
+        s(self, 'show_day_stats', show_day_stats)
+        s(self, 'context_state', context_state)
+        s(self, 'context_labels', context_labels)
+        s(self, 'context_thresholds', context_thresholds)
+        s(self, 'show_render_time', show_render_time)
+        s(self, 'show_tool_uses', show_tool_uses)
+        s(self, 'soft_limit_models', soft_limit_models)
+        s(self, 'openspec_scan_depth', openspec_scan_depth)
+        s(self, 'show_icons', show_icons)
+        s(self, 'transcript_cache', transcript_cache)
+        s(self, 'errors', errors)
+        s(self, 'debug_lines', debug_lines)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f'cannot assign to field {name!r}')
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f'cannot delete field {name!r}')
+
+    def __repr__(self) -> str:
+        return (f'Config(max_width={self.max_width}, full_width={self.full_width}, '
+                f'justify={self.justify}, labels={self.labels}, soft_limit={self.soft_limit}, '
+                f'token_window={self.token_window}, theme={self.theme!r}, bg_shift={self.bg_shift!r}, '
+                f'glyph_mode={self.glyph_mode!r}, single_width={self.single_width}, '
+                f'show_day_stats={self.show_day_stats}, context_state={self.context_state}, '
+                f'context_labels={self.context_labels!r}, context_thresholds={self.context_thresholds!r}, '
+                f'show_render_time={self.show_render_time}, show_tool_uses={self.show_tool_uses}, '
+                f'soft_limit_models={self.soft_limit_models!r}, '
+                f'openspec_scan_depth={self.openspec_scan_depth}, '
+                f'show_icons={self.show_icons}, transcript_cache={self.transcript_cache}, '
+                f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
     def load(
