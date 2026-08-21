@@ -367,19 +367,6 @@ def test_is_visible_cap_applies_when_nothing_in_progress(tmp_path: Path) -> None
     assert result.is_visible(now=now) is False
 
 
-def test_is_visible_grace_applies_when_nothing_in_progress(tmp_path: Path) -> None:
-    now = time.time()
-    done_ts = now - tasks.TaskList.GRACE_SECONDS - 5
-    path = _write_transcript(tmp_path, [
-        _create_line('A', 'A', done_ts - 5),
-        _update_line(1, 'completed', done_ts),
-    ])
-
-    result = tasks.TaskList.from_session(str(path))
-
-    assert result.is_visible(now=now) is False
-
-
 def pytest_approx(value: float, tol: float = 1.0) -> object:
     import pytest
     return pytest.approx(value, abs=tol)

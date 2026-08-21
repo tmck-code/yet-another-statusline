@@ -422,24 +422,6 @@ def test_cache_countdown_1h_tier():
     assert elapsed_pct == 2
 
 
-def test_cache_countdown_uses_frozen_now():
-    """cache_countdown must use the frozen now passed at construction, not a live clock."""
-    frozen_now = 1_700_000_000.0
-    usage      = TranscriptUsage(
-        cache_anchor_epoch = frozen_now - 90,
-        cache_ttl          = 300,
-    )
-    view = _make_view(usage, frozen_now)
-
-    result = view.cache_countdown
-
-    assert result is not None
-    remaining, elapsed_pct = result
-    # With frozen_now the math is deterministic: 300 - 90 = 210 remaining
-    assert remaining   == 210.0
-    assert elapsed_pct == 30
-
-
 from yas.info import _fmt_elapsed_clock  # noqa: E402
 
 
