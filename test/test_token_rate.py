@@ -32,6 +32,7 @@ def _write_row(path: Path, ts: float, session_id: str, total_in: int, total_out:
 def setup_rate(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> Path:
     """Patch time and constants to deterministic values; return log path."""
     monkeypatch.setattr(tokens, 'time', FakeTime)
+    monkeypatch.setattr(FakeTime, '_now', NOW)
     monkeypatch.setattr(tokens.TokenRate, 'WINDOW', 60.0)
     monkeypatch.setattr(tokens.TokenRate, 'KEEP', 300.0)
     return _log_path(tmp_home)
@@ -204,6 +205,7 @@ def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyP
 
 def test_recently_active_no_log(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     monkeypatch.setattr(tokens, 'time', FakeTime)
+    monkeypatch.setattr(FakeTime, '_now', NOW)
     in_a, out_a = tokens.TokenRate.recently_active('sess-1', window=10.0)
     assert not in_a and not out_a
 
