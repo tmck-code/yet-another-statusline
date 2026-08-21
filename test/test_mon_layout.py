@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -201,51 +203,16 @@ class TestFormatNarrowBody:
 
 
 class TestClipToHeight:
-    def test_all_boxes_fit(self):
-        boxes = ['line1\nline2', 'line3', 'line4\nline5']
-        available = 10
-
-        visible, hidden_count = clip_to_height(boxes, available)
-
-        expected_visible = boxes
-        expected_hidden = 0
-
-        assert visible == expected_visible
-        assert hidden_count == expected_hidden
-
-    def test_excess_boxes_are_hidden(self):
-        boxes = ['a\nb', 'c\nd', 'e\nf\ng']
+    @pytest.mark.parametrize(('boxes', 'available', 'expected_visible', 'expected_hidden'), [
+        (['line1\nline2', 'line3', 'line4\nline5'], 10,
+         ['line1\nline2', 'line3', 'line4\nline5'], 0),
         # box 0 = 2 lines, box 1 = 2 lines, box 2 = 3 lines; total = 7
-        available = 4
-
+        (['a\nb', 'c\nd', 'e\nf\ng'], 4, ['a\nb', 'c\nd'], 1),
+        (['first', 'second', 'third', 'fourth'], 3, ['first', 'second', 'third'], 1),
+        (['a\nb\nc\nd\ne'], 3, [], 1),
+    ], ids=['all_boxes_fit', 'excess_boxes_are_hidden', 'boxes_kept_in_order', 'first_box_too_large_hides_all'])
+    def test_clip_to_height(self, boxes, available, expected_visible, expected_hidden):
         visible, hidden_count = clip_to_height(boxes, available)
-
-        expected_visible = ['a\nb', 'c\nd']
-        expected_hidden = 1
-
-        assert visible == expected_visible
-        assert hidden_count == expected_hidden
-
-    def test_boxes_kept_in_order(self):
-        boxes = ['first', 'second', 'third', 'fourth']
-        available = 3
-
-        visible, hidden_count = clip_to_height(boxes, available)
-
-        expected_visible = ['first', 'second', 'third']
-        expected_hidden = 1
-
-        assert visible == expected_visible
-        assert hidden_count == expected_hidden
-
-    def test_first_box_too_large_hides_all(self):
-        boxes = ['a\nb\nc\nd\ne']
-        available = 3
-
-        visible, hidden_count = clip_to_height(boxes, available)
-
-        expected_visible = []
-        expected_hidden = 1
 
         assert visible == expected_visible
         assert hidden_count == expected_hidden
@@ -297,35 +264,18 @@ class TestAggregateRateLimits:
 
 
 class TestAggregateDayCost:
-    def test_sums_total_cost_across_sessions(self):
-        sessions = [
+    @pytest.mark.parametrize(('sessions', 'expected'), [
+        ([
             _make_session(payload={'cost': {'total_cost_usd': 1.50}}),
             _make_session(payload={'cost': {'total_cost_usd': 0.75}}),
-        ]
-
-        result = aggregate_day_cost(sessions)
-
-        expected = 2.25
-
-        assert abs(result - expected) < 1e-9
-
-    def test_missing_cost_field_treated_as_zero(self):
-        sessions = [
+        ], 2.25),
+        ([
             _make_session(payload={'cost': {'total_cost_usd': 1.00}}),
             _make_session(payload={}),
-        ]
-
+        ], 1.00),
+        ([], 0.0),
+    ], ids=['sums_total_cost_across_sessions', 'missing_cost_field_treated_as_zero', 'empty_sessions_returns_zero'])
+    def test_aggregate_day_cost(self, sessions, expected):
         result = aggregate_day_cost(sessions)
-
-        expected = 1.00
 
         assert abs(result - expected) < 1e-9
-
-    def test_empty_sessions_returns_zero(self):
-        sessions = []
-
-        result = aggregate_day_cost(sessions)
-
-        expected = 0.0
-
-        assert result == expected

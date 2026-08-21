@@ -5,6 +5,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 from helper import strip_ansi
 import yas.renderer as renderer_mod
 from yas.info import SessionView
@@ -91,64 +93,33 @@ def test_session_inout_no_subagents(monkeypatch):
     assert view.session_inout == 550
 
 
+@pytest.mark.parametrize(('seconds_ago', 'expected'), [
+    (300, '5m'),
+    (90 * 60, '1h30m'),
+    (3600, '1h0m'),
+    (30, '0m'),
+], ids=['sub_hour', 'multi_hour', 'exact_one_hour', 'zero_minutes'])
+def test_fmt_elapsed_relative(seconds_ago, expected):
+    from yas.info import _fmt_elapsed
+    now = time.time()
+    result = _fmt_elapsed(now - seconds_ago, now)
+    assert result == expected
+
+
 def test_fmt_elapsed_none_returns_empty():
     """None mtime returns empty string."""
     from yas.info import _fmt_elapsed
     assert _fmt_elapsed(None, time.time()) == ''
 
 
-def test_fmt_elapsed_sub_hour():
-    """mtime 5 minutes ago returns '5m'."""
-    from yas.info import _fmt_elapsed
-    now   = time.time()
-    mtime = now - 300  # 5 minutes ago
-    result = _fmt_elapsed(mtime, now)
-    assert result == '5m'
-
-
-def test_fmt_elapsed_multi_hour():
-    """mtime 1h30m ago returns '1h30m'."""
-    from yas.info import _fmt_elapsed
-    now   = time.time()
-    mtime = now - (90 * 60)  # 1h 30m ago
-    result = _fmt_elapsed(mtime, now)
-    assert result == '1h30m'
-
-
-def test_fmt_elapsed_exact_one_hour():
-    """mtime exactly 1h ago returns '1h0m'."""
-    from yas.info import _fmt_elapsed
-    now   = time.time()
-    mtime = now - 3600
-    result = _fmt_elapsed(mtime, now)
-    assert result == '1h0m'
-
-
-def test_fmt_elapsed_zero_minutes():
-    """mtime 30 seconds ago (< 1m) returns '0m'."""
-    from yas.info import _fmt_elapsed
-    now   = time.time()
-    mtime = now - 30
-    result = _fmt_elapsed(mtime, now)
-    assert result == '0m'
-
-
-def test_elapsed_duration_under_one_hour():
-    """total_duration_ms=807000 (13m27s) → elapsed == '13m'."""
+@pytest.mark.parametrize(('duration_ms', 'expected'), [
+    (807_000, '13m'),
+    (5_580_000, '1h33m'),
+    (0, ''),
+], ids=['under_one_hour', 'one_hour_or_more', 'zero'])
+def test_fmt_duration_ms(duration_ms, expected):
     from yas.info import _fmt_duration_ms
-    assert _fmt_duration_ms(807_000) == '13m'
-
-
-def test_elapsed_duration_one_hour_or_more():
-    """total_duration_ms=5580000 (1h33m) → elapsed == '1h33m'."""
-    from yas.info import _fmt_duration_ms
-    assert _fmt_duration_ms(5_580_000) == '1h33m'
-
-
-def test_elapsed_duration_zero():
-    """total_duration_ms=0 → elapsed == '' (empty string)."""
-    from yas.info import _fmt_duration_ms
-    assert _fmt_duration_ms(0) == ''
+    assert _fmt_duration_ms(duration_ms) == expected
 
 
 def test_elapsed_does_not_trigger_file_stat(monkeypatch):
@@ -472,37 +443,20 @@ def test_cache_countdown_uses_frozen_now():
 from yas.info import _fmt_elapsed_clock  # noqa: E402
 
 
-def test_fmt_elapsed_clock_zero_returns_empty() -> None:
-    assert _fmt_elapsed_clock(0) == ''
-
-
-def test_fmt_elapsed_clock_negative_returns_empty() -> None:
-    assert _fmt_elapsed_clock(-1000) == ''
-
-
-def test_fmt_elapsed_clock_sub_hour_drops_hours_digit() -> None:
-    # 13 min 27 s = 807000 ms
-    assert _fmt_elapsed_clock(807_000) == '13:27'
-
-
-def test_fmt_elapsed_clock_sub_hour_leading_zeros() -> None:
-    # 5 min 3 s = 303000 ms
-    assert _fmt_elapsed_clock(303_000) == '05:03'
-
-
-def test_fmt_elapsed_clock_exactly_one_hour() -> None:
-    # 3600 s = 3600000 ms
-    assert _fmt_elapsed_clock(3_600_000) == '1:00:00'
-
-
-def test_fmt_elapsed_clock_over_one_hour() -> None:
-    # 1h 13m 27s = 4407000 ms
-    assert _fmt_elapsed_clock(4_407_000) == '1:13:27'
-
-
-def test_fmt_elapsed_clock_double_digit_hour() -> None:
-    # 10h 0m 0s
-    assert _fmt_elapsed_clock(36_000_000) == '10:00:00'
+@pytest.mark.parametrize(('duration_ms', 'expected'), [
+    (0, ''),
+    (-1000, ''),
+    (807_000, '13:27'),      # 13 min 27 s, sub-hour drops the hours digit
+    (303_000, '05:03'),      # 5 min 3 s, sub-hour leading zeros
+    (3_600_000, '1:00:00'),  # exactly 1 hour
+    (4_407_000, '1:13:27'),  # 1h 13m 27s
+    (36_000_000, '10:00:00'),  # 10h 0m 0s, double-digit hour
+], ids=[
+    'zero', 'negative', 'sub_hour_drops_hours_digit', 'sub_hour_leading_zeros',
+    'exactly_one_hour', 'over_one_hour', 'double_digit_hour',
+])
+def test_fmt_elapsed_clock(duration_ms, expected) -> None:
+    assert _fmt_elapsed_clock(duration_ms) == expected
 
 
 # Task 6.3 — 8-column timer field in elapsed_section

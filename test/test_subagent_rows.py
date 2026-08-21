@@ -143,8 +143,7 @@ def test_two_line_cluster_tok_model_order() -> None:
     # Cluster order: lines · tok · model — the `(N.N%)` session-share suffix
     # has been removed from the tok field entirely.
     sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6')
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 136, session_inout=si)
+    line1, _ = _two(sub, 136)
     plain = strip_ansi(line1)
     tok = fmt_tok_fixed(sub.total_input)
     assert '%' not in plain
@@ -160,8 +159,7 @@ def test_two_line_cluster_tok_model_order() -> None:
 ])
 def test_two_line_cluster_shows_new_model_family(model: str, word: str) -> None:
     sub = _make_sub(total_input=12345, output=678, model=model)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 136, session_inout=si)
+    line1, _ = _two(sub, 136)
     assert word in strip_ansi(line1)
 
 
@@ -169,24 +167,21 @@ def test_two_line_cluster_shows_bracketed_context_suffix() -> None:
     # Agent frontmatter model like 'sonnet[1m]' must keep the [1m] suffix
     # visible instead of being normalised down to just 'sonnet'.
     sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6[1m]')
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 136, session_inout=si)
+    line1, _ = _two(sub, 136)
     plain = strip_ansi(line1)
     assert 'sonnet[1m]' in plain
 
 
 def test_two_line_no_tpm_field() -> None:
     sub = _make_sub(first_timestamp=time.time() - 60, total_input=3000, output=600)
-    si  = (sub.total_input + sub.output) * 2
-    line1, line2 = _two(sub, 160, session_inout=si)
+    line1, line2 = _two(sub, 160)
     assert 't/m' not in strip_ansi(line1)
     assert 't/m' not in strip_ansi(line2)
 
 
 def test_two_line_no_output_field() -> None:
     sub = _make_sub()
-    si  = (sub.total_input + sub.output) * 2
-    line1, line2 = _two(sub, 160, session_inout=si)
+    line1, line2 = _two(sub, 160)
     assert '↑' not in strip_ansi(line1)
     assert '↑' not in strip_ansi(line2)
 
@@ -221,8 +216,7 @@ def test_two_line_continuation_tool_arg_strips_newlines() -> None:
 
 def test_two_line_continuation_has_no_metrics() -> None:
     sub = _make_sub(model='claude-sonnet-4-6')
-    si  = (sub.total_input + sub.output) * 2
-    _, line2 = _two(sub, 136, session_inout=si)
+    _, line2 = _two(sub, 136)
     plain = strip_ansi(line2)
     assert '%' not in plain
     assert 'sonnet' not in plain
@@ -234,8 +228,7 @@ def test_two_line_continuation_has_no_metrics() -> None:
 @pytest.mark.parametrize('content_width', [60, 96, 136])
 def test_two_line_equal_visible_widths(content_width: int) -> None:
     sub = _make_sub()
-    si  = (sub.total_input + sub.output) * 2
-    line1, line2 = _two(sub, content_width, session_inout=si)
+    line1, line2 = _two(sub, content_width)
     assert _visible_width(line1) == content_width
     assert _visible_width(line2) == content_width
 
@@ -253,8 +246,7 @@ def test_shed_description_truncates_before_cluster_sheds() -> None:
     # Wide enough for the full cluster but not the full description: the
     # description elides while lines and tok are both retained.
     sub = _make_sub(description='x' * 120, total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 70, session_inout=si, lines=(5, 3))
+    line1, _ = _two(sub, 70, lines=(5, 3))
     plain = strip_ansi(line1)
     assert '…' in plain                     # description truncated
     assert _has_lines_field(plain)          # lines field kept
@@ -266,11 +258,10 @@ def test_shed_order_lines_then_tok_narrow_range() -> None:
     # tok+model, or lines+tok+model — never tok dropped while lines kept.
     sub = _make_sub(agent_type='general-purpose', description='x' * 80,
                     total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
     tok = fmt_tok(sub.total_input)
     valid = {(True, True), (False, True), (False, False)}
     for w in range(30, 80):
-        line1, _ = _two(sub, w, session_inout=si, lines=(5, 3))
+        line1, _ = _two(sub, w, lines=(5, 3))
         plain = strip_ansi(line1)
         state = (_has_lines_field(plain), tok in plain)
         assert state in valid, f'width={w}: out-of-order shed {state}'
@@ -282,11 +273,10 @@ def test_shed_all_levels_reachable() -> None:
     # drops. lines/tok therefore stay present at every width in this sweep.
     sub = _make_sub(agent_type='general-purpose', description='x' * 80,
                     total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
     tok = fmt_tok(sub.total_input)
     seen = set()
     for w in range(30, 80):
-        plain = strip_ansi(_two(sub, w, session_inout=si, lines=(5, 3))[0])
+        plain = strip_ansi(_two(sub, w, lines=(5, 3))[0])
         seen.add((_has_lines_field(plain), tok in plain))
     assert seen == {(True, True)}  # lines + tok never shed, at any width
 
@@ -298,10 +288,9 @@ def test_shed_model_and_duration_kept_duration_never_shed() -> None:
     sub = _make_sub(agent_type='general-purpose', description='x' * 80,
                     first_timestamp=time.time() - 47, model='claude-sonnet-4-6',
                     total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
     seen_model_present = seen_model_absent = False
     for w in range(30, 80):
-        line1, _ = _two(sub, w, session_inout=si)
+        line1, _ = _two(sub, w)
         plain = strip_ansi(line1)
         assert '0:47' in plain, f'width={w} dropped duration'
         if 'sonnet' in plain:
@@ -329,8 +318,7 @@ def test_stats_col_anchors_cluster_dot_at_column() -> None:
     # At a wide content width the cluster's leading `·` sits at exactly
     # stats_col, with the description truncated before it.
     sub = _make_sub(description='x' * 200, total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 156, session_inout=si, stats_col=100)
+    line1, _ = _two(sub, 156, stats_col=100)
     plain = strip_ansi(line1)
     assert plain[100] == '·'              # cluster dot anchored at stats_col
     assert _visible_width(line1) == 156   # still fills the content edge
@@ -341,8 +329,7 @@ def test_stats_col_none_keeps_right_alignment() -> None:
     # Default (no stats_col) is unchanged: the cluster right-aligns to the edge
     # so its leading `·` is well past stats_col=100 at this width.
     sub = _make_sub(description='short', total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 156, session_inout=si)
+    line1, _ = _two(sub, 156)
     plain = strip_ansi(line1)
     assert plain[100] != '·'              # not anchored at 100
     assert _cluster_dot_offset(line1) > 100  # cluster pushed to the right edge
@@ -355,9 +342,8 @@ def test_stats_col_narrow_falls_back_to_right_align() -> None:
     # cols of slack), the row falls back to right-alignment exactly as if
     # stats_col were None. This is the defensive guard for narrow rows.
     sub = _make_sub(description='short', total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1_anchor, _ = _two(sub, 105, session_inout=si, stats_col=100)
-    line1_default, _ = _two(sub, 105, session_inout=si)
+    line1_anchor, _ = _two(sub, 105, stats_col=100)
+    line1_default, _ = _two(sub, 105)
     assert strip_ansi(line1_anchor) == strip_ansi(line1_default)
     assert strip_ansi(line1_anchor)[100] != '·'
 
@@ -366,8 +352,7 @@ def test_stats_col_richest_cluster_that_fits_at_anchor() -> None:
     # Slack to the right of the anchor governs which cluster is chosen. With
     # generous slack the full tok+model cluster anchors at stats_col.
     sub = _make_sub(total_input=12345, output=678, model='claude-sonnet-4-6')
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 156, session_inout=si, stats_col=100)
+    line1, _ = _two(sub, 156, stats_col=100)
     plain = strip_ansi(line1)
     tok   = fmt_tok(sub.total_input)
     assert plain[100] == '·'
@@ -1834,8 +1819,7 @@ def test_lines_field_shows_humanised_values() -> None:
     # 3-significant-figure formatting); rendered as '<read> / <written>' (a
     # space on both sides of the slash), no icons.
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 136, session_inout=si, lines=(1234, 567))
+    line1, _ = _two(sub, 136, lines=(1234, 567))
     plain = strip_ansi(line1)
     assert fmt_tok_fixed(1234) in plain
     assert fmt_tok_fixed(567) in plain
@@ -1848,8 +1832,7 @@ def test_lines_field_blank_when_both_zero() -> None:
     # data — the width-reservation behaviour is tree_single-only. `lines`
     # supplied but both sides zero counts as "no data" here.
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1, _ = _two(sub, 136, session_inout=si, lines=(0, 0))
+    line1, _ = _two(sub, 136, lines=(0, 0))
     plain = strip_ansi(line1)
     assert not _has_lines_field(plain)
 
@@ -1871,9 +1854,8 @@ def test_lines_field_blank_when_both_zero_tree_single() -> None:
 def test_lines_field_blank_when_none() -> None:
     # lines=None (idle/default) also renders blank, same as (0, 0).
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1_none, _ = _two(sub, 136, session_inout=si, lines=None)
-    line1_zero, _ = _two(sub, 136, session_inout=si, lines=(0, 0))
+    line1_none, _ = _two(sub, 136, lines=None)
+    line1_zero, _ = _two(sub, 136, lines=(0, 0))
     assert strip_ansi(line1_none) == strip_ansi(line1_zero)
 
 
@@ -1883,9 +1865,8 @@ def test_lines_field_omitted_not_blank_dot_when_no_data() -> None:
     # (and its leading '· ' separator), rather than reserving blank-padded
     # width — that reservation behaviour is scoped to tree_single only.
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1_no_lines,   _ = _two(sub, 136, session_inout=si)             # lines=None
-    line1_with_lines, _ = _two(sub, 136, session_inout=si, lines=(5, 3))
+    line1_no_lines,   _ = _two(sub, 136)             # lines=None
+    line1_with_lines, _ = _two(sub, 136, lines=(5, 3))
     plain_no_lines   = strip_ansi(line1_no_lines)
     plain_with_lines = strip_ansi(line1_with_lines)
     assert not _has_lines_field(plain_no_lines)
@@ -1923,9 +1904,8 @@ def test_lines_field_cluster_width_identical_idle_vs_populated() -> None:
     # between an idle row (lines=None) and a populated one (lines=(1234, 567))
     # at the same box width.
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line1_idle, _ = _two(sub, 136, session_inout=si, lines=None)
-    line1_full, _ = _two(sub, 136, session_inout=si, lines=(1234, 567))
+    line1_idle, _ = _two(sub, 136, lines=None)
+    line1_full, _ = _two(sub, 136, lines=(1234, 567))
     assert _visible_width(line1_idle) == _visible_width(line1_full) == 136
 
 
@@ -1934,11 +1914,10 @@ def test_shed_order_lines_and_tok_protected_together() -> None:
     # never shed, together or independently, at any width in this sweep.
     sub = _make_sub(agent_type='general-purpose', description='x' * 80,
                     total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
     tok = fmt_tok(sub.total_input)
     seen = set()
     for w in range(30, 90):
-        line1, _ = _two(sub, w, session_inout=si, lines=(1234, 567))
+        line1, _ = _two(sub, w, lines=(1234, 567))
         plain = strip_ansi(line1)
         state = (_has_lines_field(plain), tok in plain)
         assert state == (True, True), f'width={w}: protected lines/tok shed {state}'
@@ -1987,15 +1966,14 @@ def test_lines_field_sheds_read_and_changed_independently() -> None:
     # Change 3: a subagent that only wrote (read == 0) blanks just the read
     # side, not the whole field — and vice versa for a read-only subagent.
     sub = _make_sub(total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
-    line_read_only, _    = _two(sub, 136, session_inout=si, lines=(1234, 0))
-    line_changed_only, _ = _two(sub, 136, session_inout=si, lines=(0, 567))
+    line_read_only, _    = _two(sub, 136, lines=(1234, 0))
+    line_changed_only, _ = _two(sub, 136, lines=(0, 567))
     plain_read    = strip_ansi(line_read_only)
     plain_changed = strip_ansi(line_changed_only)
     assert fmt_tok_fixed(1234) in plain_read and fmt_tok_fixed(567) not in plain_read
     assert fmt_tok_fixed(567) in plain_changed and fmt_tok_fixed(1234) not in plain_changed
     # Blanking one side must not shift the row's total width.
-    line_both, _ = _two(sub, 136, session_inout=si, lines=(1234, 567))
+    line_both, _ = _two(sub, 136, lines=(1234, 567))
     assert _visible_width(line_read_only) == _visible_width(line_changed_only) == _visible_width(line_both)
 
 
@@ -2049,13 +2027,12 @@ def test_tree_lines_w_tightens_gap_vs_hardcoded_five() -> None:
 
     sub = _make_tree_sub('agent-a')
     sub.jsonl_path = 'a.jsonl'
-    si  = (sub.total_input + sub.output) * 2
     line_default = strip_ansi(_r.subagent_row(
-        sub, 140, twoline=True, session_inout=si, tree_single=True, lines=(50, 194),
+        sub, 140, twoline=True, tree_single=True, lines=(50, 194),
     ).split('\n')[0])
     measured_w = layout.tree_lines_width([(sub, '', 0)], {sub.jsonl_path: (50, 194)})
     line_measured = strip_ansi(_r.subagent_row(
-        sub, 140, twoline=True, session_inout=si, tree_single=True, lines=(50, 194),
+        sub, 140, twoline=True, tree_single=True, lines=(50, 194),
         tree_lines_w=measured_w,
     ).split('\n')[0])
     read_s_default,  _ = fmt_lines_pair(50, 194, width=5, fixed=True)
@@ -2101,10 +2078,9 @@ def test_narrow_width_no_lines_matches_pre_change_output() -> None:
     # regression for existing callers).
     sub = _make_sub(agent_type='general-purpose', description='x' * 80,
                     total_input=12345, output=678)
-    si  = (sub.total_input + sub.output) * 2
     for w in (30, 45, 60):
-        line1_default, _ = _two(sub, w, session_inout=si)
-        line1_explicit_none, _ = _two(sub, w, session_inout=si, lines=None)
+        line1_default, _ = _two(sub, w)
+        line1_explicit_none, _ = _two(sub, w, lines=None)
         assert line1_default == line1_explicit_none
 
 
@@ -2157,9 +2133,8 @@ def test_self_scoped_lines_no_rollup_between_parent_and_child() -> None:
     # subagent_row never sums across the tree.
     parent = _make_sub(agent_type='parent-agent', total_input=12345, output=678)
     child  = _make_sub(agent_type='child-agent', total_input=12345, output=678)
-    si     = (parent.total_input + parent.output) * 2
-    parent_line, _ = _two(parent, 136, session_inout=si, lines=(100, 20))
-    child_line, _  = _two(child, 136, session_inout=si, lines=(500, 300))
+    parent_line, _ = _two(parent, 136, lines=(100, 20))
+    child_line, _  = _two(child, 136, lines=(500, 300))
     p_plain = strip_ansi(parent_line)
     c_plain = strip_ansi(child_line)
     assert fmt_tok(100) in p_plain and fmt_tok(20) in p_plain

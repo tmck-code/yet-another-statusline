@@ -248,6 +248,19 @@ class TestDiscover:
 
         return projects, payloads
 
+    def _patch_discovery(
+        self, monkeypatch: pytest.MonkeyPatch, projects: Path, payloads: Path
+    ) -> None:
+        """Redirect discover()'s finder/indexer at the fake projects/payloads dirs."""
+        monkeypatch.setattr(
+            'claude.mon.discovery.find_active_jsonls',
+            lambda include_after, now: find_active_jsonls(include_after, now, projects),
+        )
+        monkeypatch.setattr(
+            'claude.mon.discovery.index_payloads_by_session',
+            lambda: index_payloads_by_session(payloads),
+        )
+
     def test_active_session_with_payload_is_returned(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -263,14 +276,7 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
         result = discover(timedelta(minutes=10), now)
 
@@ -292,14 +298,7 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
         result = discover(timedelta(minutes=10), now)
 
@@ -323,14 +322,7 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
         result = discover(timedelta(minutes=10), now)
 
@@ -366,14 +358,7 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
         result = discover(timedelta(minutes=10), now)
 
@@ -399,14 +384,7 @@ class TestDiscover:
         projects, payloads = self._build_fake_home(
             tmp_path, sessions, now, timedelta(minutes=10)
         )
-        monkeypatch.setattr(
-            'claude.mon.discovery.find_active_jsonls',
-            lambda include_after, now: find_active_jsonls(include_after, now, projects),
-        )
-        monkeypatch.setattr(
-            'claude.mon.discovery.index_payloads_by_session',
-            lambda: index_payloads_by_session(payloads),
-        )
+        self._patch_discovery(monkeypatch, projects, payloads)
 
         result = discover(timedelta(minutes=10), now)
         s = result[0]

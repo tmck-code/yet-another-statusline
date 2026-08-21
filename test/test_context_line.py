@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 import yas.renderer as renderer
 from yas.constants import CLR_ALERT, CLR_WARN, GLYPH_HOURGLASS
 from yas.renderer import _ctx_fill_ratio, _ctx_used_tokens
@@ -71,17 +73,51 @@ def test_context_line_compact_respects_available() -> None:
     assert _visible_width(out) <= available
 
 
-def test_fill_ratio_host_supplied_used_percentage() -> None:
-    # Task 4.1: host-supplied used_percentage=42.7 → fill 0.427, label 43%
+@pytest.mark.parametrize(
+    ('used_percentage', 'total_input_tokens', 'total_output_tokens', 'context_window_size',
+     'soft_limit', 'expected_fill', 'expected_pct'),
+    [
+        # Task 4.1: host-supplied used_percentage=42.7 → fill 0.427, label 43%
+        (42.7, 10_000, 99_000, 200_000, 200_000, 0.427, 42.7),
+        # Task 4.2: used_percentage=None, input=80k, window=200k → fill 0.40, label 40%
+        (None, 80_000, 5_000, 200_000, 200_000, 0.40, 40.0),
+        # Task 4.3: used_percentage=None, input=60k, output=40k, window=200k
+        #           → fill 0.30 (input-only), not 0.50 (input+output)
+        (None, 60_000, 40_000, 200_000, 200_000, 0.30, 30.0),
+        # Task 4.4: used_percentage=-2.0 → fill 0.0, no exception
+        (-2.0, 10_000, 0, 200_000, 200_000, 0.0, 0.0),
+        # Task 4.5: used_percentage=None, context_window_size=0 → no ZeroDivisionError.
+        # The fill is now soft-limit-relative, so a zero window still yields a
+        # meaningful input-only ratio (80k / 200k = 0.40) rather than collapsing to 0.
+        (None, 80_000, 0, 0, 200_000, 0.40, None),
+        # The bar fills against soft_limit, not the model window: host says 75% of a
+        # 200k window (150k tokens), and with a 150k soft limit that is a full bar.
+        (75.0, 10_000, 99_000, 200_000, 150_000, 1.0, 100.0),
+        # Fallback path (no host value) also scales by soft_limit: 75k input against
+        # a 150k soft limit → 50%, regardless of the 200k window.
+        (None, 75_000, 40_000, 200_000, 150_000, 0.50, 50.0),
+        (42.7, 10_000, 0, 200_000, 0, 0.0, 0.0),
+    ],
+    ids=[
+        'host_supplied_used_percentage', 'fallback_input_only', 'output_tokens_excluded',
+        'negative_used_percentage_clamped', 'zero_context_window_no_exception',
+        'relative_to_soft_limit', 'fallback_relative_to_soft_limit', 'zero_soft_limit_no_exception',
+    ],
+)
+def test_fill_ratio(
+    used_percentage, total_input_tokens, total_output_tokens, context_window_size,
+    soft_limit, expected_fill, expected_pct,
+) -> None:
     ctx = ContextWindow(
-        used_percentage=42.7,
-        total_input_tokens=10_000,
-        total_output_tokens=99_000,
-        context_window_size=200_000,
+        used_percentage=used_percentage,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        context_window_size=context_window_size,
     )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
-    assert abs(fill - 0.427) < 1e-9
-    assert abs(pct - 42.7) < 1e-9
+    fill, pct = _ctx_fill_ratio(ctx, soft_limit=soft_limit)
+    assert abs(fill - expected_fill) < 1e-9
+    if expected_pct is not None:
+        assert abs(pct - expected_pct) < 1e-9
 
 
 def test_fill_ratio_host_supplied_renders_correct_label() -> None:
@@ -133,19 +169,6 @@ def test_label_and_fill_share_one_source() -> None:
     assert '11%' in out
 
 
-def test_fill_ratio_fallback_input_only() -> None:
-    # Task 4.2: used_percentage=None, input=80k, window=200k → fill 0.40, label 40%
-    ctx = ContextWindow(
-        used_percentage=None,
-        total_input_tokens=80_000,
-        total_output_tokens=5_000,
-        context_window_size=200_000,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
-    assert abs(fill - 0.40) < 1e-9
-    assert abs(pct - 40.0) < 1e-9
-
-
 def test_fill_ratio_fallback_renders_correct_label() -> None:
     # Task 4.2: the rendered line must display "40%"
     ctx = ContextWindow(
@@ -157,80 +180,6 @@ def test_fill_ratio_fallback_renders_correct_label() -> None:
     out = _r.context_line(ctx, available=76)
     assert '40%' in _strip(out)
 
-
-def test_fill_ratio_output_tokens_excluded() -> None:
-    # Task 4.3: used_percentage=None, input=60k, output=40k, window=200k
-    #           → fill 0.30 (input-only), not 0.50 (input+output)
-    ctx = ContextWindow(
-        used_percentage=None,
-        total_input_tokens=60_000,
-        total_output_tokens=40_000,
-        context_window_size=200_000,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
-    assert abs(fill - 0.30) < 1e-9
-    assert abs(pct - 30.0) < 1e-9
-
-
-def test_fill_ratio_negative_used_percentage_clamped() -> None:
-    # Task 4.4: used_percentage=-2.0 → fill 0.0, no exception
-    ctx = ContextWindow(
-        used_percentage=-2.0,
-        total_input_tokens=10_000,
-        context_window_size=200_000,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
-    assert fill == 0.0
-    assert pct == 0.0
-
-
-def test_fill_ratio_zero_context_window_no_exception() -> None:
-    # Task 4.5: used_percentage=None, context_window_size=0 → no ZeroDivisionError.
-    # The fill is now soft-limit-relative, so a zero window still yields a
-    # meaningful input-only ratio (80k / 200k = 0.40) rather than collapsing to 0.
-    ctx = ContextWindow(
-        used_percentage=None,
-        total_input_tokens=80_000,
-        context_window_size=0,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=200_000)
-    assert abs(fill - 0.40) < 1e-9
-
-
-def test_fill_ratio_relative_to_soft_limit() -> None:
-    # The bar fills against soft_limit, not the model window: host says 75% of a
-    # 200k window (150k tokens), and with a 150k soft limit that is a full bar.
-    ctx = ContextWindow(
-        used_percentage=75.0,
-        total_input_tokens=10_000,
-        total_output_tokens=99_000,
-        context_window_size=200_000,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=150_000)
-    assert abs(fill - 1.0) < 1e-9
-    assert abs(pct - 100.0) < 1e-9
-
-
-def test_fill_ratio_fallback_relative_to_soft_limit() -> None:
-    # Fallback path (no host value) also scales by soft_limit: 75k input against
-    # a 150k soft limit → 50%, regardless of the 200k window.
-    ctx = ContextWindow(
-        used_percentage=None,
-        total_input_tokens=75_000,
-        total_output_tokens=40_000,
-        context_window_size=200_000,
-    )
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=150_000)
-    assert abs(fill - 0.50) < 1e-9
-    assert abs(pct - 50.0) < 1e-9
-
-
-def test_fill_ratio_zero_soft_limit_no_exception() -> None:
-    ctx = ContextWindow(used_percentage=42.7, total_input_tokens=10_000, context_window_size=200_000)
-    fill, pct = _ctx_fill_ratio(ctx, soft_limit=0)
-    assert fill == 0.0
-    assert pct == 0.0
-    assert pct == 0.0
 
 
 def test_context_line_badge_present_when_exceeds_200k() -> None:

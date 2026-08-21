@@ -71,35 +71,6 @@ def test_parse_cache_round_trip(tmp_home: Path) -> None:
     assert retrieved[5] == ('tool_use', 'test_tool', {'key': 'value'})
 
 
-def test_parse_cache_mtime_change_causes_miss(tmp_home: Path) -> None:
-    """Mtime change invalidates the cache entry."""
-    session_id = 'test-session-2'
-    cache = TranscriptCache(session_id)
-
-    transcripts_dir = tmp_home / '.claude' / 'transcripts'
-    transcripts_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = transcripts_dir / 'test.jsonl'
-    jsonl_path.write_text('{"event": "test"}\n')
-    st1 = jsonl_path.stat()
-
-    parse_result = (100, 50, 200, 1234.5, 'claude-3.5-sonnet',
-                    ('text', 'hello', {}), 1235.5, 0.0)
-
-    cache.put_parse(str(jsonl_path), st1, 0.0, parse_result)
-    cache.save()
-
-    # Change mtime by writing again
-    time.sleep(0.01)
-    jsonl_path.write_text('{"event": "test2"}\n')
-    st2 = jsonl_path.stat()
-
-    # Load and try to get with new stat
-    loaded_cache = TranscriptCache.load(session_id)
-    retrieved = loaded_cache.get_parse(str(jsonl_path), st2, 0.0)
-
-    assert retrieved is None, "Expected cache miss on mtime change"
-
-
 def test_parse_cache_size_change_causes_miss(tmp_home: Path) -> None:
     """Size change invalidates the cache entry."""
     session_id = 'test-session-3'
@@ -156,6 +127,33 @@ def test_parse_cache_unchanged_mtime_and_size_hit(tmp_home: Path) -> None:
     assert retrieved == parse_result, "Expected cache hit with unchanged mtime/size"
 
 
+def test_parse_cache_mtime_change_causes_miss(tmp_home: Path) -> None:
+    """Mtime change invalidates the cache entry."""
+    session_id = 'test-session-2'
+    cache = TranscriptCache(session_id)
+
+    transcripts_dir = tmp_home / '.claude' / 'transcripts'
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = transcripts_dir / 'test.jsonl'
+    jsonl_path.write_text('{"event": "test"}\n')
+    st1 = jsonl_path.stat()
+
+    parse_result = (100, 50, 200, 1234.5, 'claude-3.5-sonnet',
+                    ('text', 'hello', {}), 1235.5, 0.0)
+
+    cache.put_parse(str(jsonl_path), st1, 0.0, parse_result)
+    cache.save()
+
+    time.sleep(0.01)
+    jsonl_path.write_text('{"event": "test2"}\n')
+    st2 = jsonl_path.stat()
+
+    loaded_cache = TranscriptCache.load(session_id)
+    retrieved = loaded_cache.get_parse(str(jsonl_path), st2, 0.0)
+
+    assert retrieved is None, "Expected cache miss on mtime change"
+
+
 def test_parse_cache_different_resume_after_miss(tmp_home: Path) -> None:
     """Different resume_after parameter causes cache miss."""
     session_id = 'test-session-5'
@@ -174,7 +172,6 @@ def test_parse_cache_different_resume_after_miss(tmp_home: Path) -> None:
     cache.save()
 
     loaded_cache = TranscriptCache.load(session_id)
-    # Try to retrieve with different resume_after
     retrieved = loaded_cache.get_parse(str(jsonl_path), st, 1235.0)
 
     assert retrieved is None, "Expected cache miss on different resume_after"
@@ -215,9 +212,14 @@ def test_parse_subkey_trim_is_by_recency_not_key_string(tmp_home: Path) -> None:
             f"Expected recently-written resume_after={resume_after} to survive the trim"
 
 
-def test_counts_cache_different_clear_epoch_miss(tmp_home: Path) -> None:
-    """Different clear_epoch causes counts cache miss."""
-    session_id = 'test-session-6'
+@pytest.mark.parametrize(('session_id', 'lookup_epoch', 'lookup_skip_sidechain'), [
+    ('test-session-6', 2000.0, False),
+    ('test-session-7', 1000.0, True),
+], ids=['different_clear_epoch', 'different_skip_sidechain'])
+def test_counts_cache_param_change_causes_miss(
+    tmp_home: Path, session_id: str, lookup_epoch: float, lookup_skip_sidechain: bool
+) -> None:
+    """A different clear_epoch or skip_sidechain causes a counts-cache miss."""
     cache = TranscriptCache(session_id)
 
     transcripts_dir = tmp_home / '.claude' / 'transcripts'
@@ -232,86 +234,30 @@ def test_counts_cache_different_clear_epoch_miss(tmp_home: Path) -> None:
     cache.save()
 
     loaded_cache = TranscriptCache.load(session_id)
-    # Try with different clear_epoch
-    retrieved = loaded_cache.get_counts(str(jsonl_path), st, 2000.0, False)
+    retrieved = loaded_cache.get_counts(str(jsonl_path), st, lookup_epoch, lookup_skip_sidechain)
 
-    assert retrieved is None, "Expected cache miss on different clear_epoch"
-
-
-def test_counts_cache_different_skip_sidechain_miss(tmp_home: Path) -> None:
-    """Different skip_sidechain causes counts cache miss."""
-    session_id = 'test-session-7'
-    cache = TranscriptCache(session_id)
-
-    transcripts_dir = tmp_home / '.claude' / 'transcripts'
-    transcripts_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = transcripts_dir / 'test.jsonl'
-    jsonl_path.write_text('{"event": "test"}\n')
-    st = jsonl_path.stat()
-
-    counts_result = {'counts': {'a': 1}, 'lines_read': 10, 'lines_changed': 2}
-
-    cache.put_counts(str(jsonl_path), st, 1000.0, False, counts_result)
-    cache.save()
-
-    loaded_cache = TranscriptCache.load(session_id)
-    # Try with different skip_sidechain
-    retrieved = loaded_cache.get_counts(str(jsonl_path), st, 1000.0, True)
-
-    assert retrieved is None, "Expected cache miss on different skip_sidechain"
+    assert retrieved is None
 
 
-def test_corrupt_truncated_json_returns_empty_cache(tmp_home: Path) -> None:
-    """Truncated JSON in cache file results in empty cache, no exception."""
-    session_id = 'test-session-8'
-    cache_file = cache_path(session_id)
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    # Write truncated JSON
-    cache_file.write_text('{"v": 1, "session": "test-session-8", "entries": {')
-
-    loaded = TranscriptCache.load(session_id)
-    assert loaded.session_id == session_id
-    assert loaded._entries == {}
-
-
-def test_corrupt_empty_dict_returns_empty_cache(tmp_home: Path) -> None:
-    """Empty dict (missing v/session) returns empty cache."""
-    session_id = 'test-session-9'
-    cache_file = cache_path(session_id)
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text('{}')
-
-    loaded = TranscriptCache.load(session_id)
-    assert loaded.session_id == session_id
-    assert loaded._entries == {}
-
-
-def test_corrupt_json_list_returns_empty_cache(tmp_home: Path) -> None:
-    """JSON list instead of dict returns empty cache."""
-    session_id = 'test-session-10'
-    cache_file = cache_path(session_id)
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text('[]')
-
-    loaded = TranscriptCache.load(session_id)
-    assert loaded.session_id == session_id
-    assert loaded._entries == {}
-
-
-def test_corrupt_wrong_version_returns_empty_cache(tmp_home: Path) -> None:
-    """Wrong cache version returns empty cache."""
-    session_id = 'test-session-11'
-    cache_file = cache_path(session_id)
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        'v': 999,  # Wrong version
-        'session': session_id,
-        'saved': time.time(),
+@pytest.mark.parametrize(('session_id', 'content'), [
+    ('test-session-8', '{"v": 1, "session": "test-session-8", "entries": {'),
+    ('test-session-9', '{}'),
+    ('test-session-10', '[]'),
+    ('test-session-11', json.dumps({
+        'v': 999,
+        'session': 'test-session-11',
+        'saved': 0.0,
         'entries': {},
-    }
-    cache_file.write_text(json.dumps(data))
+    })),
+], ids=['truncated_json', 'empty_dict', 'json_list', 'wrong_version'])
+def test_corrupt_cache_file_returns_empty_cache(tmp_home: Path, session_id: str, content: str) -> None:
+    """Corrupt or version-mismatched cache files load as an empty cache, no exception."""
+    cache_file = cache_path(session_id)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(content)
 
     loaded = TranscriptCache.load(session_id)
+    assert loaded.session_id == session_id
     assert loaded._entries == {}
 
 
