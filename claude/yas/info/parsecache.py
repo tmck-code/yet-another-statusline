@@ -70,12 +70,8 @@ class TranscriptCache:
 
             # Drop malformed entries.
             for path_key, entry in entries.items():
-                if not isinstance(entry, dict):
-                    continue
-                try:
+                if isinstance(entry, dict):
                     cache._entries[path_key] = entry
-                except Exception:
-                    continue
 
             cache._dirty = False
             return cache
@@ -98,6 +94,26 @@ class TranscriptCache:
             return None
 
         return entry
+
+    def _stamp_entry(self, path: str, st: os.stat_result) -> dict[str, object]:
+        """entries[path] (creating if absent), stamped with file metadata + access time."""
+        entry = self._entries.setdefault(path, {})
+        entry['mtime'] = st.st_mtime
+        entry['size'] = st.st_size
+        entry['seen'] = time.time()
+        self._dirty = True
+        return entry
+
+    @staticmethod
+    def _put_recency(subkey_map: dict[str, object], subkey: str, value: object) -> None:
+        """Insert/overwrite subkey_map[subkey] = value, then trim to
+        TRANSCRIPT_CACHE_SUBKEY_MAX entries by recency of write (LRU), not key string.
+        Relies on dict insertion order: pop-then-reinsert moves subkey to the end."""
+        subkey_map.pop(subkey, None)
+        subkey_map[subkey] = value
+        if len(subkey_map) > TRANSCRIPT_CACHE_SUBKEY_MAX:
+            for old_key in list(subkey_map)[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:
+                del subkey_map[old_key]
 
     def get_parse(
         self, path: str, st: os.stat_result, resume_after: float
@@ -149,16 +165,7 @@ class TranscriptCache:
         result: tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float],
     ) -> None:
         """Cache a parse result, sub-keyed by repr(float(resume_after))."""
-        if path not in self._entries:
-            self._entries[path] = {}
-
-        entry = self._entries[path]
-
-        # Stamp entry with file metadata and current time.
-        entry['mtime'] = st.st_mtime
-        entry['size'] = st.st_size
-        entry['seen'] = time.time()
-        self._dirty = True
+        entry = self._stamp_entry(path, st)
 
         if 'parse' not in entry or not isinstance(entry['parse'], dict):
             entry['parse'] = {}
@@ -166,26 +173,20 @@ class TranscriptCache:
         parses = cast('dict[str, object]', entry['parse'])
         subkey = repr(float(resume_after))
 
-        if len(result) == 8 and isinstance(result[5], tuple) and len(result[5]) == 3:
-            stored = [
-                result[0],
-                result[1],
-                result[2],
-                result[3],
-                result[4],
-                list(result[5]),
-                result[6],
-                result[7],
-            ]
-            parses[subkey] = stored
-        else:
+        if not (len(result) == 8 and isinstance(result[5], tuple) and len(result[5]) == 3):
             return
 
-        # Trim sub-map to TRANSCRIPT_CACHE_SUBKEY_MAX entries, sorted by key (not recency).
-        if len(parses) > TRANSCRIPT_CACHE_SUBKEY_MAX:
-            keys = sorted(parses.keys())
-            for old_key in keys[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:
-                del parses[old_key]
+        stored = [
+            result[0],
+            result[1],
+            result[2],
+            result[3],
+            result[4],
+            list(result[5]),
+            result[6],
+            result[7],
+        ]
+        self._put_recency(parses, subkey, stored)
 
     def get_counts(
         self,
@@ -240,30 +241,14 @@ class TranscriptCache:
         result: dict[str, object],
     ) -> None:
         """Cache a counts result, sub-keyed by f'{clear_epoch!r}|{int(skip_sidechain)}'."""
-        if path not in self._entries:
-            self._entries[path] = {}
-
-        entry = self._entries[path]
-
-        # Stamp entry with file metadata and current time.
-        entry['mtime'] = st.st_mtime
-        entry['size'] = st.st_size
-        entry['seen'] = time.time()
-        self._dirty = True
+        entry = self._stamp_entry(path, st)
 
         if 'counts' not in entry or not isinstance(entry['counts'], dict):
             entry['counts'] = {}
 
         counts_map = cast('dict[str, object]', entry['counts'])
         subkey = f'{clear_epoch!r}|{int(skip_sidechain)}'
-
-        counts_map[subkey] = result
-
-        # Trim sub-map to TRANSCRIPT_CACHE_SUBKEY_MAX entries, sorted by key (not recency).
-        if len(counts_map) > TRANSCRIPT_CACHE_SUBKEY_MAX:
-            keys = sorted(counts_map.keys())
-            for old_key in keys[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:
-                del counts_map[old_key]
+        self._put_recency(counts_map, subkey, result)
 
     def _notif_to_json(self, n: '_Notification') -> list[object]:
         """[task_id, tool_use_id, status, ts]."""

@@ -185,6 +185,41 @@ def test_parse_cache_different_resume_after_miss(tmp_home: Path) -> None:
     assert retrieved is None, "Expected cache miss on different resume_after"
 
 
+def test_parse_subkey_trim_is_by_recency_not_key_string(tmp_home: Path) -> None:
+    """The per-path sub-key map keeps the TRANSCRIPT_CACHE_SUBKEY_MAX most-recently
+    written sub-keys, not the lexicographically-largest keys. Use a resume_after
+    write order whose lexicographic key order is the reverse of write order, so a
+    key-string sort and a recency sort would evict different entries."""
+    session_id = 'test-session-subkey-recency'
+    cache = TranscriptCache(session_id)
+
+    transcripts_dir = tmp_home / '.claude' / 'transcripts'
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = transcripts_dir / 'test.jsonl'
+    jsonl_path.write_text('{"event": "test"}\n')
+    st = jsonl_path.stat()
+
+    def make(resume_after: float) -> tuple:
+        return (100, 50, 200, 1234.5, 'claude-3.5-sonnet',
+                ('text', 'hello', {}), 1235.5, resume_after)
+
+    # repr(float(x)) sorts lexicographically as '9.0' > '8.0' > ... > '5.0',
+    # i.e. descending as resume_after descends. Write in ASCENDING resume_after
+    # order, so "most recently written" (9.0) is the SMALLEST key string.
+    # TRANSCRIPT_CACHE_SUBKEY_MAX is 4, so write 5 sub-keys: 5.0..9.0.
+    for resume_after in (5.0, 6.0, 7.0, 8.0, 9.0):
+        cache.put_parse(str(jsonl_path), st, resume_after, make(resume_after))
+
+    # Recency trim keeps the 4 most-recently-written (6.0, 7.0, 8.0, 9.0) and
+    # evicts the oldest write (5.0) — a key-string sort would instead evict 9.0
+    # (the lexicographically-smallest key), which is the most recent write.
+    assert cache.get_parse(str(jsonl_path), st, 5.0) is None, \
+        "Expected the oldest WRITE (5.0) to be evicted"
+    for resume_after in (6.0, 7.0, 8.0, 9.0):
+        assert cache.get_parse(str(jsonl_path), st, resume_after) is not None, \
+            f"Expected recently-written resume_after={resume_after} to survive the trim"
+
+
 def test_counts_cache_different_clear_epoch_miss(tmp_home: Path) -> None:
     """Different clear_epoch causes counts cache miss."""
     session_id = 'test-session-6'
