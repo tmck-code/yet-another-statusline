@@ -2,11 +2,11 @@ import yas.renderer as renderer
 from helper import strip_ansi
 
 Renderer = renderer.Renderer
+_r = Renderer()
 
 
 def test_plugins_skills_skills_and_plugins() -> None:
-    r = Renderer()
-    out = r.plugins_skills(
+    out = _r.plugins_skills(
         skills_count=1,
         skills_names='tdd',
         plugin_names='foo,bar',
@@ -18,8 +18,7 @@ def test_plugins_skills_skills_and_plugins() -> None:
 
 
 def test_plugins_skills_only_skills() -> None:
-    r = Renderer()
-    out = r.plugins_skills(
+    out = _r.plugins_skills(
         skills_count=1,
         skills_names='tdd',
         plugin_names='',
@@ -30,8 +29,7 @@ def test_plugins_skills_only_skills() -> None:
 
 
 def test_plugins_skills_nothing() -> None:
-    r = Renderer()
-    out = r.plugins_skills(
+    out = _r.plugins_skills(
         skills_count=0,
         skills_names='',
         plugin_names='',
@@ -43,8 +41,7 @@ def test_plugins_skills_show_icons_false_reserves_one_col_margin() -> None:
     """With no glyph to reserve the row's left margin, plugins_skills falls
     back to a single literal leading space -- matching path_git/tokens_cost's
     fallback -- so this row's left margin lines up with the rest of the box."""
-    r = Renderer()
-    out = r.plugins_skills(
+    out = _r.plugins_skills(
         skills_count=1, skills_names='tdd', plugin_names='', show_icons=False,
     )
     stripped = strip_ansi(out)
@@ -53,8 +50,7 @@ def test_plugins_skills_show_icons_false_reserves_one_col_margin() -> None:
 
 def test_plugins_skills_show_icons_false_nothing_stays_empty() -> None:
     # No leading-margin space should leak in when there's nothing to show.
-    r = Renderer()
-    out = r.plugins_skills(
+    out = _r.plugins_skills(
         skills_count=0, skills_names='', plugin_names='', show_icons=False,
     )
     assert out == ''
@@ -63,7 +59,6 @@ def test_plugins_skills_show_icons_false_nothing_stays_empty() -> None:
 def test_plugins_skills_show_icons_true_unchanged() -> None:
     """The icons-on row already reserves its own margin via the glyph; the
     icons-off fallback space must not leak into this path."""
-    r = Renderer()
-    on_default  = r.plugins_skills(skills_count=1, skills_names='tdd', plugin_names='')
-    on_explicit = r.plugins_skills(skills_count=1, skills_names='tdd', plugin_names='', show_icons=True)
+    on_default  = _r.plugins_skills(skills_count=1, skills_names='tdd', plugin_names='')
+    on_explicit = _r.plugins_skills(skills_count=1, skills_names='tdd', plugin_names='', show_icons=True)
     assert on_default == on_explicit

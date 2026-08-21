@@ -91,10 +91,6 @@ def _get(result: RunningSubagents, agent_id: str):
     return matches[0]
 
 
-# ---------------------------------------------------------------------------
-# Each of the four terminal statuses
-# ---------------------------------------------------------------------------
-
 def test_status_completed(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -152,10 +148,6 @@ def test_status_stopped(tmp_home: Path) -> None:
     assert sub.is_done is True
 
 
-# ---------------------------------------------------------------------------
-# Unknown status -> treated as running, never done
-# ---------------------------------------------------------------------------
-
 def test_unknown_status_treated_as_running(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -182,12 +174,6 @@ def test_no_notification_at_all_is_running(tmp_home: Path) -> None:
     assert sub.end_ts == 0.0
     assert sub.run_count == 0
 
-
-# ---------------------------------------------------------------------------
-# Prose that LOOKS terminal never marks an agent done (regression test for
-# the reported false positive: an agent narrating "still waiting for the
-# actual completion notification..." was previously marked done).
-# ---------------------------------------------------------------------------
 
 def test_terminal_looking_prose_does_not_mark_done(tmp_home: Path) -> None:
     now = time.time()
@@ -221,10 +207,6 @@ def test_terminal_looking_prose_does_not_mark_done(tmp_home: Path) -> None:
     assert sub.is_done is False
 
 
-# ---------------------------------------------------------------------------
-# Resume: a second notification for the same task-id bumps run_count
-# ---------------------------------------------------------------------------
-
 def test_resume_second_notification_bumps_run_count(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -257,16 +239,6 @@ def test_resumed_flag_true_when_transcript_postdates_last_notification(tmp_home:
     assert sub.run_count == 1
     assert sub.resumed is True
 
-
-# ---------------------------------------------------------------------------
-# run_start_ts: the per-run duration anchor (subagent_dur_str's fix). All
-# timestamps are derived from the fixture's own `now`, never hardcoded ISO
-# literals — a hardcoded literal paired with a real st_mtime makes the
-# transcript look written days after the terminal signal, which
-# RunningSubagents (correctly) treats as stale. Expected values round-trip
-# through iso_ts/_parse_iso_to_epoch so millisecond-truncation in iso_ts
-# never causes a spurious float mismatch.
-# ---------------------------------------------------------------------------
 
 def test_run_start_ts_anchors_on_resume_boundary_transcript_line(tmp_home: Path) -> None:
     # Real repro shape: original spawn long ago, one notification, then the
@@ -410,16 +382,6 @@ def test_run_start_ts_terminal_resumed_never_collapses_to_zero(tmp_home: Path) -
     assert sub.end_ts - sub.run_start_ts == pytest.approx(300.0, abs=0.01)
 
 
-# ---------------------------------------------------------------------------
-# Notification dedup: every logical <task-notification> is written TWICE in
-# real transcripts (a "queue-operation" record and a "user" record for the
-# SAME task-id/tool-use-id, ~20-25ms apart) — confirmed against a real
-# session. Left un-deduped, run_count doubles (mislabeling never-resumed
-# agents as resumed) and the terminal-resumed run_start_ts bracket anchors on
-# the queue-operation twin of the SAME notification instead of one run
-# earlier, collapsing duration to ~0:00. See _dedupe_notifications.
-# ---------------------------------------------------------------------------
-
 def test_duplicate_pair_does_not_double_run_count(tmp_home: Path) -> None:
     # One real run notified as a queue-operation/user PAIR, 20ms apart — must
     # count as run_count == 1, and NOT look resumed.
@@ -524,10 +486,6 @@ def test_real_audiovis_shaped_repro_analysis_agent_ten_records_five_runs(tmp_hom
     assert duration > 60  # not the ~0.023s a doubled-count bug would produce
 
 
-# ---------------------------------------------------------------------------
-# Notification found in a nested PARENT agent's own jsonl, not the session file
-# ---------------------------------------------------------------------------
-
 def test_notification_in_nested_parent_agent_jsonl(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -560,11 +518,6 @@ def test_notification_in_nested_parent_agent_jsonl(tmp_home: Path) -> None:
     assert child.parent_id == 'agent-parent1'
 
 
-# ---------------------------------------------------------------------------
-# Both record shapes: queue-operation, and a "user" record whose message
-# content string embeds the same <task-notification> block.
-# ---------------------------------------------------------------------------
-
 def test_queue_operation_record_shape(tmp_home: Path) -> None:
     now = time.time()
     sdir = _subagents_dir(tmp_home)
@@ -588,10 +541,6 @@ def test_user_record_shape(tmp_home: Path) -> None:
     sub = _get(result, 'agent-shapeu')
     assert sub.status == 'completed'
 
-
-# ---------------------------------------------------------------------------
-# meta.json field surfacing: is_fork, parent_id, model
-# ---------------------------------------------------------------------------
 
 def test_meta_fields_surfaced(tmp_home: Path) -> None:
     now = time.time()

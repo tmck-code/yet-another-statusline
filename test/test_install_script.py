@@ -32,10 +32,6 @@ def run_install(
     )
 
 
-# ---------------------------------------------------------------------------
-# Task 4.1 — hermetic wire-only tests
-# ---------------------------------------------------------------------------
-
 @pytest.fixture
 def wire_env(tmp_path: Path) -> tuple[Path, Path, dict]:
     """Returns (claude_config_dir, plugin_root, env_extra)."""
@@ -124,10 +120,6 @@ def test_wire_only_output_is_valid_json(wire_env):
     assert data['other'] == 123
 
 
-# ---------------------------------------------------------------------------
-# Task 7.2 — wire-only proves no jq dependency
-# ---------------------------------------------------------------------------
-
 def test_wire_only_works_without_jq(wire_env, tmp_path):
     """Run wire-only with a `jq` stub that always fails (and is first on PATH).
 
@@ -150,10 +142,6 @@ def test_wire_only_works_without_jq(wire_env, tmp_path):
     assert script_path in settings['statusLine']['command']
     assert settings['statusLine']['type'] == 'command'
 
-
-# ---------------------------------------------------------------------------
-# Task 7.3 — uv bootstrap dry-run preview (hermetic, no network)
-# ---------------------------------------------------------------------------
 
 def test_wire_only_dry_run_previews_uv_bootstrap_when_uv_absent(wire_env, tmp_path):
     """With `uv` absent from PATH and --dry-run set, provision_python must report
@@ -194,19 +182,6 @@ def test_wire_only_dry_run_previews_uv_bootstrap_when_uv_absent(wire_env, tmp_pa
     assert not (plugin_root / '.uv').exists()
     assert not (plugin_root / '.python').exists()
 
-
-# ---------------------------------------------------------------------------
-# Task 4.2 — dry-run assertions (full-mode decision logic)
-#
-# These tests run `--full --dry-run`.  They need `claude` and `curl`
-# on PATH (preflight_full runs before --dry-run takes effect), plus a fake
-# plugin root for do_wire to discover.
-#
-# `ensure_plugin` checks `.plugins | has("yas@yet-another-statusline")`.
-# `do_wire` scans `.plugins` for any key whose ascii-lower contains "yas" to
-# find the renderer installPath.  The fixtures seed installed_plugins.json with
-# the yas key under `.plugins` to satisfy both checks.
-# ---------------------------------------------------------------------------
 
 # Guard: preflight_full requires claude and curl to be on PATH (jq is no longer
 # a dependency — JSON goes through the resolved Python interpreter via json_py).
@@ -317,10 +292,6 @@ def test_dry_run_does_not_touch_settings(full_dry_env):
     assert not settings_path.exists()
 
 
-# ---------------------------------------------------------------------------
-# Uninstall tests
-# ---------------------------------------------------------------------------
-
 @pytest.fixture
 def uninstall_env(tmp_path: Path) -> tuple[Path, dict]:
     """Returns (config_dir, env_extra) with settings.json pre-wired."""
@@ -405,10 +376,6 @@ def test_uninstall_dry_run_no_changes(uninstall_env):
     assert not list(config_dir.glob('settings.json.bak-yas-*'))
 
 
-# ---------------------------------------------------------------------------
-# Task 7.4 — uninstall reports it would remove the .uv dir (dry-run, hermetic)
-# ---------------------------------------------------------------------------
-
 def test_uninstall_dry_run_reports_uv_dir_removal(uninstall_env, tmp_path):
     config_dir, env = uninstall_env
     plugin_root = tmp_path / 'plugin_root'
@@ -436,15 +403,6 @@ def test_uninstall_removes_uv_dir(uninstall_env, tmp_path):
     assert 'Removed bootstrapped uv dir' in result.stdout
     assert not uv_dir.exists()
 
-
-# ---------------------------------------------------------------------------
-# Interactive installer — Python version policy + TTY gating
-#
-# NOTE: the live interactive TTY render path is NOT CI-testable (no terminal).
-# These tests exercise the non-interactive / --dry-run branches only. --dry-run
-# is treated as non-interactive by install.sh (a non-mutating preview never
-# prompts), so even on a developer's real terminal these stay deterministic.
-# ---------------------------------------------------------------------------
 
 def test_dry_run_default_provisions_3_13(wire_env):
     """Task 10.1 — the non-interactive default provisions the stable 3.13."""
@@ -624,20 +582,6 @@ def test_build_yas_toml_carries_four_values_and_parses():
     assert data['appearance']['theme'] == 'dracula'
     assert data['tokens']['soft_limit'] == 500000
 
-
-# ---------------------------------------------------------------------------
-# ANSI colorization — gating + alignment safety
-#
-# The installer emits 16-color SGR for its messages, gated on:
-#   color ON iff (stdout is a tty AND NO_COLOR unset AND TERM != dumb)
-#               OR YAS_FORCE_COLOR=1   — and NO_COLOR set always wins (off).
-#
-# Under pytest stdout is captured (not a tty) and the suite never sets
-# YAS_FORCE_COLOR, so color is OFF by default and every plain-text assertion
-# above still holds. The tests below force color on the message paths (the
-# "YAS!" logo is interactive-only and unreachable from these non-tty paths) and
-# prove (a) the gate and (b) that color wrapping never splits a phrase.
-# ---------------------------------------------------------------------------
 
 def test_no_color_when_piped_by_default(uninstall_env):
     """Captured (non-tty) output with no YAS_FORCE_COLOR carries no ESC byte."""

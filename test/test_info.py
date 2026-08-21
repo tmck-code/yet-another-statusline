@@ -5,7 +5,8 @@ import json
 import time
 from pathlib import Path
 
-
+from helper import strip_ansi
+import yas.renderer as renderer_mod
 from yas.info import SessionView
 from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec
@@ -13,6 +14,7 @@ from yas.info.subagents import RunningSubagent, RunningSubagents
 from yas.info.transcript import TranscriptUsage
 
 SESSION_FILE = Path(__file__).parent.parent / 'ops' / 'session-info-example.json'
+_r = renderer_mod.Renderer()
 
 
 def _session():
@@ -24,10 +26,6 @@ def _cfg():
     from yas.config import Config
     return Config()
 
-
-# ---------------------------------------------------------------------------
-# Task 2.1 — session_inout arithmetic
-# ---------------------------------------------------------------------------
 
 def test_session_inout_sums_usage_and_subagents(monkeypatch):
     """session_inout = (billed_in + cache_read + out) + Σ(subagent total_input + output)."""
@@ -93,10 +91,6 @@ def test_session_inout_no_subagents(monkeypatch):
     assert view.session_inout == 550
 
 
-# ---------------------------------------------------------------------------
-# Task 2.2 — _fmt_elapsed pure function
-# ---------------------------------------------------------------------------
-
 def test_fmt_elapsed_none_returns_empty():
     """None mtime returns empty string."""
     from yas.info import _fmt_elapsed
@@ -139,10 +133,6 @@ def test_fmt_elapsed_zero_minutes():
     assert result == '0m'
 
 
-# ---------------------------------------------------------------------------
-# session-elapsed-accuracy — elapsed derived from total_duration_ms
-# ---------------------------------------------------------------------------
-
 def test_elapsed_duration_under_one_hour():
     """total_duration_ms=807000 (13m27s) → elapsed == '13m'."""
     from yas.info import _fmt_duration_ms
@@ -175,10 +165,6 @@ def test_elapsed_does_not_trigger_file_stat(monkeypatch):
     # Result should be the formatted duration from the payload (807557ms → 13:27).
     assert result == '13:27'
 
-
-# ---------------------------------------------------------------------------
-# Task 2.3 — laziness: accessing view.subagents must NOT trigger git / transcript / openspec
-# ---------------------------------------------------------------------------
 
 def test_accessing_subagents_does_not_trigger_other_readers(monkeypatch):
     """Accessing only view.subagents must not call GitInfo.from_cwd,
@@ -214,10 +200,6 @@ def test_accessing_subagents_does_not_trigger_other_readers(monkeypatch):
     assert transcript_call_count['n'] == 0, 'TranscriptUsage.from_transcript should not have been called'
     assert openspec_call_count['n']   == 0, 'OpenSpec.from_cwd should not have been called'
 
-
-# ---------------------------------------------------------------------------
-# Task 6.2 — TranscriptUsage cache anchor / TTL logic
-# ---------------------------------------------------------------------------
 
 def _write_transcript(tmp_path: Path, lines: list[dict]) -> Path:
     """Write a JSONL transcript file and return its path."""
@@ -329,10 +311,6 @@ def test_cache_missing_timestamp_yields_zero_anchor(tmp_path):
     assert usage.cache_anchor_epoch == 0.0
 
 
-# ---------------------------------------------------------------------------
-# Task 6.3 — scan-once: transcript_usage and cache_countdown share one read
-# ---------------------------------------------------------------------------
-
 def test_transcript_scanned_once_for_usage_and_cache_countdown(tmp_path, monkeypatch):
     """Accessing both transcript_usage and cache_countdown triggers exactly one
     file scan — cache_countdown must reuse the already-cached transcript_usage
@@ -389,10 +367,6 @@ def test_transcript_scanned_once_for_usage_and_cache_countdown(tmp_path, monkeyp
     assert 0 < remaining <= 300, f'unexpected remaining seconds: {remaining}'
     assert 0 <= elapsed_pct <= 100
 
-
-# ---------------------------------------------------------------------------
-# Task 6.1 — cache_countdown math on SessionView
-# ---------------------------------------------------------------------------
 
 def _make_view(fake_usage: 'TranscriptUsage', fixed_now: float) -> SessionView:
     """Construct a SessionView with a pre-populated transcript_usage and frozen now."""
@@ -495,10 +469,6 @@ def test_cache_countdown_uses_frozen_now():
     assert elapsed_pct == 30
 
 
-# ---------------------------------------------------------------------------
-# Task 6.3 — _fmt_elapsed_clock MM:SS and H:MM:SS
-# ---------------------------------------------------------------------------
-
 from yas.info import _fmt_elapsed_clock  # noqa: E402
 
 
@@ -537,26 +507,17 @@ def test_fmt_elapsed_clock_double_digit_hour() -> None:
 
 # Task 6.3 — 8-column timer field in elapsed_section
 def test_elapsed_section_fixed_8_col_width() -> None:
-    import yas.renderer as renderer_mod
-    r = renderer_mod.Renderer()
-    _text, w = r.elapsed_section('13:27')
+    _text, w = _r.elapsed_section('13:27')
     assert w == 8  # '+13:27' (6 chars) absorbed inside the rjust(8) field
-    _text2, w2 = r.elapsed_section('99:59:59')
+    _text2, w2 = _r.elapsed_section('99:59:59')
     assert w2 == 9  # '+99:59:59' (9 chars) already fills the field; sign grows it by one
 
 
 def test_elapsed_section_right_justified() -> None:
-    import yas.renderer as renderer_mod
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
-    text, _ = r.elapsed_section('05:03')
+    text, _ = _r.elapsed_section('05:03')
     stripped = strip_ansi(text)
     assert stripped == '  +05:03'  # right-justified to 8 cols (2 spaces + signed 6-char clock)
 
-
-# ---------------------------------------------------------------------------
-# Task 6.1 — read_clear_epoch: reader and SessionView.clear_epoch wiring
-# ---------------------------------------------------------------------------
 
 def _write_str_transcript(path: Path, lines: list[str]) -> None:
     path.write_text('\n'.join(lines) + '\n')
@@ -657,29 +618,20 @@ def test_session_view_clear_epoch_wired_correctly(tmp_path) -> None:
     assert view.clear_epoch is view.__dict__['clear_epoch']
 
 
-# ---------------------------------------------------------------------------
-# Task 6.2 — elapsed_section: two-timer composition
-# ---------------------------------------------------------------------------
-
 def test_elapsed_section_single_timer_when_no_clear() -> None:
     """With no clear_str, elapsed_section output is byte-identical to the original."""
-    import yas.renderer as renderer_mod
-    r = renderer_mod.Renderer()
 
-    text_old, w_old = r.elapsed_section('13:27')
-    text_new, w_new = r.elapsed_section('13:27', '')  # explicit empty clear_str
+    text_old, w_old = _r.elapsed_section('13:27')
+    text_new, w_new = _r.elapsed_section('13:27', '')  # explicit empty clear_str
     assert text_old == text_new
     assert w_old    == w_new
 
 
 def test_elapsed_section_with_clear_str_contains_glyph_and_accent() -> None:
     """When clear_str is set, the output contains GLYPH_CLEAR and the clear timer."""
-    import yas.renderer as renderer_mod
     from yas.constants import GLYPH_CLEAR, CLR_CYAN
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
 
-    text, _w = r.elapsed_section('13:27', '05:11')
+    text, _w = _r.elapsed_section('13:27', '05:11')
     stripped = strip_ansi(text)
     assert GLYPH_CLEAR in text
     assert CLR_CYAN in text
@@ -689,23 +641,17 @@ def test_elapsed_section_with_clear_str_contains_glyph_and_accent() -> None:
 
 def test_elapsed_section_clear_appears_before_session_timer() -> None:
     """Clear timer must be leftmost in the rendered string."""
-    import yas.renderer as renderer_mod
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
 
-    text, _w = r.elapsed_section('13:27', '05:11')
+    text, _w = _r.elapsed_section('13:27', '05:11')
     stripped = strip_ansi(text)
     assert stripped.index('05:11') < stripped.index('13:27')
 
 
 def test_elapsed_section_clear_only_omits_session_timer() -> None:
     """elapsed='', clear_str set → session timer part is absent (clear-only tier)."""
-    import yas.renderer as renderer_mod
     from yas.constants import GLYPH_CLEAR
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
 
-    text, _w = r.elapsed_section('', '18:33')
+    text, _w = _r.elapsed_section('', '18:33')
     stripped = strip_ansi(text)
     assert GLYPH_CLEAR in text
     assert '18:33' in stripped
@@ -716,13 +662,10 @@ def test_elapsed_section_clear_only_omits_session_timer() -> None:
 def test_elapsed_section_show_icons_false_drops_clear_glyph() -> None:
     """show_icons=False hides GLYPH_CLEAR but keeps the signed digits (fix for the
     top-row leak: elapsed_section was the only number-adjacent icon not gated)."""
-    import yas.renderer as renderer_mod
     from yas.constants import GLYPH_CLEAR
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
 
-    on, _  = r.elapsed_section('13:27', '05:11', show_icons=True)
-    off, _ = r.elapsed_section('13:27', '05:11', show_icons=False)
+    on, _  = _r.elapsed_section('13:27', '05:11', show_icons=True)
+    off, _ = _r.elapsed_section('13:27', '05:11', show_icons=False)
     assert GLYPH_CLEAR in on
     assert GLYPH_CLEAR not in off
     assert '+05:11' in strip_ansi(off)
@@ -732,19 +675,16 @@ def test_elapsed_section_show_icons_false_drops_clear_glyph() -> None:
 def test_elapsed_section_count_up_timers_are_signed() -> None:
     """Session and clear timers count up, so both carry a leading `+` against
     the digits (no space) regardless of show_icons."""
-    import yas.renderer as renderer_mod
-    from helper import strip_ansi
-    r = renderer_mod.Renderer()
 
-    session_only, _ = r.elapsed_section('13:27')
+    session_only, _ = _r.elapsed_section('13:27')
     assert '+13:27' in strip_ansi(session_only)
 
-    both, _ = r.elapsed_section('13:27', '05:11')
+    both, _ = _r.elapsed_section('13:27', '05:11')
     stripped = strip_ansi(both)
     assert '+05:11' in stripped
     assert '+13:27' in stripped
 
-    clear_only, _ = r.elapsed_section('', '18:33')
+    clear_only, _ = _r.elapsed_section('', '18:33')
     assert '+18:33' in strip_ansi(clear_only)
 
 
@@ -757,10 +697,6 @@ def test_elapsed_section_clock_skew_clamped(tmp_path) -> None:
     assert clear_ms == 0.0
     assert _fmt_elapsed_clock(int(clear_ms)) == ''
 
-
-# ---------------------------------------------------------------------------
-# Task 6.9 — SessionView cache writes nothing until explicit save()
-# ---------------------------------------------------------------------------
 
 def test_session_view_cache_not_written_until_save(tmp_home: Path, frozen_clock: float) -> None:
     """Task 6.9: SessionView with a cache attached must NOT write the cache file
@@ -819,7 +755,6 @@ def test_session_view_cache_not_written_until_save(tmp_home: Path, frozen_clock:
     _ = view.tool_counts
     _ = view.session_inout
 
-    # === FIRST HALF: File access does NOT trigger save ===
     # Assert: cache file still does NOT exist after field access
     assert not cache_file.exists(), (
         "Cache file should NOT exist after accessing SessionView fields; "
@@ -829,7 +764,6 @@ def test_session_view_cache_not_written_until_save(tmp_home: Path, frozen_clock:
     # Assert: no .tmp file left behind by field access
     assert not tmp_file.exists(), "No .tmp file should be left behind after field access"
 
-    # === SECOND HALF: Cache is genuinely dirty/non-empty ===
     # Verify the cache actually contains data by checking if get_parse returns
     # a result for one of the agent transcripts. We access the cache internals
     # to verify it's non-empty; this is acceptable in a test for validation.
@@ -843,7 +777,6 @@ def test_session_view_cache_not_written_until_save(tmp_home: Path, frozen_clock:
         "the view did not actually populate the cache"
     )
 
-    # === THIRD HALF: Explicit save() writes the cache file ===
     # Now explicitly save the cache
     cache.save()
 

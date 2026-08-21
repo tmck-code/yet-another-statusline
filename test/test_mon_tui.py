@@ -21,10 +21,6 @@ from claude.mon.tui import (
 from claude.mon.lifecycle import validate_thresholds
 
 
-# ---------------------------------------------------------------------------
-# parse_args — defaults
-# ---------------------------------------------------------------------------
-
 def test_parse_args_defaults():
     ns = parse_args([])
     assert ns.include_after == timedelta(minutes=10)
@@ -34,10 +30,6 @@ def test_parse_args_defaults():
     assert ns.bg_shift == 'warm'
     assert ns.theme is None
 
-
-# ---------------------------------------------------------------------------
-# parse_args — individual flags
-# ---------------------------------------------------------------------------
 
 def test_parse_args_include_after():
     ns = parse_args(['--include-after=5m'])
@@ -74,10 +66,6 @@ def test_parse_args_theme():
     assert ns.theme == 'dark'
 
 
-# ---------------------------------------------------------------------------
-# parse_args — all duration suffixes
-# ---------------------------------------------------------------------------
-
 def test_parse_args_duration_suffix_s():
     ns = parse_args(['--refresh=10s'])
     assert ns.refresh == timedelta(seconds=10)
@@ -98,10 +86,6 @@ def test_parse_args_duration_fractional_seconds():
     assert ns.refresh == timedelta(seconds=0.5)
 
 
-# ---------------------------------------------------------------------------
-# parse_args — invalid duration raises SystemExit
-# ---------------------------------------------------------------------------
-
 def test_parse_args_invalid_duration_no_suffix():
     with pytest.raises(SystemExit):
         parse_args(['--refresh=10'])
@@ -116,10 +100,6 @@ def test_parse_args_invalid_bg_shift():
     with pytest.raises(SystemExit):
         parse_args(['--bg-shift=blazing'])
 
-
-# ---------------------------------------------------------------------------
-# validate_thresholds — threshold ordering
-# ---------------------------------------------------------------------------
 
 def test_validate_thresholds_ok():
     # should not raise
@@ -148,10 +128,6 @@ def test_validate_thresholds_remove_equal_idle_ok():
     )
 
 
-# ---------------------------------------------------------------------------
-# enter_alt_screen / exit_alt_screen — escape sequences
-# ---------------------------------------------------------------------------
-
 def test_enter_alt_screen_writes_correct_sequence(monkeypatch):
     buf = io.StringIO()
     monkeypatch.setattr(sys, 'stdout', buf)
@@ -173,10 +149,6 @@ def test_enter_exit_alt_screen_combined(monkeypatch):
     exit_alt_screen()
     assert buf.getvalue() == '\x1b[?1049h\x1b[?1049l'
 
-
-# ---------------------------------------------------------------------------
-# RefreshClock
-# ---------------------------------------------------------------------------
 
 def test_refresh_clock_wait_returns_within_timeout():
     clock = RefreshClock()
@@ -238,10 +210,6 @@ def test_refresh_clock_second_wait_blocks_after_first_consumed():
     clock.wake()          # clean up the thread
     t.join(timeout=1.0)
 
-
-# ---------------------------------------------------------------------------
-# install_sigwinch_handler
-# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
     not hasattr(signal, 'SIGWINCH'),

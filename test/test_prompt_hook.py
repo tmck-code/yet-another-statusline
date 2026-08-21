@@ -54,10 +54,6 @@ _FOREIGN = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Hook script helpers
-# ---------------------------------------------------------------------------
-
 _HOOK_SCRIPT = Path(__file__).resolve().parent.parent / 'hooks' / 'yas-prompt-hook.py'
 
 
@@ -98,10 +94,6 @@ def _run_hook_logic(session_id: str, config_dir: Path) -> None:
         for k, v in env_backup.items():
             os.environ[k] = v
 
-
-# ---------------------------------------------------------------------------
-# Tests: read_last_prompt_ts
-# ---------------------------------------------------------------------------
 
 def test_missing_state_file_returns_none(tmp_home: Path) -> None:
     '''Missing state file → None, no raise.'''
@@ -159,10 +151,6 @@ def test_non_dict_json_returns_none(tmp_home: Path) -> None:
     result = read_last_prompt_ts('any')
     assert result is None
 
-
-# ---------------------------------------------------------------------------
-# Tests: hook script
-# ---------------------------------------------------------------------------
 
 def test_hook_writes_single_session(tmp_path: Path) -> None:
     '''Hook creates the state file and records a timestamp for the session.'''
@@ -256,23 +244,16 @@ def test_hook_missing_session_id_does_not_crash(tmp_path: Path) -> None:
     assert not state.exists()
 
 
-# ---------------------------------------------------------------------------
-# Installer json_py ops: wire / get-hook / del-hook
-# ---------------------------------------------------------------------------
-
 class TestInstallerHookOps:
     '''The install.sh json_py wire/get-hook/del-hook ops that manage the
     UserPromptSubmit hook alongside statusLine, exercised via the real heredoc.'''
 
     def test_wire_on_empty_sets_statusline_and_hook(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text('{}')
 
-        # run
         result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # expected
         expected = {
             'statusLine': {
                 'async': True,
@@ -288,45 +269,35 @@ class TestInstallerHookOps:
             },
         }
 
-        # assert
         assert result == expected
 
     def test_wire_is_idempotent(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text('{}')
         settings.write_text(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # run
         result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # expected
         expected = [
             {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
         ]
 
-        # assert
         assert result['hooks']['UserPromptSubmit'] == expected
 
     def test_wire_preserves_foreign_hooks(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'hooks': {'UserPromptSubmit': [_FOREIGN]}}))
 
-        # run
         result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # expected
         expected = [
             _FOREIGN,
             {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
         ]
 
-        # assert
         assert result['hooks']['UserPromptSubmit'] == expected
 
     def test_wire_replaces_stale_path(self, tmp_path):
-        # setup
         stale = {
             'matcher': '',
             'hooks': [{'type': 'command', 'command': '"python3" "/old/0.2.0/hooks/yas-prompt-hook.py"'}],
@@ -334,47 +305,35 @@ class TestInstallerHookOps:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'hooks': {'UserPromptSubmit': [stale]}}))
 
-        # run
         result = json.loads(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # expected
         expected = [
             {'matcher': '', 'hooks': [{'type': 'command', 'command': _HOOK_CMD}]},
         ]
 
-        # assert
         assert result['hooks']['UserPromptSubmit'] == expected
 
     def test_get_hook_returns_current_command(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text(_run_json_py('wire', settings, _STATUSLINE_CMD, _HOOK_CMD))
 
-        # run
         result = _run_json_py('get-hook', settings).strip()
 
-        # expected
         expected = _HOOK_CMD
 
-        # assert
         assert result == expected
 
     def test_get_hook_empty_when_absent(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text('{}')
 
-        # run
         result = _run_json_py('get-hook', settings)
 
-        # expected
         expected = ''
 
-        # assert
         assert result == expected
 
     def test_del_hook_removes_only_yas_and_collapses(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({
             'theme': 'dark',
@@ -383,17 +342,14 @@ class TestInstallerHookOps:
             ]},
         }))
 
-        # run
         result = json.loads(_run_json_py('del-hook', settings))
 
         # expected — sole YAS entry gone, empty UserPromptSubmit/hooks collapse away
         expected = {'theme': 'dark'}
 
-        # assert
         assert result == expected
 
     def test_del_hook_preserves_foreign_hooks(self, tmp_path):
-        # setup
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({
             'hooks': {'UserPromptSubmit': [
@@ -402,11 +358,8 @@ class TestInstallerHookOps:
             ]},
         }))
 
-        # run
         result = json.loads(_run_json_py('del-hook', settings))
 
-        # expected
         expected = {'hooks': {'UserPromptSubmit': [_FOREIGN]}}
 
-        # assert
         assert result == expected

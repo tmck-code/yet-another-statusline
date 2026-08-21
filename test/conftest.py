@@ -11,6 +11,11 @@ from helper import strip_ansi as _strip_ansi
 import yas.constants as _sl_constants
 import yas.renderer as _sl_renderer
 import yas.render.gradient as _sl_gradient
+import yas.session as _sl_session
+import yas.info.subagents as _sl_subagents
+import yas.info.tasks as _sl_tasks
+import yas.info.skills as _sl_skills
+import yas.info.openspec as _sl_openspec
 
 _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
 
@@ -59,6 +64,30 @@ def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> float:
     monkeypatch.setattr(_sl_renderer, 'time', clock)
     monkeypatch.setattr(_sl_gradient, 'time', clock)
     return now
+
+
+@pytest.fixture
+def silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip every conditional (dynamic) section so token stats render deterministically.
+
+    Each dynamic section reads the real machine (transcript, ~/.claude/settings.json,
+    the cwd's openspec dir, the wall-clock rainbow step, ...). Left alone, the host's
+    own plugins/skills/tasks and clock leak in and synthesise an extra dynamic
+    row/seam or break byte-for-byte comparison, so neutralise every source —
+    including Workspace.plugins, which reads CLAUDE_DIR/settings.json directly.
+    `**kwargs` on every patched classmethod tolerates each real signature
+    (RunningSubagents.from_session takes `now=`/`cache=`) without pinning to it.
+    """
+    monkeypatch.setenv('YAS_RAINBOW_STEP', '0')
+    monkeypatch.setattr(_sl_subagents.RunningSubagents, 'from_session',
+                        classmethod(lambda cls, sid, pdir, **kwargs: _sl_subagents.RunningSubagents(subagents=[])))
+    monkeypatch.setattr(_sl_tasks.TaskList, 'from_session',
+                        classmethod(lambda cls, path, **kwargs: _sl_tasks.TaskList(tasks=[], last_event_ts=0.0)))
+    monkeypatch.setattr(_sl_skills.LoadedSkills, 'from_transcript',
+                        classmethod(lambda cls, path, **kwargs: _sl_skills.LoadedSkills(names=[])))
+    monkeypatch.setattr(_sl_openspec.OpenSpec, 'from_cwd',
+                        classmethod(lambda cls, cwd, max_depth=None, **kwargs: _sl_openspec.OpenSpec(changes=[])))
+    monkeypatch.setattr(_sl_session.Workspace, 'plugins', property(lambda self: ''))
 
 
 @pytest.fixture

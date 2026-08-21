@@ -20,6 +20,7 @@ from yas.render.text import _visible_width
 from yas.session import ContextWindow
 
 Renderer = renderer.Renderer
+_r = Renderer()
 
 _ANSI = re.compile(r'\x1b\[[^m]*m')
 
@@ -27,10 +28,6 @@ _ANSI = re.compile(r'\x1b\[[^m]*m')
 def _strip(s: str) -> str:
     return _ANSI.sub('', s)
 
-
-# ---------------------------------------------------------------------------
-# Pure mapping
-# ---------------------------------------------------------------------------
 
 L = DEFAULT_CONTEXT_LABELS
 T = DEFAULT_CONTEXT_THRESHOLDS
@@ -73,10 +70,6 @@ def test_index_never_exceeds_labels() -> None:
     # More thresholds than labels-1 must clamp to the last label, not raise.
     assert context_state(100, ('only', 'two'), (10, 20, 30, 40)) == 'two'
 
-
-# ---------------------------------------------------------------------------
-# Config knobs
-# ---------------------------------------------------------------------------
 
 def test_defaults_off_and_canonical_labels(tmp_path) -> None:
     cfg = config.Config.load(env={}, config_dir=tmp_path)
@@ -137,56 +130,45 @@ def test_env_beats_toml(tmp_path) -> None:
     assert cfg.context_state is True
 
 
-# ---------------------------------------------------------------------------
-# Renderer wiring
-# ---------------------------------------------------------------------------
-
 def _ctx(used: int, window: int = 200_000) -> ContextWindow:
     return ContextWindow(total_input_tokens=used, total_output_tokens=0, context_window_size=window)
 
 
 def test_word_absent_by_default() -> None:
     # No state args → byte output unchanged (opt-in feature).
-    r = Renderer()
-    out = _strip(r.context_line(_ctx(30_000), available=76))
+    out = _strip(_r.context_line(_ctx(30_000), available=76))
     assert not any(lbl in out for lbl in DEFAULT_CONTEXT_LABELS)
 
 
 def test_word_present_when_enabled() -> None:
-    r = Renderer()
-    out = _strip(r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T))
+    out = _strip(_r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T))
     # 30k / 150k soft limit = 20% → Smart.
     assert 'Smart' in out
 
 
 def test_word_tracks_fill() -> None:
-    r = Renderer()
     # 120k / 150k = 80% → Cooked.
-    out = _strip(r.context_line(_ctx(120_000), available=76, state_labels=L, state_thresholds=T))
+    out = _strip(_r.context_line(_ctx(120_000), available=76, state_labels=L, state_thresholds=T))
     assert 'Cooked' in out
 
 
 def test_word_padded_to_widest_label() -> None:
-    r = Renderer()
-    out = _strip(r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T))
+    out = _strip(_r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T))
     # 'Smart' padded to width of 'Coasting' (8) → followed by spaces before the bar.
     assert 'Smart   ' in out
 
 
 def test_word_respects_width_budget() -> None:
-    r = Renderer()
-    out = r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T)
+    out = _r.context_line(_ctx(30_000), available=76, state_labels=L, state_thresholds=T)
     assert _visible_width(out) <= 76
 
 
 def test_word_sheds_when_too_narrow() -> None:
     # A tight available width must drop the word so the bar stays legible.
-    r = Renderer()
-    out = _strip(r.context_line(_ctx(30_000), available=28, state_labels=L, state_thresholds=T))
+    out = _strip(_r.context_line(_ctx(30_000), available=28, state_labels=L, state_thresholds=T))
     assert 'Smart' not in out
 
 
 def test_word_renders_over_soft_limit() -> None:
-    r = Renderer()
-    out = _strip(r.context_line(_ctx(300_000), available=76, state_labels=L, state_thresholds=T))
+    out = _strip(_r.context_line(_ctx(300_000), available=76, state_labels=L, state_thresholds=T))
     assert 'Dumb' in out

@@ -8,10 +8,6 @@ import pytest
 import yas.layout as layout
 import yas.renderer as renderer_mod
 import yas.session as session_mod
-import yas.info.subagents as subagents_mod
-import yas.info.tasks as tasks_mod
-import yas.info.skills as skills_mod
-import yas.info.openspec as openspec_mod
 from helper import strip_ansi
 from yas.config import Config
 from yas.constants import FAINT, TOOL_COUNTS_LABEL
@@ -36,25 +32,11 @@ def _tick() -> TickRecord:
     return TickRecord(token_log=TokenLog(), day_cost=0.0, tok_rate=0)
 
 
-def _silence_dynamic(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subagents_mod.RunningSubagents, 'from_session',
-                        classmethod(lambda cls, sid, pdir, **kwargs: subagents_mod.RunningSubagents(subagents=[])))
-    monkeypatch.setattr(tasks_mod.TaskList, 'from_session',
-                        classmethod(lambda cls, path, **kwargs: tasks_mod.TaskList(tasks=[], last_event_ts=0.0)))
-    monkeypatch.setattr(skills_mod.LoadedSkills, 'from_transcript',
-                        classmethod(lambda cls, path, **kwargs: skills_mod.LoadedSkills(names=[])))
-    monkeypatch.setattr(openspec_mod.OpenSpec, 'from_cwd',
-                        classmethod(lambda cls, cwd, max_depth=None, **kwargs: openspec_mod.OpenSpec(changes=[])))
-    monkeypatch.setattr(session_mod.Workspace, 'plugins', property(lambda self: ''))
 
 
 def _content_texts(spec: layout.LayoutSpec) -> str:
     return ' '.join(strip_ansi(r.content) for r in spec.rows if r.kind == 'content')
 
-
-# ---------------------------------------------------------------------------
-# Renderer.tool_counts_row helper
-# ---------------------------------------------------------------------------
 
 def test_helper_format_and_faint_on_sub() -> None:
     out = _r.tool_counts_row({'Bash': (5, 12)}, 100)
@@ -97,12 +79,7 @@ def test_helper_overflow_counts_types_not_calls() -> None:
     assert unshown_calls != 8  # marker is a type count, not a call sum
 
 
-# ---------------------------------------------------------------------------
-# build_wide wiring
-# ---------------------------------------------------------------------------
-
-def test_row_present_in_wide(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_row_present_in_wide(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     view = _view(Config(show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2), 'Aread': (8, 1)})
     spec = layout.build_wide(view, _tick(), 160, _r)
@@ -112,8 +89,7 @@ def test_row_present_in_wide(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [r.kind for r in spec.rows].count('separator_seam') == 1
 
 
-def test_row_label_when_captions_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_row_label_when_captions_enabled(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     view = _view(Config(labels=True, show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2)})
     spec = layout.build_wide(view, _tick(), 160, _r)
@@ -128,8 +104,7 @@ def test_row_label_when_captions_enabled(monkeypatch: pytest.MonkeyPatch) -> Non
     assert superscript(TOOL_COUNTS_LABEL) in line
 
 
-def test_zero_state_omits_row_and_separator(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_zero_state_omits_row_and_separator(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     view = _view()
     view.__dict__['tool_counts'] = ToolCounts({})
     spec = layout.build_wide(view, _tick(), 140, _r)
@@ -139,8 +114,7 @@ def test_zero_state_omits_row_and_separator(monkeypatch: pytest.MonkeyPatch) -> 
     assert kinds[-1] == 'bottom_border'
 
 
-def test_row_hidden_when_show_tool_uses_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_row_hidden_when_show_tool_uses_false(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     view = _view(Config(show_tool_uses=False))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2), 'Aread': (8, 1)})
     spec = layout.build_wide(view, _tick(), 160, _r)
@@ -151,8 +125,7 @@ def test_row_hidden_when_show_tool_uses_false(monkeypatch: pytest.MonkeyPatch) -
     assert kinds[-1] == 'bottom_border'
 
 
-def test_row_absent_in_narrow_and_medium(monkeypatch: pytest.MonkeyPatch) -> None:
-    _silence_dynamic(monkeypatch)
+def test_row_absent_in_narrow_and_medium(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     counts = ToolCounts({'Zbash': (5, 2)})
 
     view_n = _view()
@@ -166,9 +139,8 @@ def test_row_absent_in_narrow_and_medium(monkeypatch: pytest.MonkeyPatch) -> Non
     assert 'Zbash' not in _content_texts(spec_m)
 
 
-def test_row_directly_under_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_row_directly_under_tokens(monkeypatch: pytest.MonkeyPatch, silence_dynamic: None) -> None:
     """The tool row sits immediately after the tokens/cost content rows."""
-    _silence_dynamic(monkeypatch)
     view = _view(Config(show_tool_uses=True))
     view.__dict__['tool_counts'] = ToolCounts({'Zbash': (5, 2)})
     spec = layout.build_wide(view, _tick(), 160, _r)

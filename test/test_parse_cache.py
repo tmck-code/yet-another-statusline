@@ -31,11 +31,6 @@ from yas.constants import (
 )
 
 
-# ============================================================================
-# 6.2: Cache round-trip, invalidation, parameter variations, corruption,
-#      pruning, atomic save
-# ============================================================================
-
 def test_parse_cache_round_trip(tmp_home: Path) -> None:
     """Round-trip: put a parse result, save(), load(), get the identical tuple."""
     session_id = 'test-session-1'
@@ -515,10 +510,6 @@ def test_save_survives_os_replace_failure(tmp_home: Path, monkeypatch: pytest.Mo
     assert not tmp_file.exists(), ".tmp file should be cleaned up after failure"
 
 
-# ============================================================================
-# 6.3: Tail resumption tests for notifications and tool results
-# ============================================================================
-
 def test_tail_read_notifications_with_cache_cold_warm_equivalence(
     tmp_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -668,10 +659,6 @@ def test_tail_read_tool_results_with_cache_resumption(
 
     assert warm_result == cold_result
 
-
-# ============================================================================
-# 6.5: totals_only equivalence tests
-# ============================================================================
 
 def test_totals_only_equivalence_no_resume(tmp_home: Path) -> None:
     """totals_only parse equals full parse except model/last_activity, no resume."""
