@@ -48,20 +48,14 @@ def install_sigwinch_handler(
     signal.signal(sigwinch, _handler)
 
 
+_DURATION_UNITS = {'h': 'hours', 's': 'seconds', 'm': 'minutes'}
+
+
 def _parse_duration(s: str) -> timedelta:
-    if s.endswith('h'):
+    unit = _DURATION_UNITS.get(s[-1:])
+    if unit is not None:
         try:
-            return timedelta(hours=float(s[:-1]))
-        except ValueError:
-            pass
-    elif s.endswith('m'):
-        try:
-            return timedelta(minutes=float(s[:-1]))
-        except ValueError:
-            pass
-    elif s.endswith('s'):
-        try:
-            return timedelta(seconds=float(s[:-1]))
+            return timedelta(**{unit: float(s[:-1])})
         except ValueError:
             pass
     raise argparse.ArgumentTypeError(

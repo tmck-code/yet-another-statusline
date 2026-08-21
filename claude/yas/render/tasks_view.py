@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from yas.info.tasks import Task, TaskList
 
 
+@dataclass(slots=True)
 class WindowSlice:
     """Active-anchored window of `Task`s to draw, plus counts clipped above/below."""
 
-    __slots__ = ('items', 'done_hidden', 'more_hidden')
-
-    def __init__(
-        self,
-        items: 'list[Task] | None' = None,
-        done_hidden: int = 0,
-        more_hidden: int = 0,
-    ) -> None:
-        self.items       = items if items is not None else []
-        self.done_hidden = done_hidden
-        self.more_hidden = more_hidden
+    items:       'list[Task]' = field(default_factory=list)
+    done_hidden: int = 0
+    more_hidden: int = 0
 
 
 def fmt_duration(secs: float) -> str:

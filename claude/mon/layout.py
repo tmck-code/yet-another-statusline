@@ -96,32 +96,28 @@ def _centre_line(text: str, width: int) -> str:
     return ' ' * pad_left + text + ' ' * pad_right
 
 
-def format_empty_body(width: int, height: int) -> str:
-    """Return a multi-line string of exactly height lines with (no active sessions) centred."""
+def _centred_body(message: str, width: int, height: int) -> str:
+    """Return a multi-line string of exactly height lines with message centred."""
     if height <= 0:
         return ''
     blank = ' ' * width
-    msg_line = _centre_line('(no active sessions)', width)
+    msg_line = _centre_line(message, width)
     if height == 1:
         return msg_line
     mid = height // 2
     lines = [blank] * height
     lines[mid] = msg_line
     return '\n'.join(lines)
+
+
+def format_empty_body(width: int, height: int) -> str:
+    """Return a multi-line string of exactly height lines with (no active sessions) centred."""
+    return _centred_body('(no active sessions)', width, height)
 
 
 def format_narrow_body(width: int, height: int) -> str:
     """Return a multi-line string of exactly height lines with (terminal too narrow) centred."""
-    if height <= 0:
-        return ''
-    blank = ' ' * width
-    msg_line = _centre_line('(terminal too narrow)', width)
-    if height == 1:
-        return msg_line
-    mid = height // 2
-    lines = [blank] * height
-    lines[mid] = msg_line
-    return '\n'.join(lines)
+    return _centred_body('(terminal too narrow)', width, height)
 
 
 def clip_to_height(

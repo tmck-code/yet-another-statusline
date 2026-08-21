@@ -8,7 +8,7 @@ import zlib
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import Callable
 
 from yas.render.borders import BorderRenderer
 from yas.constants import (
@@ -24,26 +24,8 @@ from yas.constants import (
     BG_LUM_THRESHOLD,
     BOX_V,
     CLR_CYAN,
-    CLR_CYAN_DAY,
-    CLR_CYAN_DAY_DIM,
-    CLR_CYAN_DIM,
-    CLR_CYAN_ICON,
-    CLR_GOLD,
-    CLR_GREEN_BRT,
-    CLR_GREEN_DIM,
-    CLR_GREEN_OK,
-    CLR_GREY_DARK,
-    CLR_GREY_DIM,
-    CLR_PEACH,
-    CLR_PINK,
-    CLR_PURPLE,
-    CLR_ROSE,
-    CLR_SKY_BLUE,
-    CLR_TEAL_VIOLET,
     CLR_WARN,
     CLR_WHITE_BRT,
-    CLR_YELLOW,
-    CLR_YELLOW_BRT,
     DEFAULT_SOFT_LIMIT,
     ELLIPSIS,
     FAINT,
@@ -106,7 +88,6 @@ from yas.render.gradient import (
     rainbow_at,
     rainbow_step,
     thinking_form_short,
-    _scale,
 )
 from yas.context_state import context_state
 from yas.info.git import GitInfo
@@ -119,9 +100,6 @@ from yas.info.workflows import RunningWorkflow
 from yas.info.tasks import TaskList
 from yas.render.text import _middle_ellipsis, _visible_width, fmt_tok, fmt_tok_fixed, strike
 from yas.tokens import TokenRate
-
-if TYPE_CHECKING:
-    from yas.themes import Theme
 
 from yas.themes import CLAUDE_DARK, Theme
 
@@ -176,13 +154,10 @@ def _best_fit_cluster(
     fits: Callable[[str], bool],
 ) -> str:
     """Pick the richest subagent stats cluster that satisfies `fits`; tok+loc are never shed, only model."""
-    cluster = build_cluster(True, True, False)  # floor: tok + loc, no model
-    for show_lines, show_tok, show_model in ((True, True, True),):
-        cand = build_cluster(show_lines, show_tok, show_model)
-        if fits(cand):
-            cluster = cand
-            break
-    return cluster
+    full = build_cluster(True, True, True)
+    if fits(full):
+        return full
+    return build_cluster(True, True, False)  # floor: tok + loc, no model
 
 
 def _is_pua(ch: str) -> bool:
@@ -216,36 +191,25 @@ class Renderer:
         self._apply_theme(self.theme)
 
     def _apply_theme(self, t: Theme) -> None:
-        self.BORDER      = t.border
         self.PWD         = t.pwd
         self.BRANCH      = t.branch
         self.COMMIT      = t.commit
         self.SESSION     = t.session
-        self.MODEL       = t.model
         self.SKILLS      = t.skills
-        self.TIME        = t.time
         self.TOK         = t.tok
         self.TOK_DIM     = t.tok_dim
-        self.TOK_DAY     = t.tok_day
         self.TOK_DAY_DIM = t.tok_day_dim
         self.COST        = t.cost
-        self.BAR_FILL    = t.bar_fill
         self.BAR_EMPTY   = t.bar_empty
         self.DIM_GREEN   = t.dim_green
         self.LABEL       = t.label
         self.CTX         = t.ctx
         self.CTX_DIM     = t.ctx_dim
-        self.BOLDW       = BOLD + t.white_brt
         self.BOLDY       = t.tok_arrow
         self.DIRTY       = t.dirty
         self.ICON_PATH   = t.icon_path
         self.ARROW       = t.arrow
         self.TOK_ICON    = t.tok_icon
-        self.OPUS        = t.models['opus'].label
-        self.SONNET      = t.models['sonnet'].label
-        self.HAIKU       = t.models['haiku'].label
-        self.FABLE       = t.models['fable'].label
-        self.MYTHOS      = t.models['mythos'].label
         self.safe        = t.safe
         self.warn        = t.warn
         self.alert       = t.alert
@@ -264,57 +228,7 @@ class Renderer:
         shift = mc.warm_shift if self.bg_shift == 'warm' else mc.cool_shift
         return mc.anchor, shift
 
-    def model_bg_lead(self, model_name: str, effort_level: str) -> str:
-        pct = self._model_bg_pct(effort_level)
-        if not pct:
-            return ''
-        anchor, _ = self._model_anchor_pair(model_name)
-        r, g, b   = _scale(anchor, pct)
-        return f'\033[48;2;{r};{g};{b}m'
-
-    def model_bg_trail(self, model_name: str, effort_level: str) -> str:
-        pct = self._model_bg_pct(effort_level)
-        if not pct:
-            return ''
-        _, shift = self._model_anchor_pair(model_name)
-        r, g, b  = _scale(shift, pct)
-        return f'\033[48;2;{r};{g};{b}m'
-
-    R         = RESET
-    BORDER    = CLR_GREY_DIM
-    PWD       = CLR_SKY_BLUE
-    BRANCH    = CLR_GREEN_OK
-    COMMIT    = CLR_GREY_DIM
-    SESSION   = CLR_GREY_DIM
-    MODEL     = CLR_PURPLE
-    SKILLS    = CLR_GOLD
-    TIME      = CLR_GREY_DIM
-    TOK       = CLR_CYAN
-    TOK_DIM   = CLR_CYAN_DIM
-    TOK_DAY     = CLR_CYAN_DAY
-    TOK_DAY_DIM = CLR_CYAN_DAY_DIM
-    COST      = CLR_PINK
-    BAR_FILL  = CLR_GREEN_OK
-    BAR_EMPTY = CLR_GREY_DARK
-    DIM_GREEN = CLR_GREEN_DIM
-    LABEL     = CLR_GREY_DIM
-    CTX       = CLR_PEACH
-    CTX_DIM   = CLR_PEACH
-    BOLDW     = BOLD + CLR_WHITE_BRT
-    BOLDY     = CLR_YELLOW
-    DIRTY     = CLR_WARN
-    ICON_PATH = CLR_CYAN_ICON
-    ARROW     = CLR_GREEN_BRT
-    TOK_ICON  = CLR_YELLOW_BRT
-    OPUS      = CLR_YELLOW
-    SONNET    = CLR_GREEN_OK
-    HAIKU     = CLR_SKY_BLUE
-    FABLE     = CLR_ROSE
-    MYTHOS    = CLR_TEAL_VIOLET
-
-    # --- Gradient delegations (theme-driven; see r.gradient for GRAD_STOPS etc.) ---
-    FADE        = GradientEngine.FADE
-    SPARK_CHARS = GradientEngine.SPARK_CHARS
+    R = RESET  # not set by _apply_theme; read 125x as self.R
 
     def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         return self.gradient.gradient_rgb(t, dim)
@@ -737,8 +651,6 @@ class Renderer:
             parts = [c for c, _ in shown]
             parts.append(f'{self.LABEL}+{k}{self.R}')
         return (' ' * gap).join(parts)
-
-    SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
 
     def subagent_activity(
         self,
@@ -1288,7 +1200,6 @@ class Renderer:
 
         return out
 
-    RATE_W  = 6
     IN_W    = 6
     CACHE_W = 6
     OUT_W   = 6
@@ -1505,28 +1416,6 @@ class Renderer:
         min_width = tokens_base_w + 3
 
         return [line], vsep_cols, 0, min_width
-
-    def context_bar(self, fill_ratio: float) -> str:
-        ratio = min(max(fill_ratio, 0.0), 1.0)
-        filled = int(ratio * 30)
-        bar_filled = BarChars.FILLED * filled
-        bar_empty = BarChars.EMPTY * (30 - filled)
-        if ratio >= 0.9:
-            color = self.alert
-        elif ratio >= 0.7:
-            color = self.warn
-        else:
-            color = self.safe
-        return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
-
-    def context_bar_color(self, fill_ratio: float) -> str:
-        ratio = min(max(fill_ratio, 0.0), 1.0)
-        if ratio >= 0.9:
-            return self.alert
-        elif ratio >= 0.7:
-            return self.warn
-        else:
-            return self.safe
 
     _EMPTY_FADE_256 = re.compile(r'\x1b\[38;5;(\d+)m')
     _EMPTY_FADE_RGB = re.compile(r'\x1b\[38;2;(\d+);(\d+);(\d+)m')

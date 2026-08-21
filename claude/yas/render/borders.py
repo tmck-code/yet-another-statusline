@@ -21,6 +21,7 @@ from yas.constants import (
     BOLD,
     BOLD_OFF,
     ITALIC,
+    ITALIC_OFF,
     LABEL_ABBREVIATIONS,
     RESET,
 )
@@ -84,6 +85,17 @@ def _overlay_labels(chars: list[str], fills: list[bool], labels: tuple[tuple[str
             fills[i] = False  # claim column so later labels yield to it
 
 
+def _elbow_char(col: int, downs_set: set[int], ups_set: set[int], default: str) -> str:
+    """Junction glyph for an interior column: cross/T-down/T-up, else `default` (plain fill)."""
+    if col in downs_set and col in ups_set:
+        return BOX_CROSS
+    if col in downs_set:
+        return BOX_T_DOWN
+    if col in ups_set:
+        return BOX_T_UP
+    return default
+
+
 class BorderRenderer:
     def __init__(self, gradient: GradientEngine):
         self.gradient = gradient
@@ -127,7 +139,7 @@ class BorderRenderer:
                 fills[col - 1] = (chars[col - 1] == BOX_H)
             prefix[3] = self.SESSION + ITALIC
             chars[3] = sid
-            suffix[3 + sid_w - 1] = '\033[23m'
+            suffix[3 + sid_w - 1] = ITALIC_OFF
             offset = 3 + sid_w
             rest = max(0, width - 4 - sid_w)
             for i in range(rest):
@@ -219,14 +231,7 @@ class BorderRenderer:
         chars[0] = BOX_T_RIGHT
         for i in range(width - 2):
             col = i + 2
-            if col in downs_set and col in ups_set:
-                ch = BOX_CROSS
-            elif col in downs_set:
-                ch = BOX_T_DOWN
-            elif col in ups_set:
-                ch = BOX_T_UP
-            else:
-                ch = BOX_H
+            ch = _elbow_char(col, downs_set, ups_set, BOX_H)
             prefix[col - 1] = self.gradient.grad_at(i + 1, width, fill=fill)
             chars[col - 1] = ch
             fills[col - 1] = (ch == BOX_H)
@@ -270,14 +275,7 @@ class BorderRenderer:
                 prefix[col - 1] = p.border_fg(col)
                 chars[col - 1] = pc
             else:
-                if col in downs_set and col in ups_set:
-                    ch = BOX_CROSS
-                elif col in downs_set:
-                    ch = BOX_T_DOWN
-                elif col in ups_set:
-                    ch = BOX_T_UP
-                else:
-                    ch = BOX_H_DASH
+                ch = _elbow_char(col, downs_set, ups_set, BOX_H_DASH)
                 # dim factor baked into the colour prefix, so an overlaid label glyph inherits it for free
                 prefix[col - 1] = self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill)
                 chars[col - 1] = ch

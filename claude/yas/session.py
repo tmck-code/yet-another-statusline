@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
@@ -34,14 +34,6 @@ def _as_str(v: object, default: str = '') -> str:
         return _sanitize(v)
     return default
 
-
-def _parse_iso_to_epoch(ts: str) -> float:
-    try:
-        if ts.endswith('Z'):
-            ts = ts[:-1] + '+00:00'
-        return datetime.fromisoformat(ts).timestamp()
-    except (ValueError, TypeError):
-        return 0.0
 
 # models ----------------------------------------
 
@@ -118,30 +110,11 @@ class RateBucket(NamedTuple):
         )
 
 
+@dataclass(slots=True)
 class Workspace:
-    __slots__ = ('current_dir', 'project_dir', 'added_dirs')
-
-    def __init__(
-        self,
-        current_dir: str = '',
-        project_dir: str = '',
-        added_dirs:  list[object] | None = None,
-    ) -> None:
-        self.current_dir = current_dir
-        self.project_dir = project_dir
-        self.added_dirs  = added_dirs if added_dirs is not None else []
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Workspace):
-            return NotImplemented
-        return (self.current_dir, self.project_dir, self.added_dirs) == \
-               (other.current_dir, other.project_dir, other.added_dirs)
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return (f'Workspace(current_dir={self.current_dir!r}, project_dir={self.project_dir!r}, '
-                f'added_dirs={self.added_dirs!r})')
+    current_dir: str = ''
+    project_dir: str = ''
+    added_dirs:  list[object] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> Workspace:
@@ -173,40 +146,13 @@ class Workspace:
         return ','.join(seen.keys())
 
 
+@dataclass(slots=True)
 class Cost:
-    __slots__ = (
-        'total_cost_usd', 'total_duration_ms', 'total_api_duration_ms',
-        'total_lines_added', 'total_lines_removed',
-    )
-
-    def __init__(
-        self,
-        total_cost_usd:        float = 0.0,
-        total_duration_ms:     int = 0,
-        total_api_duration_ms: int = 0,
-        total_lines_added:     int = 0,
-        total_lines_removed:   int = 0,
-    ) -> None:
-        self.total_cost_usd        = total_cost_usd
-        self.total_duration_ms     = total_duration_ms
-        self.total_api_duration_ms = total_api_duration_ms
-        self.total_lines_added     = total_lines_added
-        self.total_lines_removed   = total_lines_removed
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Cost):
-            return NotImplemented
-        return (self.total_cost_usd, self.total_duration_ms, self.total_api_duration_ms,
-                self.total_lines_added, self.total_lines_removed) == \
-               (other.total_cost_usd, other.total_duration_ms, other.total_api_duration_ms,
-                other.total_lines_added, other.total_lines_removed)
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return (f'Cost(total_cost_usd={self.total_cost_usd}, total_duration_ms={self.total_duration_ms}, '
-                f'total_api_duration_ms={self.total_api_duration_ms}, '
-                f'total_lines_added={self.total_lines_added}, total_lines_removed={self.total_lines_removed})')
+    total_cost_usd:        float = 0.0
+    total_duration_ms:     int = 0
+    total_api_duration_ms: int = 0
+    total_lines_added:     int = 0
+    total_lines_removed:   int = 0
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> Cost:
@@ -219,44 +165,14 @@ class Cost:
         )
 
 
+@dataclass(slots=True)
 class ContextWindow:
-    __slots__ = (
-        'total_input_tokens', 'total_output_tokens', 'context_window_size',
-        'current_usage', 'used_percentage', 'remaining_percentage',
-    )
-
-    def __init__(
-        self,
-        total_input_tokens:   int = 0,
-        total_output_tokens:  int = 0,
-        context_window_size:  int = 0,
-        current_usage:        CurrentUsage | None = None,
-        used_percentage:      float | None = None,
-        remaining_percentage: float | None = None,
-    ) -> None:
-        self.total_input_tokens   = total_input_tokens
-        self.total_output_tokens  = total_output_tokens
-        self.context_window_size  = context_window_size
-        self.current_usage        = current_usage if current_usage is not None else CurrentUsage()
-        self.used_percentage      = used_percentage
-        self.remaining_percentage = remaining_percentage
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, ContextWindow):
-            return NotImplemented
-        return (self.total_input_tokens, self.total_output_tokens, self.context_window_size,
-                self.current_usage, self.used_percentage, self.remaining_percentage) == \
-               (other.total_input_tokens, other.total_output_tokens, other.context_window_size,
-                other.current_usage, other.used_percentage, other.remaining_percentage)
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return (f'ContextWindow(total_input_tokens={self.total_input_tokens}, '
-                f'total_output_tokens={self.total_output_tokens}, '
-                f'context_window_size={self.context_window_size}, '
-                f'current_usage={self.current_usage!r}, used_percentage={self.used_percentage}, '
-                f'remaining_percentage={self.remaining_percentage})')
+    total_input_tokens:   int = 0
+    total_output_tokens:  int = 0
+    context_window_size:  int = 0
+    current_usage:        CurrentUsage = field(default_factory=CurrentUsage)
+    used_percentage:      float | None = None
+    remaining_percentage: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> ContextWindow:
@@ -274,26 +190,10 @@ class ContextWindow:
         )
 
 
+@dataclass(slots=True)
 class RateLimits:
-    __slots__ = ('five_hour', 'seven_day')
-
-    def __init__(
-        self,
-        five_hour: RateBucket | None = None,
-        seven_day: RateBucket | None = None,
-    ) -> None:
-        self.five_hour = five_hour if five_hour is not None else RateBucket()
-        self.seven_day = seven_day if seven_day is not None else RateBucket()
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, RateLimits):
-            return NotImplemented
-        return self.five_hour == other.five_hour and self.seven_day == other.seven_day
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return f'RateLimits(five_hour={self.five_hour!r}, seven_day={self.seven_day!r})'
+    five_hour: RateBucket = field(default_factory=RateBucket)
+    seven_day: RateBucket = field(default_factory=RateBucket)
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> RateLimits:

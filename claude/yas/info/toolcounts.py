@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from yas.constants import META_EXCLUDE_TOOLS
 from yas.info.parsecache import TranscriptCache
@@ -230,50 +230,21 @@ def count_transcript(
     return result
 
 
+@dataclass(eq=True)
 class ToolCounts:
     """Per-tool ``(main, sub)`` tool_use counts, session line totals, and per-agent breakdown."""
 
-    __slots__ = ('counts', 'lines_read', 'lines_changed', 'per_agent')
+    counts:        dict[str, tuple[int, int]] = field(default_factory=dict)  # tool name -> (main_count, sub_count)
+    lines_read:    int = 0  # session total: main + all subagents
+    lines_changed: int = 0
+    per_agent:     dict[str, tuple[int, int]] = field(default_factory=dict)  # transcript path -> (lines_read, lines_changed)
 
-    def __init__(
-        self,
-        counts: dict[str, tuple[int, int]] | None = None,
-        lines_read: int = 0,
-        lines_changed: int = 0,
-        per_agent: dict[str, tuple[int, int]] | None = None,
-    ) -> None:
-        self.counts = counts if counts is not None else {}  # tool name -> (main_count, sub_count)
-        self.lines_read = lines_read        # session total: main + all subagents
-        self.lines_changed = lines_changed
-        self.per_agent = per_agent if per_agent is not None else {}  # transcript path -> (lines_read, lines_changed)
+    __hash__ = None  # type: ignore[assignment]
 
     @property
     def total_types(self) -> int:
         """Number of distinct tool types counted (for +k overflow math)."""
         return len(self.counts)
-
-    type_count = total_types  # alias
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, ToolCounts):
-            return NotImplemented
-        return (
-            self.counts == other.counts
-            and self.lines_read == other.lines_read
-            and self.lines_changed == other.lines_changed
-            and self.per_agent == other.per_agent
-        )
-
-    __hash__ = None  # type: ignore[assignment]
-
-    def __repr__(self) -> str:
-        return (
-            f'ToolCounts('
-            f'counts={self.counts!r}, '
-            f'lines_read={self.lines_read}, '
-            f'lines_changed={self.lines_changed}, '
-            f'per_agent={self.per_agent!r})'
-        )
 
     @classmethod
     def gather(

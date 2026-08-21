@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import re
 import unicodedata
 
 from yas.constants import (
@@ -205,18 +206,12 @@ def superscript(s: str) -> str:
 _SUPERSCRIPT_TO_ASCII = {ord(v): k for k, v in _SUPERSCRIPT.items()}
 
 
+_TOKEN_RE = re.compile(r'[^ ]+')  # NOT \S+ -- a tab must not split a token, only a literal space does
+
+
 def _token_offsets(plain: str) -> list[int]:
-    """0-indexed start positions of each whitespace-separated run in `plain`."""
-    offs: list[int] = []
-    i, n = 0, len(plain)
-    while i < n:
-        if plain[i] != ' ':
-            offs.append(i)
-            while i < n and plain[i] != ' ':
-                i += 1
-        else:
-            i += 1
-    return offs
+    """0-indexed start positions of each space-separated run in `plain`."""
+    return [m.start() for m in _TOKEN_RE.finditer(plain)]
 
 
 def fmt_tok(n: int) -> str:

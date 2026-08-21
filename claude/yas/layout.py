@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import time
-from typing import NamedTuple
+from dataclasses import dataclass, field
+from typing import NamedTuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from yas.session import ContextWindow, SessionInfo
 
 from yas.config import Config
 from yas.constants import (
@@ -84,6 +88,27 @@ class _TopRowShed(NamedTuple):
     elapsed_section_w: int
 
 
+class _CtxFillPill(NamedTuple):
+    """Shared preamble computed by every `build_*` tier: context fill + model pill state."""
+    ctx:           'ContextWindow'
+    fill:          float
+    effort_for_bg: str
+    pill_pct:      int
+    pill_anchor:   tuple[int, int, int]
+    pill_shift:    tuple[int, int, int]
+
+
+def _ctx_fill_pill(session: 'SessionInfo', r: Renderer, soft_limit: int) -> _CtxFillPill:
+    """Context-window fill ratio plus the model-pill anchor/shift/pct, identical across tiers."""
+    ctx           = session.context_window
+    total_tokens  = ctx.total_input_tokens + ctx.total_output_tokens
+    fill          = min(total_tokens / soft_limit, 1.0)
+    effort_for_bg = session.effort.level if session.thinking.enabled else ''
+    pill_pct      = r._model_bg_pct(effort_for_bg)
+    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0, 0, 0), (0, 0, 0))
+    return _CtxFillPill(ctx, fill, effort_for_bg, pill_pct, pill_anchor, pill_shift)
+
+
 def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
     """Str index in *ansi* corresponding to visible-text position *plain_idx*."""
     pos = 0   # current byte position in `ansi`
@@ -98,53 +123,27 @@ def _ansi_byte_offset(ansi: str, plain_idx: int) -> int:
     return pos
 
 
+@dataclass(slots=True)
 class RowSpec:
-    __slots__ = (
-        'kind', 'content', 'bg_lead', 'bg_trail', 'pill_flush', 'ups', 'downs',
-        'pill', 'pill_edge', 'right_pill', 'labels',
-    )
-
-    def __init__(
-        self,
-        kind:       str,  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
-        content:    str = '',
-        bg_lead:    str = '',
-        bg_trail:   str = '',
-        pill_flush: bool = False,
-        ups:        tuple[int, ...] = (),
-        downs:      tuple[int, ...] = (),
-        pill:       Pill | None = None,
-        pill_edge:  str = 'bottom',
-        right_pill: str = '',
-        labels:     list[tuple[str, int]] | None = None,
-    ) -> None:
-        self.kind       = kind
-        self.content    = content
-        self.bg_lead    = bg_lead
-        self.bg_trail   = bg_trail
-        self.pill_flush = pill_flush
-        self.ups        = ups
-        self.downs      = downs
-        self.pill       = pill
-        self.pill_edge  = pill_edge
-        self.right_pill = right_pill
-        self.labels     = labels if labels is not None else []
+    kind:       str  # 'top_border', 'bottom_border', 'separator', 'separator_dim', 'content'
+    content:    str = ''
+    bg_lead:    str = ''
+    bg_trail:   str = ''
+    pill_flush: bool = False
+    ups:        tuple[int, ...] = ()
+    downs:      tuple[int, ...] = ()
+    pill:       Pill | None = None
+    pill_edge:  str = 'bottom'
+    right_pill: str = ''
+    labels:     list[tuple[str, int]] = field(default_factory=list)
 
 
+@dataclass(slots=True)
 class LayoutSpec:
-    __slots__ = ('width', 'fill', 'session_id', 'rows')
-
-    def __init__(
-        self,
-        width:      int,
-        fill:       float,
-        session_id: str,
-        rows:       list[RowSpec] | None = None,
-    ) -> None:
-        self.width      = width
-        self.fill       = fill
-        self.session_id = session_id
-        self.rows       = rows if rows is not None else []
+    width:      int
+    fill:       float
+    session_id: str
+    rows:       list[RowSpec] = field(default_factory=list)
 
 
 def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) -> None:
@@ -434,6 +433,25 @@ def workflow_divider_col(width: int) -> int:
     return 3 + half_w + 2
 
 
+def _append_subagent_cohort_rows(
+    rows:  list[RowSpec],
+    r:     Renderer,
+    visible_subs: list[RunningSubagent],
+    width: int,
+) -> None:
+    """Oneline subagent cohort stack shared by `build_narrow`'s fallback branch and `build_medium`."""
+    cells   = subagent_cells(visible_subs)
+    name_w  = oneline_name_width(cells)
+    model_w = tree_model_width(cells)
+    for sub, prefix, depth in cells:
+        for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
+                                   stats_col=100 if width >= 125 else None,
+                                   tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
+                                   oneline_model_w=model_w).split('\n'):
+            rows.append(RowSpec('content', content=line))
+    rows.append(RowSpec('separator_dim'))
+
+
 def build_workflow_rows(
     view: SessionView,
     width: int,
@@ -519,14 +537,7 @@ def build_narrow(
     soft_limit: int = DEFAULT_SOFT_LIMIT,
 ) -> LayoutSpec:
     session = view.session
-
-    ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / soft_limit, 1.0)
-
-    effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    pill_pct      = r._model_bg_pct(effort_for_bg)
-    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0, 0, 0), (0, 0, 0))
+    ctx, fill, effort_for_bg, pill_pct, pill_anchor, pill_shift = _ctx_fill_pill(session, r, soft_limit)
 
     max_right    = max(8, width // 2)
     rate_text, right_text, right_w = r.model_right_section_compact(
@@ -598,16 +609,7 @@ def build_narrow(
                 rows.append(RowSpec('content', content=line))
             rows.append(RowSpec('separator_dim'))
         if visible_subs:
-            cells = subagent_cells(visible_subs)
-            name_w = oneline_name_width(cells)
-            model_w = tree_model_width(cells)
-            for sub, prefix, depth in cells:
-                for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                           stats_col=100 if width >= 125 else None,
-                                           tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                           oneline_model_w=model_w).split('\n'):
-                    rows.append(RowSpec('content', content=line))
-            rows.append(RowSpec('separator_dim'))
+            _append_subagent_cohort_rows(rows, r, visible_subs, width)
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
     if wf_rows:
         rows.extend(wf_rows)
@@ -631,14 +633,7 @@ def build_medium(
     soft_limit: int = DEFAULT_SOFT_LIMIT,
 ) -> LayoutSpec:
     session = view.session
-
-    ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / soft_limit, 1.0)
-
-    effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    pill_pct      = r._model_bg_pct(effort_for_bg)
-    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
+    ctx, fill, effort_for_bg, pill_pct, pill_anchor, pill_shift = _ctx_fill_pill(session, r, soft_limit)
 
     git          = view.git
     line_context = r.context_line_compact(ctx, width - 3, soft_limit)
@@ -688,16 +683,7 @@ def build_medium(
             rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     if visible_subs:
-        cells = subagent_cells(visible_subs)
-        name_w = oneline_name_width(cells)
-        model_w = tree_model_width(cells)
-        for sub, prefix, depth in cells:
-            for line in r.subagent_row(sub, width - 4, twoline=width > 100, session_inout=0,
-                                       stats_col=100 if width >= 125 else None,
-                                       tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                       oneline_model_w=model_w).split('\n'):
-                rows.append(RowSpec('content', content=line))
-        rows.append(RowSpec('separator_dim'))
+        _append_subagent_cohort_rows(rows, r, visible_subs, width)
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
     if wf_rows:
         rows.extend(wf_rows)
@@ -729,13 +715,7 @@ def build_wide(
     elapsed   = view.elapsed
     git       = view.git
 
-    ctx          = session.context_window
-    total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill         = min(total_tokens / soft_limit, 1.0)
-
-    effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    pill_pct      = r._model_bg_pct(effort_for_bg)
-    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
+    ctx, fill, effort_for_bg, pill_pct, pill_anchor, pill_shift = _ctx_fill_pill(session, r, soft_limit)
 
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     session_inout = view.session_inout
@@ -1405,10 +1385,9 @@ def render_layout(spec: LayoutSpec, r: Renderer, timing: str = '', version: str 
             lines.append(r.border_top(spec.width, spec.session_id, downs=row.downs, fill=spec.fill, pill=row.pill, labels=tuple(row.labels)))
         elif row.kind == 'bottom_border':
             lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill, timing=timing, version=version))
-        elif row.kind == 'separator':
-            lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill, labels=tuple(row.labels)))
-        elif row.kind == 'separator_seam':
-            # Static->dynamic split: full-brightness solid rule, not dotted-dim.
+        elif row.kind in ('separator', 'separator_seam'):
+            # 'separator_seam' (static->dynamic split) is a full-brightness solid rule,
+            # not dotted-dim, but renders identically to a plain 'separator' otherwise.
             lines.append(r.border_separator(spec.width, ups=row.ups, downs=row.downs, fill=spec.fill, labels=tuple(row.labels)))
         elif row.kind == 'separator_dim':
             lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge, labels=tuple(row.labels)))

@@ -10,6 +10,7 @@ from yas.constants import (
     RAINBOW_PALETTE,
     BG_LUM_THRESHOLD,
     BarChars,
+    ITALIC_OFF,
     LIVE_DIM,
     RESET,
     SPARK_RAMP,
@@ -35,22 +36,16 @@ def rainbow_at(step: int, offset: int = 0) -> str:
     return f'\033[38;5;{color}m'
 
 
-def rainbow_color() -> str:
-    return rainbow_at(rainbow_step())
-
-
 # ---------------------------------------------------------------------------
 # Model key
 # ---------------------------------------------------------------------------
 
+_MODEL_KEYS = ('opus', 'sonnet', 'haiku', 'fable', 'mythos')
+
+
 def model_key(name: str) -> str:
     m = name.lower()
-    if 'opus'   in m: return 'opus'
-    if 'sonnet' in m: return 'sonnet'
-    if 'haiku'  in m: return 'haiku'
-    if 'fable'  in m: return 'fable'
-    if 'mythos' in m: return 'mythos'
-    return 'other'
+    return next((k for k in _MODEL_KEYS if k in m), 'other')
 
 
 # trailing bracket suffix, e.g. 'sonnet[1m]' -> '[1m]'
@@ -151,14 +146,14 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
             parts.append('\033[1m' if bold else '\033[22m')
             prev_bold = bold
         if italic != prev_italic:
-            parts.append('\033[3m' if italic else '\033[23m')
+            parts.append('\033[3m' if italic else ITALIC_OFF)
             prev_italic = italic
         parts.append(ch)
     parts.append('\033[49m')
     if prev_bold:
         parts.append('\033[22m')
     if prev_italic:
-        parts.append('\033[23m')
+        parts.append(ITALIC_OFF)
     parts.append('\033[39m')
     return ''.join(parts)
 
@@ -194,37 +189,34 @@ class GradientEngine:
         self.SPARK_STOPS = t.spark_stops
         self.BORDER_OFF  = t.border_off
 
-    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
+    @staticmethod
+    def _lerp_stops(
+        stops: tuple[tuple[float, tuple[int, int, int]], ...],
+        t:     float,
+        dim:   float,
+    ) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
-        for i in range(len(self.SPARK_STOPS) - 1):
-            t0, c0 = self.SPARK_STOPS[i]
-            t1, c1 = self.SPARK_STOPS[i + 1]
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
             if t <= t1:
                 u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
                 r = int((c0[0] + (c1[0] - c0[0]) * u) * dim)
                 g = int((c0[1] + (c1[1] - c0[1]) * u) * dim)
                 b = int((c0[2] + (c1[2] - c0[2]) * u) * dim)
                 return r, g, b
-        r, g, b = self.SPARK_STOPS[-1][1]
+        r, g, b = stops[-1][1]
         return int(r * dim), int(g * dim), int(b * dim)
+
+    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
+        return self._lerp_stops(self.SPARK_STOPS, t, dim)
 
     def spark_color(self, t: float, dim: float = 1.0) -> str:
         r, g, b = self.spark_rgb(t, dim)
         return f'\033[38;2;{r};{g};{b}m'
 
     def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
-        t = max(0.0, min(1.0, t))
-        for i in range(len(self.GRAD_STOPS) - 1):
-            t0, c0 = self.GRAD_STOPS[i]
-            t1, c1 = self.GRAD_STOPS[i + 1]
-            if t <= t1:
-                u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
-                r = int((c0[0] + (c1[0] - c0[0]) * u) * dim)
-                g = int((c0[1] + (c1[1] - c0[1]) * u) * dim)
-                b = int((c0[2] + (c1[2] - c0[2]) * u) * dim)
-                return r, g, b
-        r, g, b = self.GRAD_STOPS[-1][1]
-        return int(r * dim), int(g * dim), int(b * dim)
+        return self._lerp_stops(self.GRAD_STOPS, t, dim)
 
     def gradient_color(self, t: float, dim: float = 1.0) -> str:
         r, g, b = self.gradient_rgb(t, dim)

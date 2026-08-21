@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from yas.constants import subagent_is_terminal, subagent_status
+from yas.render.tasks_view import fmt_duration
 from yas.render.text import fmt_tok, fmt_tok_fixed
 
 
@@ -28,14 +29,7 @@ def subagent_dur_str(sub: object, now: float) -> str:
         dur = max(0.0, sub.end_ts - run_start)  # type: ignore[attr-defined]
     else:
         dur = max(0.0, now - run_start) if run_start > 0 else 0.0
-    total_s = int(dur)
-    minutes, seconds = divmod(total_s, 60)
-    if minutes >= 60:
-        hours, minutes = divmod(minutes, 60)
-        clock = f'{hours}:{minutes:02d}:{seconds:02d}'
-    else:
-        clock = f'{minutes}:{seconds:02d}'
-    return clock.rjust(5)
+    return fmt_duration(dur).rjust(5)
 
 
 def subagent_type_label(sub: object) -> str:
