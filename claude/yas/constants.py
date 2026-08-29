@@ -6,31 +6,20 @@ import re
 from pathlib import Path
 
 
-# Keep in sync with pyproject.toml's [project] version — pyproject isn't
-# shipped with the runtime copy under ~/.claude, so the value lives here too.
+# Keep in sync with pyproject.toml's [project] version.
 VERSION    = '0.8.1'
-# Bumped by any future on-disk relayout under yas/; stamped into
-# state/version.json by yas.migrate so a future migration can detect and
-# convert an older layout.
 LAYOUT_SCHEMA_VERSION = 1
 
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 
 # --- YAS on-disk layout ---
-# No module outside this one may import CLAUDE_DIR directly (i.e.
-# `from yas.constants import CLAUDE_DIR`) — always go through the helpers
-# below so a test's `monkeypatch.setattr(constants, 'CLAUDE_DIR', tmp)`
-# reaches every path. None of these helpers may be evaluated at import time
-# (including as a function default argument) — call them at use time only.
+# Always go through the helpers below, never `from yas.constants import
+# CLAUDE_DIR` directly, so tests can monkeypatch CLAUDE_DIR. Not evaluable at
+# import time (including as a default arg) — call at use time only.
 
 
 def yas_root() -> Path:
-    """Root of the YAS on-disk layout under CLAUDE_DIR: yas/cache/,
-    yas/state/, yas/state/runtime/,
-    yas/state/signals/, yas/state/sessions/. `yas.toml` itself lives directly
-    under CLAUDE_DIR and is deliberately excluded from this tree — it is
-    user-authored config, not YAS-managed runtime/cache state."""
     return CLAUDE_DIR / 'yas'
 
 
@@ -104,11 +93,7 @@ def settings_path() -> Path:
 
 MIN_WIDTH    = 40
 DEFAULT_MAX_WIDTH    = 140
-# Repo-levels (not path segments) the OpenSpec downward scan descends below
-# cwd before pruning. 1 (the historic hardcoded behavior) finds a nested
-# openspec/ in a repo directly below cwd; 0 disables the downward scan
-# entirely (only cwd's own upward-found openspec/ is considered). See
-# yas.info.openspec for the repo-levels -> path-segments conversion.
+# Repo-levels the OpenSpec downward scan descends below cwd before pruning.
 DEFAULT_OPENSPEC_SCAN_DEPTH = 1
 DEFAULT_SOFT_LIMIT   = 150_000
 DEFAULT_TOKEN_WINDOW = 60.0
@@ -117,124 +102,57 @@ DEFAULT_SHOW_DAY_STATS = True
 DEFAULT_SHOW_TOOL_USES = False
 DEFAULT_JUSTIFY        = False
 DEFAULT_LABELS         = False
-# Context-state word (ported from Dumbometer, MIT). Opt-in: off by default so
-# the context line's byte output is unchanged unless explicitly enabled.
+# Context-state word (ported from Dumbometer, MIT). Opt-in.
 DEFAULT_CONTEXT_STATE      = False
 DEFAULT_CONTEXT_LABELS:     tuple[str, ...] = ('Smart', 'Coasting', 'Foggy', 'Cooked', 'Dumb')
 DEFAULT_CONTEXT_THRESHOLDS: tuple[int, ...] = (25, 50, 70, 90)
 TRANSCRIPT_CACHE_VERSION   = 1
-TRANSCRIPT_CACHE_KEEP_SECONDS = 86400.0  # 24 h — comfortably beyond ABANDONED_HORIZON_SECONDS = 1800
+TRANSCRIPT_CACHE_KEEP_SECONDS = 86400.0  # 24h, > ABANDONED_HORIZON_SECONDS
 TRANSCRIPT_CACHE_SUBKEY_MAX = 4          # max sub-keys retained per transcript per result kind
 DEFAULT_TRANSCRIPT_CACHE   = True
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
-# Box width at/above which the wide layout's workflow cohort pairs agents into
-# two side-by-side columns (each ~half the inner width minus the 5-col divider).
-# Below this the agents stack single-column. Set under DEFAULT_MAX_WIDTH=140 so
-# the two-column layout is actually reachable in a default-config wide terminal.
+# Box width at/above which build_wide's workflow cohort pairs agents into two
+# side-by-side columns instead of stacking single-column.
 TWO_COL_WF_WIDTH = 120
-# The wide layout's checklist/subagents side-by-side split always renders the
-# subagent side as a tree (parent/child rows with ├/└ branch prefixes), so
-# the plan/task-list column is fixed at this width instead of the usual
-# 45%-of-inner cap, giving the subagent tree the rest of a wide box instead
-# of being starved by an even split. Still clamped to
-# the 45%-of-inner ceiling on narrow terminals so it degrades to the old
-# behavior when the box is too small to justify a fixed-width left column.
-# 68 (down from an earlier 78) hands the subagent side ~10 more columns on
-# typical wide boxes while still leaving the plan column readable. It is now a
-# *ceiling* rather than a fixed size: the column is sized to the longest
-# rendered plan line plus SUBAGENT_TREE_PLAN_PAD, so a short plan hands its
-# slack to the subagent tree instead of rendering a band of trailing padding.
+# Ceiling on the wide layout's checklist/subagents side-by-side split's plan
+# column (subagent side always renders as a tree). Sized to the longest
+# rendered plan line + SUBAGENT_TREE_PLAN_PAD, clamped to the usual
+# 45%-of-inner cap on narrow terminals.
 SUBAGENT_TREE_PLAN_WIDTH = 68
-# Trailing pad, in cells, between the longest plan line and the column divider
-# in the tree-mode side-by-side split. `zip_columns` already puts one space on
-# each side of the `│`, so this is the extra breathing room on top of that.
+# Trailing pad between the longest plan line and the column divider.
 SUBAGENT_TREE_PLAN_PAD = 1
-# Narrow-tier plan + subagent side-by-side (build_narrow). Unlike the wide
-# tier's tree-mode split, both columns use their *one-line* forms
-# (task_row's non-compact per-item list, subagent_row's oneline collapse) —
-# there is no room at 40-54 total columns for the twoline tree form.
-#
-# SUBAGENT_ONELINE_MIN_W: absolute floor for the subagent (right) column
-# below which `Renderer.subagent_row`'s oneline form degrades to a double-
-# ellipsis mess (the front cluster's own emergency `_middle_ellipsis` kicks
-# in on top of the name/model fields already being crushed) rather than a
-# single clean truncation. Measured empirically: rendering a one-subagent
-# cohort (type 'Explore', model 'sonnet') at content widths 10-39 shows the
-# front cluster garble below 26 ('Exp…s… · 1.00K') and settle into a single
-# clean truncation at 26 ('Explore · s… · 1.00K'); the fully untruncated form
-# ('Explore · sonnet · 1.00K') needs 30. 26 is picked as the floor — cohorts
-# with longer type/model labels only need more, never less.
+# build_narrow's plan + subagent side-by-side both use one-line forms (no
+# room for the tree form at 40-54 total columns).
+# Floor for the subagent (right) column below which the oneline form garbles.
 SUBAGENT_ONELINE_MIN_W = 26
-# PLAN_ONELINE_MIN_W: floor for the plan (left) column below which the
-# per-item checklist (`task_row(..., compact=False)`) still renders something
-# legible (glyph + item number + a couple of subject characters + ellipsis)
-# rather than being crushed to an empty subject. task_row degrades gracefully
-# at any width (it never garbles like the subagent oneline form does), so
-# this floor is a readability choice, not a hard failure boundary.
+# Floor for the plan (left) column's per-item checklist legibility.
 PLAN_ONELINE_MIN_W = 12
-# Total `width` floor below which build_narrow's plan + subagent split falls
-# back to stacking (plan above subagents) instead of side-by-side: the inner
-# content area (width - 4) minus the 3-col ' │ ' divider must fit both
-# column floors above. width - 4 - 3 >= PLAN_ONELINE_MIN_W +
-# SUBAGENT_ONELINE_MIN_W => width >= 7 + 12 + 26 = 45.
+# width - 4 - 3 >= PLAN_ONELINE_MIN_W + SUBAGENT_ONELINE_MIN_W floor below
+# which build_narrow's split falls back to stacking.
 NARROW_SIDE_BY_SIDE_MIN_WIDTH = PLAN_ONELINE_MIN_W + SUBAGENT_ONELINE_MIN_W + 7
-# Floor for the wide layout's three-segment tokens │ cost │ rate row. Below this
-# the row cannot hold both columns at full size plus the rate/spark leader, so
-# build_wide drops it for the compact context line instead of overflowing the
-# box. The exact, content-aware minimum is computed per-render by
-# Renderer.tokens_cost (its ``min_width`` return) — this constant is a flat
-# floor on top of that. Deliberately pinned to MEDIUM_WIDTH (the box width
-# where build_wide itself starts) rather than a higher magic number: the old
-# value of 85 opened an 80-84 band where the plugin row (gated only by
-# MEDIUM_WIDTH) had already appeared but the context/tokens row was still
-# degraded to the compact form — an inconsistent shed ladder. Aligning the
-# two floors means both upgrade together at the same box width.
+# Floor for full-width display of `tokens │ cost │ rate` row; pinned to
+# MEDIUM_WIDTH so it upgrades in step with the plugin row's own gate.
 TOKENS_COST_MIN_WIDTH = MEDIUM_WIDTH
-# Cap, in columns, on each individually-distributed justify "extra" slot in
-# the wide top row (path/elapsed/5h/7d/cache breathing room — see
-# `build_wide`'s justify block). Below `Renderer.JUSTIFY_PAD_CAP=4`'s sibling
-# for the tokens/cost row, this is the same idea applied one level up: without
-# a cap, `total_slack` (which scales linearly with `width` once nothing is
-# being shed — proven unbounded above width~150 by direct comparison against
-# the pre-refactor renderer) turns into several UNCAPPED, individually-large
-# blank runs scattered across the row, one per stat block, each growing
-# without bound as the box widens. Capping every slot except the last funnels
-# any slack beyond what these slots can absorb into a single trailing run
-# (`last_extra`, ahead of the model pill) instead of multiple scattered ones.
-# 8 is chosen so the per-section inner-gap-widening feature (separators
-# widen up to a 3-char cap — 4 inner columns for the two-separator 5h
-# section) still reaches its own cap before any outer padding is left over,
-# while the residual outer padding this constant permits (well under 6 cols
-# per side) stays below the width-gap audit's own gap-detection threshold.
+# Cap per individually-distributed justify "extra" slot in the wide top row,
+# so unbounded slack funnels into one trailing run instead of many scattered
+# blank runs as the box widens.
 TOPROW_JUSTIFY_OUTER_CAP = 8
-# Floor for the wide layout's four-segment tokens │ lines │ cost │ rate row.
-# This constant gates ONLY the lines segment; TOKENS_COST_MIN_WIDTH must stay
-# at MEDIUM_WIDTH because bumping it would regress every terminal below 103
-# into the compact context line (losing the cost/rate row entirely, not just
-# the lines).
+# Floor for the wide layout's four-segment tokens │ lines │ cost │ rate row
+# (gates only the lines segment; TOKENS_COST_MIN_WIDTH stays at MEDIUM_WIDTH).
 LINES_SEGMENT_MIN_WIDTH = 103
 
-# Minimum gap between the narrow tasks-header's left cluster (glyph + done/total)
-# and its right-anchored active-task timer. The timer is flush to the content
-# edge to use the otherwise-dead trailing space as a second anchor (mirroring the
-# subagent rows' two-anchor read); this floor guarantees a readable separation
-# and triggers the middle-ellipsis fallback before left + timer would collide.
+# Minimum gap between the narrow tasks-header's left cluster and its
+# right-anchored active-task timer before middle-ellipsis kicks in.
 TASK_HEADER_RIGHT_GAP_MIN = 2
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
-# Terminal control characters: C0 (0x00-0x08, 0x0b-0x1f), DEL (0x7f), and C1
-# (0x80-0x9f). This range includes ESC (0x1b) and BEL (0x07) — the introducers
-# and terminators for OSC/CSI sequences — so stripping it neutralizes OSC-52
-# clipboard writes, OSC-0/2 title spoofs, and any other escape injection from
-# untrusted input. TAB (0x09) and LF (0x0a) are deliberately preserved.
+# C0/DEL/C1 control chars (covers ESC/BEL, the OSC/CSI introducers) — strips
+# escape-injection from untrusted input. TAB/LF preserved.
 _CTRL_RE = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
 
 
 def _sanitize(s: str) -> str:
-    """Strip terminal control characters from an untrusted, host-/repo-supplied
-    string at capture time, before it can reach stdout. Printable text
-    (including non-ASCII/CJK) passes through byte-for-byte unchanged."""
     return _CTRL_RE.sub('', s)
 
 FIVE_HOUR_MINUTES        = 300
@@ -259,12 +177,11 @@ FAINT   = '\033[2m'
 ITALIC  = '\033[3m'
 ITALIC_OFF = '\033[23m'
 BOLD_OFF   = '\033[22m'
-STRIKE  = '\033[9m'   # SGR strikethrough on  (finished-subagent task description)
+STRIKE  = '\033[9m'   # SGR strikethrough on
 UNSTRIKE = '\033[29m'  # SGR strikethrough off
 
-# Tools excluded from the per-tool tool_use counts row: todo/UI-plumbing tools,
-# not "work". `Task` is deliberately NOT in this set — it represents a subagent
-# delegation and is a meaningful main-column entry.
+# Tools excluded from the per-tool tool_use counts row (UI-plumbing, not
+# "work"). `Task` stays included — it's a meaningful subagent delegation.
 META_EXCLUDE_TOOLS = frozenset({'TodoWrite', 'ExitPlanMode', 'AskUserQuestion'})
 
 # Plain-ASCII caption for the tool-counts separator. The label overlay applies
@@ -397,13 +314,8 @@ LABEL_ABBREVIATIONS: dict[str, str] = {
     'input sess/day':     'in sess/day',
 }
 
-# ASCII fallbacks for the non-ASCII glyphs above. Used by ascii render mode
-# (Config.ascii_mode / YAS_ASCII_MODE) to keep the statusline legible in
-# terminals without a Nerd Font. This table now covers EVERY non-ASCII char the
-# statusline renders \u2014 not just Nerd Font PUA icons, but also the box-drawing
-# frame, block/sparkline elements, arrows, and inline punctuation. Each char
-# maps to exactly ONE ASCII char so visible width \u2014 and therefore the
-# hand-tuned border/elbow column math \u2014 is preserved.
+# ASCII fallbacks for every non-ASCII glyph the statusline renders (ascii
+# render mode). Each maps to exactly one ASCII char to preserve visible width.
 ASCII_GLYPHS: dict[str, str] = {
     ICON_COST:          '$',
     ICON_TOK_RATE:      '~',
@@ -449,15 +361,8 @@ ASCII_GLYPHS: dict[str, str] = {
     BOX_ARC_TR:         '+',
     BOX_ARC_BR:         '+',
     BOX_ARC_BL:         '+',
-    # GLYPH_CONTINUATION and GLYPH_WF_SUMMARY share the same U+2514 codepoint
-    # ('└') — both draw the same elbow shape (line-2 activity continuation /
-    # workflow-run summary / Subagent Tree View last-child prefix, the latter
-    # a raw literal in `layout.subagent_cells` since it's plain box-drawing,
-    # not a PUA icon). Ascii mode collapses this codepoint to a single 'L'
-    # for all three, and treats the tree's mid-sibling '├' the same way (no
-    # sibling/last-child distinction ascii-side) — rather than the '+' a
-    # generic box-corner would suggest. '├' needs its own entry since it has
-    # no other constant.
+    # GLYPH_CONTINUATION/GLYPH_WF_SUMMARY/tree '├' all fold to 'L' in ascii
+    # mode (no sibling/last-child distinction ascii-side).
     GLYPH_CONTINUATION: 'L',
     GLYPH_WF_SUMMARY:   'L',
     '├':                'L',  # ├ BOX DRAWINGS LIGHT VERTICAL AND RIGHT
@@ -487,23 +392,16 @@ ASCII_GLYPHS: dict[str, str] = {
     PILL_BOT:           '-',
     PILL_LEFT:          '|',
     PILL_RIGHT:         '|',
-    # Corners map to '+' (not ' ') so a pill's start/end column never blanks
-    # a structural elbow/corner it happens to coincide with -- '+' is exactly
-    # what BOX_T_DOWN/BOX_T_UP/BOX_ARC_T* already fold to in ascii mode, so
-    # the pill corner reads as a normal box corner whether or not it lines up
-    # with a divider underneath.
+    # Corners map to '+' so a pill's start/end column never blanks a
+    # structural elbow/corner it coincides with.
     PILL_TL:            '+',
     PILL_TR:            '+',
     PILL_BL:            '+',
     PILL_BR:            '+',
 }
 
-# Sparkline density ramp fallbacks (U+2581..U+2588), low->high. Some of these
-# block codepoints already have constant-level mappings above (\u2584=PILL_TOP,
-# \u2586=BarChars.HEAVY, \u2588=BarChars.FILLED); the explicit ramp gives every block a
-# monotonic ascii density step, and the `|` merge below lets these win for the
-# shared codepoints so the rendered ramp stays consistent. Purely cosmetic \u2014
-# every entry is width-1, so no column moves either way.
+# Sparkline density ramp fallbacks (U+2581..U+2588), low->high. Wins over any
+# shared-codepoint entries above so the rendered ramp stays monotonic.
 _RAMP_FALLBACK = {0x2581:'_', 0x2582:'.', 0x2583:':', 0x2584:'-',
                   0x2585:'=', 0x2586:'+', 0x2587:'*', 0x2588:'#'}
 
@@ -511,13 +409,9 @@ _RAMP_FALLBACK = {0x2581:'_', 0x2582:'.', 0x2583:':', 0x2584:'-',
 # no entry. Ramp entries win for the shared block codepoints (see above).
 ASCII_TRANSLATE = {ord(g): a for g, a in ASCII_GLYPHS.items()} | _RAMP_FALLBACK
 
-# Unicode (no-Nerd-Font) fallbacks. `unicode` glyph_mode replaces ONLY the Nerd
-# Font Private Use Area icon glyphs with non-PUA, width-1 BMP equivalents, while
-# leaving box-drawing, block/sparkline, arrow, and punctuation glyphs (which are
-# standard Unicode) intact. Keys are the 21 PUA ICON_*/GLYPH_* constants plus
-# BarChars.MID; every value is a single non-PUA char (escaped so the bytes
-# survive diff/chat round-trips). Geometric-Shapes/Arrows are preferred over
-# emoji-presentation symbols, which many terminals render double-width.
+# Unicode (no-Nerd-Font) fallbacks. `unicode` glyph_mode replaces only the
+# PUA icon glyphs with non-PUA, width-1 BMP equivalents; box-drawing, block,
+# arrow, and punctuation glyphs pass through unchanged.
 UNICODE_PUA: dict[str, str] = {
     ICON_COST:          '$',  # $  currency-usd
     ICON_TOK_RATE:      '◷',  # gauge
@@ -552,22 +446,14 @@ UNICODE_PUA: dict[str, str] = {
 # Pre-built {codepoint: char} map for str.translate (used by `unicode` glyph_mode).
 UNICODE_TRANSLATE = {ord(g): u for g, u in UNICODE_PUA.items()}
 
-# GitHub-paste-safe mode. `github` glyph_mode folds EVERY browser-wide glyph
-# (East-Asian-Width Ambiguous/Wide/Fullwidth) and every Nerd Font PUA codepoint
-# to a width-1, EAW-narrow (N/Na/H) or ASCII replacement, so a pasted statusline
-# keeps its column geometry in a proportional-blind monospace web font (GitHub,
-# Slack, etc.) where Ambiguous chars otherwise render double-width. Unlike
-# `unicode` (which only swaps PUA icons), `github` also ASCII-folds the
-# box-drawing frame and block ramp, because those are EAW-Ambiguous in a browser.
-#
-# PUA icons keep the prettier `unicode` substitutions where those are already
-# EAW-narrow; the five whose `unicode` target is EAW-Ambiguous get a narrow
-# override below (verified against unicodedata.east_asian_width).
+# GitHub-paste-safe mode. `github` glyph_mode folds every EAW-Ambiguous/Wide
+# glyph and PUA codepoint to a width-1 EAW-narrow or ASCII replacement, so a
+# pasted statusline keeps its column geometry in a proportional-blind
+# monospace web font. Also ASCII-folds box-drawing/block ramp beyond what
+# `unicode` mode does.
 GITHUB_PUA: dict[str, str] = dict(UNICODE_PUA)
 
-# EAW-narrow overrides for icons whose `unicode` substitution is EAW-Ambiguous
-# (would render double-width in a browser), plus one non-PUA nicety. Every target
-# is verified width-1 and EAW N/Na/H so the C1 invariant holds.
+# EAW-narrow overrides for icons whose `unicode` substitution is EAW-Ambiguous.
 GITHUB_ICON_OVERRIDE: dict[str, str] = {
     GLYPH_MODEL:        '⊞',  # ⊞ squared plus      (was ▦ U+25A6, EAW=A)
     GLYPH_TASKS:        '⊟',  # ⊟ squared minus     (was ▤ U+25A4, EAW=A)
@@ -588,70 +474,36 @@ GITHUB_TRANSLATE: dict[int, str] = (
     | {ord(g): u for g, u in GITHUB_ICON_OVERRIDE.items()}
 )
 
-# Workflow cohort thresholds. A run is kept visible while any agent transcript
-# was written within WORKFLOW_LIVENESS_SECONDS (longer than the subagent
-# cohort's windows so a run rides through between-phase lulls). At most
-# WORKFLOW_AGENT_CAP agent rows render per run and WORKFLOW_RUN_CAP run blocks
-# render concurrently; overflow is summarised, never dropped silently.
+# Workflow cohort thresholds. A run stays visible while any agent transcript
+# was written within WORKFLOW_LIVENESS_SECONDS. Overflow past the caps is
+# summarised, never dropped silently.
 WORKFLOW_LIVENESS_SECONDS = 120
 WORKFLOW_AGENT_CAP        = 6
 WORKFLOW_RUN_CAP          = 2
 
-# At most SUBAGENT_DISPLAY_CAP subagent rows render in the standalone cohort;
-# the layout builders keep the most recent (latest-started) rows and drop the
-# older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
+# Max standalone-cohort subagent rows; oldest overflow is dropped.
 SUBAGENT_DISPLAY_CAP      = 6
 
-# A terminal (completed/killed/stopped/failed) subagent row is retained for at
-# most this many seconds after its end_ts before it drops from the cohort
-# entirely, independent of the display-cap eviction below (see
-# layout.select_visible_cohort).
+# Seconds a terminal subagent row is retained after end_ts before dropping.
 SUBAGENT_RETENTION_SECONDS = 120
 
-# Tree-single rows: the description/activity text columns are now the
-# ELASTIC side of the layout — they truncate first as the terminal narrows,
-# and the lines/share%/tok stats cluster is protected (it sheds only once the
-# description is already at its floor; see layout.tree_columns and
-# Renderer.subagent_row's "anchored" branch). SUBAGENT_DESC_FLOOR is that
-# floor: just enough for a recognisable truncated prefix plus the ellipsis
-# glyph, not a guarantee to pad every row up to. The column otherwise grows
-# to `min(cohort's longest actual description, available width)` — measured
-# per cohort by `layout.tree_desc_content_width` — so a wide terminal never
-# leaves a description artificially truncated OR padded out with a dead
-# gutter before the stats cluster.
-#
-# Replaces the old SUBAGENT_DESC_MIN_WIDTH (a hard 70-col guarantee, raised
-# from 45 as part of an earlier rebalance) now that the shed priority is
-# inverted: a large hard minimum doesn't make sense once description is the
-# first thing to give ground under width pressure rather than the last.
+# Tree-single rows: description/activity is the elastic side of the layout
+# (truncates first); the stats cluster is protected. SUBAGENT_DESC_FLOOR is
+# the minimum for a recognisable truncated prefix + ellipsis.
 SUBAGENT_DESC_FLOOR            = 16
-# Widest the agent-name (type) column may grow in subagent rows — a longer
-# label truncates with an ellipsis so one pathological agent type can't push
-# the model/description columns off the row.
+# Widest the agent-name (type) column may grow before ellipsis-truncating.
 SUBAGENT_NAME_MAX              = 50
-# Constant gap (visible cols) between the stats/model cluster and the
-# activity snippet in tree-single rows, once the model label is padded to the
-# cohort's widest model width (see renderer.Renderer.subagent_row). Exactly
-# the ' · ' separator rendered in the gap — no extra padding.
+# Gap (visible cols) between the stats/model cluster and activity snippet.
 SUBAGENT_STATS_ACTIVITY_GAP    = 3
-# Tree-view box-drawing prefix staircase (see layout.subagent_cells): a
-# top-level agent's connector is padded to TREE_PREFIX_BASE_W visible
-# columns, each depth below that adds TREE_PREFIX_STEP_W more — so names
-# indent 2 columns per level rather than all lining up in one shared
-# gutter. Both include the single trailing separator space before the name.
+# Tree-view prefix staircase: base width for a top-level connector, plus
+# per-depth step (2 cols indent per level).
 TREE_PREFIX_BASE_W             = 4
 TREE_PREFIX_STEP_W             = 2
 
-# Four-state subagent lifecycle: 'running' (live), 'completed' (normal finish),
-# 'killed'/'stopped' (ended early by intent — same glyph, see
-# subagent_marker_glyph), 'failed' (ended by error). `RunningSubagent.status`
-# is the source of truth once populated; these helpers fall back to the
-# original end_ts-only binary (running/completed) for any object that doesn't
-# carry the attribute yet, so callers never need an isinstance/hasattr guard.
+# Four-state subagent lifecycle: running/completed/killed/stopped/failed.
+# `RunningSubagent.status` is the source of truth; falls back to the
+# end_ts-only binary for objects without the attribute.
 def subagent_status(sub: object) -> str:
-    """Resolve a subagent's lifecycle state ('running'/'completed'/'killed'/
-    'stopped'/'failed'), defaulting to the end_ts binary when `.status` is
-    absent."""
     status = getattr(sub, 'status', None)
     if status:
         return str(status)
@@ -659,14 +511,10 @@ def subagent_status(sub: object) -> str:
 
 
 def subagent_is_terminal(status: str) -> bool:
-    """True for any non-running lifecycle state."""
     return status != 'running'
 
 
 def subagent_marker_glyph(status: str) -> str:
-    """The single-glyph row marker for a lifecycle state ('' while running —
-    the caller supplies the live ▶/↺ marker itself since that also depends on
-    resume state)."""
     return {
         'completed': GLYPH_SUBAGENT_DONE,
         'killed':    GLYPH_SUBAGENT_ENDED,
@@ -674,14 +522,11 @@ def subagent_marker_glyph(status: str) -> str:
         'failed':    GLYPH_SUBAGENT_FAILED,
     }.get(status, '')
 
-# Maximum lines to scan from the head of a transcript when searching for a
-# /clear marker. Keeps the lookup O(1) even on large transcripts.
+# Max lines scanned from a transcript's head for a /clear marker.
 CLEAR_SCAN_MAX_LINES      = 30
 
-# Workflow run-header phase-trail layout. WF_NAME_MIN is the minimum run-name
-# width preserved before the inline phase trail truncates with `…`; WF_PHASE_GAP
-# is the spaces reserved between the name and the trail (the header prepends
-# two). WF_PHASE_DOT separates phases in the trail.
+# Workflow run-header phase-trail layout: min run-name width before the
+# trail truncates, and the gap reserved before it.
 WF_NAME_MIN   = 12
 WF_PHASE_GAP  = 2
 

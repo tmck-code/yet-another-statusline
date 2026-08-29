@@ -1,19 +1,9 @@
-"""Session data-classes and parser helpers.
-
-The only package import is the leaf-level `_sanitize`/`settings_path` from
-yas.constants (a stdlib-only module, so no import cycle); everything else is
-stdlib. HOME (the user's home dir, distinct from CLAUDE_DIR) stays local to
-this module for short_pwd's `~` collapsing.
-TokenAccounting (used by Model.cost_rates) is imported lazily inside the
-property so this module can be loaded before tokens.py exists; it will resolve
-once task 4.1 creates claude/yas/tokens.py.
-"""
+"""Session data-classes and parser helpers."""
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -44,14 +34,6 @@ def _as_str(v: object, default: str = '') -> str:
     return default
 
 
-def _parse_iso_to_epoch(ts: str) -> float:
-    try:
-        if ts.endswith('Z'):
-            ts = ts[:-1] + '+00:00'
-        return datetime.fromisoformat(ts).timestamp()
-    except (ValueError, TypeError):
-        return 0.0
-
 # models ----------------------------------------
 
 class Model(NamedTuple):
@@ -71,7 +53,7 @@ class Model(NamedTuple):
 
     @property
     def cost_rates(self) -> tuple[float, float]:
-        from yas.tokens import TokenAccounting  # wired up in task 4.1
+        from yas.tokens import TokenAccounting
         return TokenAccounting.rates_for(self.display_name or self.id)
 
 
@@ -166,10 +148,7 @@ class Workspace:
     @property
     def plugins(self) -> str:
         seen: dict[str, None] = {}
-        # Only the user's own config dir is read. project_dir/.claude/settings.json
-        # is attacker-controlled for a cloned repo — reading it was both an
-        # unexpected trust-boundary read and an escape-injection sink (SEC-2).
-        candidates = [settings_path()]
+        candidates = [settings_path()]  # only the user's own config dir; project settings.json is untrusted
         for sf in candidates:
             if not sf.is_file():
                 continue
@@ -318,8 +297,7 @@ class RateLimits:
 
 
 class SessionInfo:
-    # No __slots__: a test splats **session.__dict__ to clone a SessionInfo, so
-    # the instance must keep a real __dict__.
+    # no __slots__: a test splats **session.__dict__ to clone a SessionInfo
 
     def __init__(
         self,

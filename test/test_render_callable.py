@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from helper import strip_ansi
 import yas.app as app
 import yas.constants as constants
 
@@ -100,7 +101,6 @@ def test_show_render_time_off_emits_no_annotation(tmp_path, monkeypatch):
     writes: list = []
     monkeypatch.setattr(RenderTiming, 'write', staticmethod(lambda sid, ms: writes.append((sid, ms))))
 
-    from helper import strip_ansi
     info = _load_example()
     out  = _run_main(info, tmp_path, monkeypatch, {})
     assert 'ms' not in strip_ansi(out.splitlines()[-1])
@@ -113,7 +113,6 @@ def test_show_render_time_on_emits_annotation(tmp_path, monkeypatch):
     writes: list = []
     monkeypatch.setattr(RenderTiming, 'write', staticmethod(lambda sid, ms: writes.append((sid, ms))))
 
-    from helper import strip_ansi
     info = _load_example()
     out  = _run_main(info, tmp_path, monkeypatch, {'YAS_SHOW_RENDER_TIME': '1'})
     assert '47.2ms' in strip_ansi(out.splitlines()[-1])

@@ -219,6 +219,12 @@ smell applies only to code with **zero** callers — a dead `Config` knob, an
 unused constant — not to a small helper that exists because it names a
 concept clearly, even if only `renderer.py` calls it today.
 
+**`@dataclass` is banned in `claude/yas/**`.** Its cost is class-definition
+time paid at import, and the statusline is a cold-start CLI where import time
+is runtime — 16 conversions measured 1.13-1.18x slower. Use hand-written
+`__slots__` classes and accept the extra lines. Full measurements and
+reasoning in `KNOWN_ISSUES.md`.
+
 **`else` after `return` is accepted** where the symmetry between branches
 reads better than dropping the `else` — not a review finding on its own.
 

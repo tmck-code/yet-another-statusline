@@ -25,26 +25,24 @@ from yas.render.text import _visible_width
 from helper import strip_ansi
 
 Renderer = renderer.Renderer
+_r = Renderer()
 
 _NOW = 1_000_000_000.0
 
 
 def test_model_right_section_no_seven_day_suffix() -> None:
-    r = Renderer()
-    h5h, _h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    h5h, _h7d, _right, _w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
     assert '%' not in strip_ansi(h5h)
 
 
 def test_model_right_section_seven_day_appears_when_used() -> None:
-    r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    _h5h, h7d, _right, _w = _r.model_right_section('Sonnet 4.6', '', rate)
     assert '12.5%' in strip_ansi(h7d)
 
 
 def test_model_right_section_pill_inactive_plain_text() -> None:
-    r = Renderer()
-    _h5h, _h7d, right, w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    _h5h, _h7d, right, w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
     stripped = strip_ansi(right)
     assert 'Sonnet 4.6' in stripped
     assert PILL_LEFT not in stripped
@@ -53,8 +51,7 @@ def test_model_right_section_pill_inactive_plain_text() -> None:
 
 
 def test_model_right_section_pill_active_wraps_with_caps() -> None:
-    r = Renderer()
-    _h5h, _h7d, right, w = r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
+    _h5h, _h7d, right, w = _r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
     stripped = strip_ansi(right)
     assert stripped.startswith(PILL_LEFT)
     assert stripped.endswith(PILL_RIGHT)
@@ -64,31 +61,27 @@ def test_model_right_section_pill_active_wraps_with_caps() -> None:
 
 
 def test_model_right_section_pill_inactive_fable() -> None:
-    r = Renderer()
-    _h5h, _h7d, right, w = r.model_right_section('Fable 5', '', RateLimits())
+    _h5h, _h7d, right, w = _r.model_right_section('Fable 5', '', RateLimits())
     stripped = strip_ansi(right)
     assert 'Fable 5' in stripped
     assert w == _visible_width(right)
 
 
 def test_model_right_section_pill_inactive_mythos() -> None:
-    r = Renderer()
-    _h5h, _h7d, right, w = r.model_right_section('Mythos 5', '', RateLimits())
+    _h5h, _h7d, right, w = _r.model_right_section('Mythos 5', '', RateLimits())
     stripped = strip_ansi(right)
     assert 'Mythos 5' in stripped
     assert w == _visible_width(right)
 
 
 def test_model_right_section_compact_respects_max_width() -> None:
-    r = Renderer()
-    _rate, right, w = r.model_right_section_compact('A' * 100, RateLimits(), max_right_width=20)
+    _rate, right, w = _r.model_right_section_compact('A' * 100, RateLimits(), max_right_width=20)
     assert w <= 20
     assert '…' in strip_ansi(right)
 
 
 def test_model_section_compact_respects_max_width() -> None:
-    r = Renderer()
-    out, _ = r.model_section_compact('A' * 100, RateLimits(), max_width=30)
+    out, _ = _r.model_section_compact('A' * 100, RateLimits(), max_width=30)
     assert _visible_width(out) <= 30
     assert '…' in strip_ansi(out)
 
@@ -98,55 +91,52 @@ def test_model_section_compact_respects_max_width() -> None:
 class TestSingleRowGuarantee:
     _vsep_w = 5
 
-    def _wide_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
+    def _wide_combo(self, _r: Renderer, width: int) -> tuple[str, str, str, int]:
         git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
-        h5h, h7d, right, right_w = r.model_right_section(
+        h5h, h7d, right, right_w = _r.model_right_section(
             'Sonnet 4.6', '', RateLimits()
         )
         helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
         target_w = (width - 4) - self._vsep_w - helper_w - right_w
-        path = r.fit_path('~/deep/project/submodule/src', git, target_w,
+        path = _r.fit_path('~/deep/project/submodule/src', git, target_w,
                           compact_only=False)
         return path, h5h, right, right_w
 
-    def _medium_combo(self, r: Renderer, width: int) -> tuple[str, str, str, int]:
+    def _medium_combo(self, _r: Renderer, width: int) -> tuple[str, str, str, int]:
         git    = GitInfo(branch='feat/long', commit='abc1234', modified=3)
-        _rate, right, right_w = r.model_right_section_compact(
+        _rate, right, right_w = _r.model_right_section_compact(
             'Sonnet 4.6', RateLimits(), max_right_width=max(8, width // 2),
         )
         rate_w   = _visible_width(_rate)
         target_w = (width - 4) - self._vsep_w - rate_w - right_w
-        path = r.fit_path('~/deep/project/submodule/src', git, target_w,
+        path = _r.fit_path('~/deep/project/submodule/src', git, target_w,
                           compact_only=True)
         return path, _rate, right, right_w
 
     def test_wide_path_fits_target_at_borderline(self) -> None:
-        r = Renderer()
         for width in (MEDIUM_WIDTH, 100, MAX_WIDTH):
             git    = GitInfo(branch='feat/long', commit='abc1234', modified=3, untracked=2)
-            h5h, h7d, _right, right_w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+            h5h, h7d, _right, right_w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
             helper_w = _visible_width(h5h) + (4 + _visible_width(h7d) if h7d else 0)
             target_w = (width - 4) - self._vsep_w - helper_w - right_w
-            path = r.fit_path('~/deep/project/submodule/src', git, target_w)
+            path = _r.fit_path('~/deep/project/submodule/src', git, target_w)
             assert _visible_width(path) <= target_w, f'width={width}: path overflows target_w={target_w}'
 
     def test_medium_path_fits_target_at_borderline(self) -> None:
-        r = Renderer()
         for width in (NARROW_WIDTH, 68, MEDIUM_WIDTH - 1):
             git    = GitInfo(branch='feat/long', commit='abc1234', modified=3)
-            _rate, _right, right_w = r.model_right_section_compact(
+            _rate, _right, right_w = _r.model_right_section_compact(
                 'Sonnet 4.6', RateLimits(), max_right_width=max(8, width // 2),
             )
             rate_w   = _visible_width(_rate)
             target_w = (width - 4) - self._vsep_w - rate_w - right_w
-            path = r.fit_path('~/deep/project/submodule/src', git, target_w,
+            path = _r.fit_path('~/deep/project/submodule/src', git, target_w,
                               compact_only=True)
             assert _visible_width(path) <= target_w, f'width={width}: path overflows target_w={target_w}'
 
     def test_wide_model_on_right_of_content_row(self) -> None:
-        r = Renderer()
         width = 90
-        path, helper, right, right_w = self._wide_combo(r, width)
+        path, helper, right, right_w = self._wide_combo(_r, width)
         path_w   = _visible_width(path)
         helper_w = _visible_width(helper)
         total    = path_w + self._vsep_w + helper_w + right_w
@@ -154,9 +144,8 @@ class TestSingleRowGuarantee:
         assert strip_ansi(right_w and right or right) != ''
 
     def test_medium_model_on_right_of_content_row(self) -> None:
-        r = Renderer()
         width = 70
-        path, rate, right, right_w = self._medium_combo(r, width)
+        path, rate, right, right_w = self._medium_combo(_r, width)
         path_w = _visible_width(path)
         rate_w = _visible_width(rate)
         total  = path_w + self._vsep_w + rate_w + right_w
@@ -175,42 +164,37 @@ def _narrow_session(model_name: str = 'Sonnet 4.6', effort_level: str = '', thin
 
 class TestNarrowPillOnRight:
     def test_pill_placed_at_right_edge_when_thinking_active(self) -> None:
-        r = Renderer()
         width = 50
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = layout_mod.build_narrow(SessionView(session, Config()), width, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), width, _r)
         pill = next(row.pill for row in spec.rows if row.pill is not None)
         assert pill.end == width, 'pill must end at right edge'
         assert pill.start > 1,   'pill must not start at left edge'
 
     def test_content_row_uses_right_pill_when_thinking_active(self) -> None:
-        r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, _r)
         content_rows = [row for row in spec.rows if row.kind == 'content']
         model_row = content_rows[0]
         assert model_row.right_pill != '', 'model row must use right_pill when pill active'
         assert not model_row.pill_flush,   'pill_flush must be False when right_pill is used'
 
     def test_no_pill_when_thinking_disabled(self) -> None:
-        r = Renderer()
         session = _narrow_session('Sonnet 4.6', thinking=False)
-        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, _r)
         assert all(row.pill is None for row in spec.rows), 'no pill when thinking disabled'
 
     def test_rendered_top_border_starts_with_normal_corner(self) -> None:
-        r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
-        lines = layout_mod.render_layout(spec, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, _r)
+        lines = layout_mod.render_layout(spec, _r)
         top = strip_ansi(lines[0])
         assert top.startswith('╭'), 'top-left corner must be ╭ when pill is on right'
 
     def test_rendered_separator_ends_with_pill_bottom(self) -> None:
-        r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, r)
-        lines = layout_mod.render_layout(spec, r)
+        spec = layout_mod.build_narrow(SessionView(session, Config()), 50, _r)
+        lines = layout_mod.render_layout(spec, _r)
         sep = strip_ansi(lines[2])
         assert sep.endswith(PILL_BR), 'separator must end with PILL_BR when pill is on right'
 
@@ -315,37 +299,29 @@ class TestNarrowLayoutNoBurndown:
         assert '▼' not in strip_ansi(out)
 
 
-# ---------------------------------------------------------------------------
-# Task 6.1 — single lightbulb glyph, leading padding, parenthesised effort
-# ---------------------------------------------------------------------------
-
 from yas.constants import GLYPH_MODEL_LIGHT, ICON_LIMIT_5H, ICON_LIMIT_7D  # noqa: E402 (after class defs)
 
 class TestModelGlyph:
     def test_model_right_section_uses_lightbulb_glyph(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+        _h5h, _h7d, right, _w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
         stripped = strip_ansi(right)
         assert GLYPH_MODEL_LIGHT in stripped
 
     def test_model_right_section_fast_mode_swaps_to_burn_glyph(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits(), fast_mode=True)
+        _h5h, _h7d, right, _w = _r.model_right_section('Sonnet 4.6', '', RateLimits(), fast_mode=True)
         stripped = strip_ansi(right)
         assert GLYPH_BURN_FAST in stripped
         assert GLYPH_MODEL_LIGHT not in stripped
 
 
     def test_model_section_compact_uses_lightbulb_glyph(self) -> None:
-        r = Renderer()
-        out, _ = r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55)
+        out, _ = _r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55)
         stripped = strip_ansi(out)
         assert GLYPH_MODEL_LIGHT in stripped
 
 
     def test_model_right_section_compact_uses_lightbulb_glyph(self) -> None:
-        r = Renderer()
-        _rate, right, _w = r.model_right_section_compact('Sonnet 4.6', RateLimits(), max_right_width=40)
+        _rate, right, _w = _r.model_right_section_compact('Sonnet 4.6', RateLimits(), max_right_width=40)
         stripped = strip_ansi(right)
         assert GLYPH_MODEL_LIGHT in stripped
 
@@ -356,9 +332,8 @@ class TestShowIconsModelRow:
     current glyphs, off drops every one while numbers/text stay intact."""
 
     def test_model_right_section_show_icons_false_drops_all_glyphs(self) -> None:
-        r = Renderer()
         rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-        h5h, h7d, right, _w = r.model_right_section('Sonnet 4.6', '', rate, show_icons=False)
+        h5h, h7d, right, _w = _r.model_right_section('Sonnet 4.6', '', rate, show_icons=False)
         assert ICON_LIMIT_5H not in strip_ansi(h5h)
         assert ICON_LIMIT_7D not in strip_ansi(h7d)
         assert GLYPH_MODEL_LIGHT not in strip_ansi(right)
@@ -366,8 +341,7 @@ class TestShowIconsModelRow:
         assert '12.5%' in strip_ansi(h7d)
 
     def test_model_right_section_pill_show_icons_false_drops_lightbulb(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section(
+        _h5h, _h7d, right, _w = _r.model_right_section(
             'Opus 4.7 1M', 'high', RateLimits(), effort_level='high', show_icons=False,
         )
         stripped = strip_ansi(right)
@@ -375,8 +349,7 @@ class TestShowIconsModelRow:
         assert '(high)' in stripped
 
     def test_model_right_section_compact_show_icons_false_drops_lightbulb(self) -> None:
-        r = Renderer()
-        _rate, right, _w = r.model_right_section_compact(
+        _rate, right, _w = _r.model_right_section_compact(
             'Sonnet 4.6', RateLimits(), max_right_width=40, show_icons=False,
         )
         stripped = strip_ansi(right)
@@ -384,20 +357,18 @@ class TestShowIconsModelRow:
         assert 'Sonnet 4.6' in stripped
 
     def test_model_section_compact_show_icons_false_drops_glyphs(self) -> None:
-        r = Renderer()
-        out, _ = r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55, show_icons=False)
+        out, _ = _r.model_section_compact('Sonnet 4.6', RateLimits(), max_width=55, show_icons=False)
         stripped = strip_ansi(out)
         assert GLYPH_MODEL_LIGHT not in stripped
         assert ICON_LIMIT_5H not in stripped
         assert 'Sonnet 4.6' in stripped
 
     def test_burndown_trend_show_icons_false_drops_flame(self) -> None:
-        r = Renderer()
         # resets_at far enough in the future, `now` past warmup so a delta computes.
         now = 1_000_000_000.0
         resets_at = int(now + FIVE_HOUR_MINUTES * 60 - FIVE_HOUR_WARMUP_MINUTES * 60 * 4)
-        on  = r.burndown_trend(90.0, resets_at, FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=now, show_icons=True)
-        off = r.burndown_trend(90.0, resets_at, FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=now, show_icons=False)
+        on  = _r.burndown_trend(90.0, resets_at, FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=now, show_icons=True)
+        off = _r.burndown_trend(90.0, resets_at, FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=now, show_icons=False)
         assert on and off
         on_s, off_s = strip_ansi(on), strip_ansi(off)
         assert GLYPH_BURN_FAST in on_s or GLYPH_BURN_SLOW in on_s
@@ -406,11 +377,10 @@ class TestShowIconsModelRow:
         assert on_s.split()[-1] == off_s.split()[-1] or on_s[-6:] == off_s[-6:]
 
     def test_rate_helpers_show_icons_false_drops_flame_and_clock(self) -> None:
-        r = Renderer()
         now = 1_000_000_000.0
         resets_at = int(now + SEVEN_DAY_MINUTES * 60 - SEVEN_DAY_WARMUP_MINUTES * 60 * 4)
         rate = RateLimits(seven_day=RateBucket(used_percentage=50.0, resets_at=resets_at))
-        h5h, h7d = r._rate_helpers(rate, show_icons=False)
+        h5h, h7d = _r._rate_helpers(rate, show_icons=False)
         h5h_s, h7d_s = strip_ansi(h5h), strip_ansi(h7d)
         assert ICON_LIMIT_5H not in h5h_s
         assert ICON_LIMIT_7D not in h7d_s
@@ -418,9 +388,8 @@ class TestShowIconsModelRow:
         assert '50.0%' in h7d_s
 
     def test_cache_section_show_icons_false_drops_glyph(self) -> None:
-        r = Renderer()
-        on, _  = r.cache_section(125.0, 30, show_icons=True)
-        off, _ = r.cache_section(125.0, 30, show_icons=False)
+        on, _  = _r.cache_section(125.0, 30, show_icons=True)
+        off, _ = _r.cache_section(125.0, 30, show_icons=False)
         assert GLYPH_CACHE in strip_ansi(on)
         assert GLYPH_CACHE not in strip_ansi(off)
         assert '-02:05' in strip_ansi(off)
@@ -428,14 +397,12 @@ class TestShowIconsModelRow:
     def test_cache_section_countdown_is_signed(self) -> None:
         """Cache TTL counts down, so the digits carry a leading `-` against
         the clock (no space), same colour as the digits."""
-        r = Renderer()
-        text, _ = r.cache_section(125.0, 30, show_icons=True)
+        text, _ = _r.cache_section(125.0, 30, show_icons=True)
         assert '-02:05' in strip_ansi(text)
 
     def test_plugins_skills_show_icons_false_drops_glyphs(self) -> None:
-        r = Renderer()
-        on  = r.plugins_skills(2, 'foo,bar', 'baz', show_icons=True)
-        off = r.plugins_skills(2, 'foo,bar', 'baz', show_icons=False)
+        on  = _r.plugins_skills(2, 'foo,bar', 'baz', show_icons=True)
+        off = _r.plugins_skills(2, 'foo,bar', 'baz', show_icons=False)
         on_s, off_s = strip_ansi(on), strip_ansi(off)
         assert GLYPH_SKILLS in on_s and GLYPH_PLUGINS in on_s
         assert GLYPH_SKILLS not in off_s and GLYPH_PLUGINS not in off_s
@@ -445,30 +412,26 @@ class TestShowIconsModelRow:
 class TestModelEffort:
 
     def test_model_right_section_pill_no_effort_no_parens(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Opus 4.7 1M', '', RateLimits(), effort_level='high')
+        _h5h, _h7d, right, _w = _r.model_right_section('Opus 4.7 1M', '', RateLimits(), effort_level='high')
         stripped = strip_ansi(right)
         assert '(' not in stripped
         assert ')' not in stripped
 
 
     def test_model_right_section_pill_with_effort_shows_parens(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Opus 4.7 1M', 'medium', RateLimits(), effort_level='high')
+        _h5h, _h7d, right, _w = _r.model_right_section('Opus 4.7 1M', 'medium', RateLimits(), effort_level='high')
         stripped = strip_ansi(right)
         assert '(medium)' in stripped
 
     def test_model_right_section_plain_text_no_effort_no_parens(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+        _h5h, _h7d, right, _w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
         stripped = strip_ansi(right)
         assert GLYPH_MODEL_LIGHT in stripped
         assert '(' not in stripped
 
 
     def test_model_right_section_plain_text_with_effort_shows_parens(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section('Sonnet 4.6', 'low', RateLimits())
+        _h5h, _h7d, right, _w = _r.model_right_section('Sonnet 4.6', 'low', RateLimits())
         stripped = strip_ansi(right)
         assert '(low)' in stripped
 
@@ -588,8 +551,7 @@ class TestModelRightSectionShortForm:
     kwargs the layout agent's shed ladder calls under width pressure."""
 
     def test_model_form_short_abbreviates_pill_text(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, right, _w = r.model_right_section(
+        _h5h, _h7d, right, _w = _r.model_right_section(
             'Opus 5 1M', 'low', RateLimits(), model_form='short',
         )
         stripped = strip_ansi(right)
@@ -598,28 +560,25 @@ class TestModelRightSectionShortForm:
         assert 'Opus 5' not in stripped
 
     def test_model_form_short_is_narrower_than_full(self) -> None:
-        r = Renderer()
-        _h5h, _h7d, _right_full, w_full = r.model_right_section(
+        _h5h, _h7d, _right_full, w_full = _r.model_right_section(
             'Opus 5 1M', 'low', RateLimits(), model_form='full',
         )
-        _h5h, _h7d, _right_short, w_short = r.model_right_section(
+        _h5h, _h7d, _right_short, w_short = _r.model_right_section(
             'Opus 5 1M', 'low', RateLimits(), model_form='short',
         )
         assert w_short < w_full
 
     def test_model_form_defaults_to_full(self) -> None:
-        r = Renderer()
-        default = r.model_right_section('Opus 5 1M', 'low', RateLimits())
-        explicit_full = r.model_right_section('Opus 5 1M', 'low', RateLimits(), model_form='full')
+        default = _r.model_right_section('Opus 5 1M', 'low', RateLimits())
+        explicit_full = _r.model_right_section('Opus 5 1M', 'low', RateLimits(), model_form='full')
         assert default == explicit_full
 
     def test_include_7d_false_zeroes_helper_7d(self) -> None:
-        r = Renderer()
         rate = RateLimits(seven_day=RateBucket(used_percentage=42.0, resets_at=1_700_000_000))
-        _h5h, h7d_on, _right, _w = r.model_right_section(
+        _h5h, h7d_on, _right, _w = _r.model_right_section(
             'Sonnet 4.6', '', rate, include_7d=True,
         )
-        _h5h, h7d_off, _right, _w = r.model_right_section(
+        _h5h, h7d_off, _right, _w = _r.model_right_section(
             'Sonnet 4.6', '', rate, include_7d=False,
         )
         assert h7d_on != ''
@@ -629,8 +588,7 @@ class TestModelRightSectionShortForm:
         # include_7d=True (the default) does not manufacture a 7d helper when
         # there's no 7d data at all -- the content-driven has_7d gate in
         # `_rate_helpers` still applies first.
-        r = Renderer()
-        _h5h, h7d, _right, _w = r.model_right_section(
+        _h5h, h7d, _right, _w = _r.model_right_section(
             'Sonnet 4.6', '', RateLimits(), include_7d=True,
         )
         assert h7d == ''

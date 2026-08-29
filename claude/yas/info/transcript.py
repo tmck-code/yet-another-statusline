@@ -55,11 +55,7 @@ class TranscriptUsage:
         p = Path(transcript_path)
         if not p.is_file():
             return cls()
-        # Usage is keyed by message id with last-line-wins: streaming re-writes
-        # the same id as it appends content blocks, and the usage counters GROW
-        # across those writes — the final one carries the message's real totals.
-        # A first-write dedup freezes usage at the first partial snapshot and
-        # undercounts output tokens.
+        # keyed by message id, last-line-wins: usage counters grow across streamed rewrites of the same id
         usage_by_id: dict[str, tuple[int, int, int, int]] = {}
         _cache_anchor_ts: str  = ''
         _cache_1h:        bool = False

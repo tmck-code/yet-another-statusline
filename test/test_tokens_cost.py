@@ -502,6 +502,6 @@ def test_tokens_cost_show_icons_false_leading_number_matches_context_line_margin
 def test_tokens_cost_show_icons_true_leading_number_unchanged() -> None:
     """With icons on, the icon itself already reserves the margin -- the
     show_icons=False rjust fix must not perturb the icons-on row shape."""
-    on_default = _call(show_icons=True, sess_in=1)
+    on_default = _call(sess_in=1)
     on_explicit = _call(show_icons=True, sess_in=1)
     assert on_default == on_explicit

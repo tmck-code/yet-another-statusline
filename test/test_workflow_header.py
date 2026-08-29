@@ -15,7 +15,6 @@ class TestWorkflowHeaderPhaseTrail:
     def test_phase_list_highlights_current_dims_rest(self, strip_ansi):
         # 5.6 — a known phase list renders the trail inline, current phase
         # highlighted (SKILLS colour + ❯ marker), the rest in CTX_DIM.
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x',
             name   = 'my-workflow',
@@ -23,7 +22,6 @@ class TestWorkflowHeaderPhaseTrail:
             phases = ['Discover', 'Scan', 'Verify'],
         )
 
-        # run
         raw   = _r.workflow_header(run, 120)
         plain = strip_ansi(raw)
 
@@ -42,7 +40,6 @@ class TestWorkflowHeaderPhaseTrail:
 
     def test_empty_phase_dims_all_with_no_marker(self, strip_ansi):
         # 5.3 — a live run (empty run.phase) dims every phase, no ❯ marker.
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x',
             name   = 'my-workflow',
@@ -50,11 +47,9 @@ class TestWorkflowHeaderPhaseTrail:
             phases = ['Discover', 'Scan', 'Verify'],
         )
 
-        # run
         raw   = _r.workflow_header(run, 120)
         plain = strip_ansi(raw)
 
-        # assert
         assert GLYPH_WF_CURRENT not in plain
         for title in ('Discover', 'Scan', 'Verify'):
             assert f'{_r.CTX_DIM}{title}{_r.R}' in raw
@@ -63,7 +58,6 @@ class TestWorkflowHeaderPhaseTrail:
 
     def test_no_phase_list_falls_back_to_bracket_style(self, strip_ansi):
         # 5.7 — empty phases but a set phase keeps the legacy [<phase>] form.
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x',
             name   = 'my-workflow',
@@ -71,10 +65,8 @@ class TestWorkflowHeaderPhaseTrail:
             phases = [],
         )
 
-        # run
         plain = strip_ansi(_r.workflow_header(run, 80))
 
-        # assert
         assert GLYPH_WF_HEADER in plain
         assert 'my-workflow' in plain
         assert '[Analyse]' in plain

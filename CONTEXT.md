@@ -248,7 +248,7 @@ A `[[tokens.model]]` entry in `yas.toml` pairing a `match` substring with a `sof
 _Avoid_: "per-model env var" (none exists by design).
 
 **Config-Error Row**:
-The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. Full per-value reasons are written to stderr only when `YAS_DEBUG` is set. A rejected knob silently falls back to its default — the row is informational, never fatal.
+The compact `⚠ yas.toml: N values ignored (...)` row that renders just above the box's bottom border when one or more `yas.toml` values were rejected. It lists the rejected *knob names* (e.g. `soft_limit`, `tokens.model[0]`), not their values or reasons, and is capped to the render width. It appears only for `yas.toml`-sourced rejections (a bad `YAS_*` env var or CLI flag stays silent in the box); a malformed-file parse failure shows as the single entry `yas.toml: parse error`. A rejected knob silently falls back to its default — the row is informational, never fatal.
 _Avoid_: "error message" (it is a per-knob *ignored-values* tally, not a single failure message, and never aborts the render).
 
 **Section Labels** (`labels` knob / `YAS_LABELS`):

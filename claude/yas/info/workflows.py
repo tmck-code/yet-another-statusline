@@ -1,13 +1,9 @@
 """RunningWorkflow / RunningWorkflows — Workflow-tool run discovery.
 
-Workflow agents live one directory deeper than ordinary subagents
-(``subagents/workflows/<runId>/agent-*.jsonl``) and their ``meta.json`` carries
-no usable label (just ``{"agentType":"workflow-subagent"}``). This reader
-discovers runs from the filesystem — the detection spine — parses each agent
-with the shared transcript parser, and opportunistically enriches a run from the
-*completion-only* ``workflows/<runId>.json`` snapshot. Detection never depends
-on that JSON existing; during a live run the per-field fallbacks (run id for the
-name, the first prompt line for each agent label, no phase) are the primary path.
+Workflow agents live at `subagents/workflows/<runId>/agent-*.jsonl`; runs are
+discovered from the filesystem and opportunistically enriched from the
+completion-only `workflows/<runId>.json` snapshot, with filesystem fallbacks
+for a still-live run.
 """
 
 from __future__ import annotations
@@ -25,24 +21,14 @@ from yas.info.subagents import RunningSubagent, parse_transcript
 from yas.render.text import _middle_ellipsis
 
 
-# Run-JSON statuses that mean "still going". Anything else (``completed``,
-# ``failed``, ``cancelled``, or empty) is treated as terminal. This is only a
-# liveness *hint*: the real signal during a live run is the filesystem (agents
-# actively writing keep newest_mtime within the liveness window), because the
-# run JSON is written at completion only.
+# run-JSON statuses meaning "still going"; only a hint, real liveness signal is the filesystem
 _NONTERMINAL_STATUSES = frozenset({'running', 'in-progress', 'in_progress', 'queued', 'pending'})
 
-# Middle-ellipsis cap for the fallback prompt-line label, so a long first prompt
-# never blows out a one-line agent row. subagent_row fits it further per width.
-_LABEL_CAP = 48
+_LABEL_CAP = 48  # middle-ellipsis cap for the fallback prompt-line label
 
 
 def _first_prompt_line(jsonl: Path) -> str:
-    """First non-empty line of the first user message in a transcript, sanitised.
-
-    A user message's ``content`` may be a plain string or a list of blocks;
-    both are handled. Returns '' when no user text is found. Never raises.
-    """
+    """First non-empty line of the first user message in a transcript, sanitised. Never raises."""
     try:
         with jsonl.open('r', errors='ignore') as fh:
             for ln in fh:
@@ -74,22 +60,13 @@ def _first_prompt_line(jsonl: Path) -> str:
     return ''
 
 
-# The phases live in a ``meta.phases: [ ... ]`` array inside the workflow
-# script. Each phase object carries a ``title: '...'`` (single or double
-# quoted). We match the bracketed block narrowly, then pull each title in order.
+# phase titles live in a `meta.phases: [ {title: '...'}, ... ]` array in the workflow script
 _PHASES_BLOCK_RE = re.compile(r'phases:\s*\[(.*?)\]', re.DOTALL)
 _TITLE_RE        = re.compile(r"""title:\s*(['"])(.*?)\1""", re.DOTALL)
 
 
 def _parse_script_phases(scripts_dir: Path, run_id: str) -> list[str]:
-    """Phase titles for ``run_id`` from its workflow script, in order.
-
-    The script is written to ``workflows/scripts/<name>-<runId>.js`` at run
-    start and is the only on-disk source of phase titles during a live run.
-    Locates it by the ``*-<runId>.js`` suffix, regex-parses the ``phases:[...]``
-    block, and extracts each ``title:`` string. Returns ``[]`` on ANY error
-    (missing dir, no matching script, unreadable file, no parseable block).
-    """
+    """Phase titles for `run_id` from `workflows/scripts/*-<runId>.js`, in order. `[]` on any error."""
     try:
         scripts = sorted(scripts_dir.glob(f'*-{run_id}.js'))
         if not scripts:
@@ -142,14 +119,11 @@ class RunningWorkflow:
 
     @property
     def done_count(self) -> int:
-        # Done reuses the subagent rule: end_ts > 0 (an end_turn was seen).
-        return sum(1 for a in self.agents if a.end_ts > 0)
+        return sum(1 for a in self.agents if a.end_ts > 0)  # end_ts > 0 means an end_turn was seen
 
     @property
     def total_tokens(self) -> int:
-        # Summed from the per-agent transcript parse, never the run JSON's
-        # reported totalTokens (which only exists once the run completes).
-        return sum(a.total_input + a.output for a in self.agents)
+        return sum(a.total_input + a.output for a in self.agents)  # per-agent parse, not run JSON's totalTokens
 
     @property
     def newest_mtime(self) -> float:
@@ -180,9 +154,7 @@ class RunningWorkflows:
     def from_session(cls, session_id: str, project_dir: str) -> RunningWorkflows:
         if not session_id or not project_dir:
             return cls()
-        # Same projects/ dir convention as RunningSubagents.from_session: every
-        # non-alphanumeric char becomes '-' (Unix and Windows safe).
-        project_slug = re.sub(r'[^A-Za-z0-9]', '-', project_dir)
+        project_slug = re.sub(r'[^A-Za-z0-9]', '-', project_dir)  # same projects/ slug convention as RunningSubagents
         session_dir  = projects_dir() / project_slug / session_id
         runs_dir     = session_dir / 'subagents' / 'workflows'
         if not runs_dir.is_dir():
@@ -213,9 +185,7 @@ class RunningWorkflows:
                 continue
             agent_id = jsonl.stem[len('agent-'):]  # 'agent-<id>.jsonl' -> '<id>'
             billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts, _ = parse_transcript(jsonl)
-            # Fallback identity: the label defaults to the first prompt line and
-            # lives in agent_type so subagent_row renders it as the primary
-            # identity at every width. run-JSON enrichment may override it.
+            # fallback label: first prompt line, in agent_type; run-JSON enrichment may override
             label = _middle_ellipsis(_first_prompt_line(jsonl), _LABEL_CAP)
             agents.append(RunningSubagent(
                 agent_type      = label,
@@ -236,13 +206,7 @@ class RunningWorkflows:
 
     @staticmethod
     def _enrich(wf: RunningWorkflow, session_dir: Path) -> None:
-        """Opportunistically upgrade a run from ``workflows/<runId>.json``.
-
-        Sets the run name from ``workflowName``, maps ``workflowProgress``
-        ``agentId -> label`` onto each agent, derives the current phase from the
-        latest ``workflow_phase`` entry, and records the raw status. Never raises
-        on a missing or malformed JSON — the run keeps its filesystem fallbacks.
-        """
+        """Opportunistically upgrade a run's name/phase/status/agent labels from `workflows/<runId>.json`."""
         json_path = session_dir / 'workflows' / f'{wf.run_id}.json'
         try:
             data = json.loads(json_path.read_text())
@@ -285,22 +249,10 @@ class RunningWorkflows:
                 agent.agent_type = _middle_ellipsis(lbl, _LABEL_CAP)
 
     def visible(self, now: float, last_prompt_ts: float | None) -> list[RunningWorkflow]:
-        """Live workflow runs, most-recently-active first.
+        """Live workflow runs, most-recently-active first: within WORKFLOW_LIVENESS_SECONDS or non-terminal status.
 
-        A run stays visible while any agent transcript was written within
-        WORKFLOW_LIVENESS_SECONDS (longer than the subagent cohort's windows so a
-        run rides through a between-phase lull), OR while its run JSON reports a
-        non-terminal status. A settled run — terminal status or all agents Done,
-        with its newest transcript older than that window — falls out of the
-        liveness window and retires.
-
-        ``last_prompt_ts`` is accepted for parity with
-        ``RunningSubagents.visible``; workflow liveness is purely window/status
-        based and does not consult the prompt boundary.
-
-        The concurrent-run cap (WORKFLOW_RUN_CAP) is applied by the layout
-        builders, which own the ``+N more workflows`` overflow text; this method
-        only supplies the liveness filter and recency ordering they slice.
+        `last_prompt_ts` is unused (parity with `RunningSubagents.visible`).
+        The WORKFLOW_RUN_CAP overflow cap is applied by the layout builders, not here.
         """
         live = [
             wf for wf in self.workflows

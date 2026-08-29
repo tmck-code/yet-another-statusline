@@ -21,10 +21,6 @@ from claude.mon.tui import (
 from claude.mon.lifecycle import validate_thresholds
 
 
-# ---------------------------------------------------------------------------
-# parse_args — defaults
-# ---------------------------------------------------------------------------
-
 def test_parse_args_defaults():
     ns = parse_args([])
     assert ns.include_after == timedelta(minutes=10)
@@ -35,91 +31,36 @@ def test_parse_args_defaults():
     assert ns.theme is None
 
 
-# ---------------------------------------------------------------------------
-# parse_args — individual flags
-# ---------------------------------------------------------------------------
-
-def test_parse_args_include_after():
-    ns = parse_args(['--include-after=5m'])
-    assert ns.include_after == timedelta(minutes=5)
-
-
-def test_parse_args_idle_after():
-    ns = parse_args(['--idle-after=30s'])
-    assert ns.idle_after == timedelta(seconds=30)
-
-
-def test_parse_args_remove_after():
-    ns = parse_args(['--remove-after=1h'])
-    assert ns.remove_after == timedelta(hours=1)
-
-
-def test_parse_args_refresh():
-    ns = parse_args(['--refresh=5s'])
-    assert ns.refresh == timedelta(seconds=5)
+@pytest.mark.parametrize(('arg', 'attr', 'expected'), [
+    ('--include-after=5m', 'include_after', timedelta(minutes=5)),
+    ('--idle-after=30s', 'idle_after', timedelta(seconds=30)),
+    ('--remove-after=1h', 'remove_after', timedelta(hours=1)),
+    ('--refresh=5s', 'refresh', timedelta(seconds=5)),
+    ('--bg-shift=cool', 'bg_shift', 'cool'),
+    ('--bg-shift=warm', 'bg_shift', 'warm'),
+    ('--theme=dark', 'theme', 'dark'),
+    ('--refresh=10s', 'refresh', timedelta(seconds=10)),
+    ('--refresh=3m', 'refresh', timedelta(minutes=3)),
+    ('--include-after=2h', 'include_after', timedelta(hours=2)),
+    ('--refresh=0.5s', 'refresh', timedelta(seconds=0.5)),
+], ids=[
+    'include_after', 'idle_after', 'remove_after', 'refresh', 'bg_shift_cool', 'bg_shift_warm',
+    'theme', 'duration_suffix_s', 'duration_suffix_m', 'duration_suffix_h', 'duration_fractional_seconds',
+])
+def test_parse_args_single_option(arg, attr, expected):
+    ns = parse_args([arg])
+    assert getattr(ns, attr) == expected
 
 
-def test_parse_args_bg_shift_cool():
-    ns = parse_args(['--bg-shift=cool'])
-    assert ns.bg_shift == 'cool'
-
-
-def test_parse_args_bg_shift_warm():
-    ns = parse_args(['--bg-shift=warm'])
-    assert ns.bg_shift == 'warm'
-
-
-def test_parse_args_theme():
-    ns = parse_args(['--theme=dark'])
-    assert ns.theme == 'dark'
-
-
-# ---------------------------------------------------------------------------
-# parse_args — all duration suffixes
-# ---------------------------------------------------------------------------
-
-def test_parse_args_duration_suffix_s():
-    ns = parse_args(['--refresh=10s'])
-    assert ns.refresh == timedelta(seconds=10)
-
-
-def test_parse_args_duration_suffix_m():
-    ns = parse_args(['--refresh=3m'])
-    assert ns.refresh == timedelta(minutes=3)
-
-
-def test_parse_args_duration_suffix_h():
-    ns = parse_args(['--include-after=2h'])
-    assert ns.include_after == timedelta(hours=2)
-
-
-def test_parse_args_duration_fractional_seconds():
-    ns = parse_args(['--refresh=0.5s'])
-    assert ns.refresh == timedelta(seconds=0.5)
-
-
-# ---------------------------------------------------------------------------
-# parse_args — invalid duration raises SystemExit
-# ---------------------------------------------------------------------------
-
-def test_parse_args_invalid_duration_no_suffix():
+@pytest.mark.parametrize('arg', [
+    '--refresh=10',
+    '--refresh=abcs',
+    '--bg-shift=blazing',
+], ids=['invalid_duration_no_suffix', 'invalid_duration_bad_number', 'invalid_bg_shift'])
+def test_parse_args_invalid_option_exits(arg):
     with pytest.raises(SystemExit):
-        parse_args(['--refresh=10'])
+        parse_args([arg])
 
-
-def test_parse_args_invalid_duration_bad_number():
-    with pytest.raises(SystemExit):
-        parse_args(['--refresh=abcs'])
-
-
-def test_parse_args_invalid_bg_shift():
-    with pytest.raises(SystemExit):
-        parse_args(['--bg-shift=blazing'])
-
-
-# ---------------------------------------------------------------------------
-# validate_thresholds — threshold ordering
-# ---------------------------------------------------------------------------
 
 def test_validate_thresholds_ok():
     # should not raise
@@ -148,10 +89,6 @@ def test_validate_thresholds_remove_equal_idle_ok():
     )
 
 
-# ---------------------------------------------------------------------------
-# enter_alt_screen / exit_alt_screen — escape sequences
-# ---------------------------------------------------------------------------
-
 def test_enter_alt_screen_writes_correct_sequence(monkeypatch):
     buf = io.StringIO()
     monkeypatch.setattr(sys, 'stdout', buf)
@@ -173,10 +110,6 @@ def test_enter_exit_alt_screen_combined(monkeypatch):
     exit_alt_screen()
     assert buf.getvalue() == '\x1b[?1049h\x1b[?1049l'
 
-
-# ---------------------------------------------------------------------------
-# RefreshClock
-# ---------------------------------------------------------------------------
 
 def test_refresh_clock_wait_returns_within_timeout():
     clock = RefreshClock()
@@ -238,10 +171,6 @@ def test_refresh_clock_second_wait_blocks_after_first_consumed():
     clock.wake()          # clean up the thread
     t.join(timeout=1.0)
 
-
-# ---------------------------------------------------------------------------
-# install_sigwinch_handler
-# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
     not hasattr(signal, 'SIGWINCH'),

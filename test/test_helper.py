@@ -8,6 +8,7 @@ from yas.session import RateBucket, RateLimits
 from helper import strip_ansi
 
 Renderer = renderer.Renderer
+_r = Renderer()
 
 _NOW = 1_000_000_000.0  # fixed timestamp for deterministic tests
 
@@ -108,8 +109,7 @@ class TestHelperBurndownIntegration:
         self._patch(monkeypatch)
         # 2 min elapsed < 5 min warmup → no trend but countdown still appears
         resets_at = int(_NOW + 298 * 60)
-        r = Renderer()
-        out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
+        out = _r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
         assert GLYPH_BURN_FAST not in stripped
         assert GLYPH_BURN_SLOW not in stripped
@@ -120,8 +120,7 @@ class TestHelperBurndownIntegration:
         self._patch(monkeypatch)
         # 150 min elapsed, 150 min left → over-burn; countdown leads
         resets_at = int(_NOW + 150 * 60)
-        r = Renderer()
-        out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
+        out = _r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
         assert '60.0%' in stripped
         assert GLYPH_BURN_FAST in stripped
@@ -131,8 +130,7 @@ class TestHelperBurndownIntegration:
     def test_expired_window_infinity_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch(monkeypatch)
         past_ts = int(_NOW) - 60
-        r = Renderer()
-        out = r.helper(RateBucket(used_percentage=80.0, resets_at=past_ts))
+        out = _r.helper(RateBucket(used_percentage=80.0, resets_at=past_ts))
         stripped = strip_ansi(out)
         assert '∞' in stripped
         assert 'T-' not in stripped
@@ -141,21 +139,18 @@ class TestHelperBurndownIntegration:
         self._patch(monkeypatch)
         # warmup = 5 min, so at 6 min elapsed trend should appear
         resets_at = int(_NOW + 294 * 60)  # 6 min elapsed
-        r = Renderer()
-        out = r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
+        out = _r.helper(RateBucket(used_percentage=60.0, resets_at=resets_at))
         stripped = strip_ansi(out)
         assert GLYPH_BURN_FAST in stripped or '▼' in stripped or GLYPH_BURN_SLOW in stripped
 
 
 def test_helper_no_usage_no_reset() -> None:
-    r = Renderer()
-    out = r.helper(RateBucket())
+    out = _r.helper(RateBucket())
     assert out == '∞'
 
 
 def test_helper_used_no_reset() -> None:
-    r = Renderer()
-    out = r.helper(RateBucket(used_percentage=10.0, resets_at=0))
+    out = _r.helper(RateBucket(used_percentage=10.0, resets_at=0))
     stripped = strip_ansi(out)
     assert stripped.endswith('∞')
     assert '10.0%' in stripped
@@ -174,37 +169,29 @@ def test_helper_reset_in_future(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
 
     future_ts = int(fixed_now.timestamp()) + 3600
-    r = Renderer()
-    out = r.helper(RateBucket(used_percentage=50.0, resets_at=future_ts))
+    out = _r.helper(RateBucket(used_percentage=50.0, resets_at=future_ts))
     stripped = strip_ansi(out)
     assert '50.0%' in stripped
     assert '(-1:00)' in stripped
 
 
-# ---------------------------------------------------------------------------
-# Task 6.2 — 5h/7d icons, countdown placement, separator, 1dp
-# ---------------------------------------------------------------------------
-
 from yas.constants import ICON_LIMIT_5H, ICON_LIMIT_7D  # noqa: E402
 
 
 def test_model_right_section_5h_icon() -> None:
-    r = Renderer()
-    h5h, _h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', RateLimits())
+    h5h, _h7d, _right, _w = _r.model_right_section('Sonnet 4.6', '', RateLimits())
     assert ICON_LIMIT_5H in h5h
 
 
 def test_model_right_section_7d_icon_appears_when_used() -> None:
-    r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
-    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    _h5h, h7d, _right, _w = _r.model_right_section('Sonnet 4.6', '', rate)
     assert ICON_LIMIT_7D in h7d
 
 
 def test_model_right_section_7d_empty_when_idle() -> None:
-    r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=0, resets_at=0))
-    _h5h, h7d, _right, _w = r.model_right_section('Sonnet 4.6', '', rate)
+    _h5h, h7d, _right, _w = _r.model_right_section('Sonnet 4.6', '', rate)
     assert h7d == ''
 
 
@@ -219,27 +206,20 @@ def test_helper_countdown_at_front(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(renderer, 'datetime', _FakeDatetime)
     future_ts = int(fixed_now.timestamp()) + 7200  # 2 hours
-    r = Renderer()
-    out = strip_ansi(r.helper(RateBucket(used_percentage=30.0, resets_at=future_ts)))
+    out = strip_ansi(_r.helper(RateBucket(used_percentage=30.0, resets_at=future_ts)))
     assert '(-2:00)' in out
     assert out.index('(-2:00)') < out.index('30.0%')
 
 
 def test_helper_one_dp_usage() -> None:
-    r = Renderer()
-    out = strip_ansi(r.helper(RateBucket(used_percentage=30.0, resets_at=0)))
+    out = strip_ansi(_r.helper(RateBucket(used_percentage=30.0, resets_at=0)))
     assert '30.0%' in out
 
 
 def test_burndown_trend_one_dp() -> None:
-    r = Renderer()
-    out = strip_ansi(r.burndown_trend(53.0, int(_NOW + 150 * 60), FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=_NOW))
+    out = strip_ansi(_r.burndown_trend(53.0, int(_NOW + 150 * 60), FIVE_HOUR_MINUTES, FIVE_HOUR_WARMUP_MINUTES, now=_NOW))
     assert '+3.0%' in out
 
-
-# ---------------------------------------------------------------------------
-# Inter-stat gap widening (justify breathing room)
-# ---------------------------------------------------------------------------
 
 def test_helper_gap_widens_inter_stat_separators(monkeypatch: pytest.MonkeyPatch) -> None:
     from datetime import datetime, timezone
@@ -254,11 +234,10 @@ def test_helper_gap_widens_inter_stat_separators(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(renderer.time, 'time', lambda: fixed_now.timestamp())
     # 1h to reset → 4h into the 5h window → over-burn trend present.
     future_ts = int(fixed_now.timestamp()) + 3600
-    r = Renderer()
     bucket = RateBucket(used_percentage=60.0, resets_at=future_ts)
 
-    g1 = strip_ansi(r.helper(bucket, gap=1))
-    g3 = strip_ansi(r.helper(bucket, gap=3))
+    g1 = strip_ansi(_r.helper(bucket, gap=1))
+    g3 = strip_ansi(_r.helper(bucket, gap=3))
     # countdown↔pct separator widens from 1 to 3 spaces.
     assert '(-1:00) 60.0%' in g1
     assert '(-1:00)   60.0%' in g3
@@ -267,15 +246,13 @@ def test_helper_gap_widens_inter_stat_separators(monkeypatch: pytest.MonkeyPatch
 
 
 def test_helper_gap_widens_infinity_separator() -> None:
-    r = Renderer()
-    out = strip_ansi(r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=3))
+    out = strip_ansi(_r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=3))
     assert '10.0%   ∞' in out
 
 
 def test_helper_gap_defaults_to_one() -> None:
-    r = Renderer()
-    assert r.helper(RateBucket(used_percentage=10.0, resets_at=0)) == \
-        r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=1)
+    assert _r.helper(RateBucket(used_percentage=10.0, resets_at=0)) == \
+        _r.helper(RateBucket(used_percentage=10.0, resets_at=0), gap=1)
 
 
 def test_rate_helpers_gap_widens_seven_day(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -292,9 +269,8 @@ def test_rate_helpers_gap_widens_seven_day(monkeypatch: pytest.MonkeyPatch) -> N
     # 7d resets in 1 day → well past warmup → trend present on the 7d section.
     seven_reset = int(fixed_now.timestamp()) + 86400
     rate = RateLimits(seven_day=RateBucket(used_percentage=80.0, resets_at=seven_reset))
-    r = Renderer()
 
-    _h5, h7_g1 = r._rate_helpers(rate, gap_7d=1)
-    _h5, h7_g3 = r._rate_helpers(rate, gap_7d=3)
+    _h5, h7_g1 = _r._rate_helpers(rate, gap_7d=1)
+    _h5, h7_g3 = _r._rate_helpers(rate, gap_7d=3)
     assert '80.0% ' in strip_ansi(h7_g1)
     assert '80.0%   ' in strip_ansi(h7_g3)

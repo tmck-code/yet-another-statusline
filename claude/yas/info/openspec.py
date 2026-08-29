@@ -3,20 +3,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-# Directories skipped during the downward recursive scan for nested openspec/
-# roots (monorepo-of-repos layout). Kept small and cheap to check per entry.
+# dirs skipped during the downward recursive scan for nested openspec/ roots
 _IGNORED_DIRS = frozenset((
     '.git', 'node_modules', 'venv', '.venv', '__pycache__',
     '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
 ))
-# Default repo-levels below the scan root the downward walk descends before
-# pruning (matches yas.constants.DEFAULT_OPENSPEC_SCAN_DEPTH, the yas.toml-
-# configurable knob threaded in via from_cwd's max_depth param). A nested
-# openspec/ is detected when the repo/dir containing it sits at most this
-# many levels below the scan root (repo-levels=1: cwd/repo-a/openspec is
-# found, cwd/group/repo-a/openspec is not). _scan_downward takes the
-# path-segment form of this (repo_levels + 1, since openspec/ itself is one
-# segment deeper than its containing repo dir) — see _find_roots.
+# repo-levels below the scan root the downward walk descends (yas.toml [openspec] scan_depth);
+# _scan_downward converts this to path segments as max_depth + 1 (openspec/ is one segment deeper)
 _MAX_SCAN_DEPTH = 1
 
 
@@ -38,17 +31,11 @@ class OpenSpec:
 
     @classmethod
     def from_cwd(cls, cwd: str, max_depth: int = _MAX_SCAN_DEPTH) -> OpenSpec:
-        """``max_depth`` is repo-levels below cwd (matches the yas.toml
-        ``[openspec] scan_depth`` knob), not raw path segments — see
-        _scan_downward for the internal conversion."""
+        """``max_depth`` is repo-levels below cwd, not raw path segments."""
         roots = cls._find_roots(cwd, max_depth)
         if not roots:
             return cls()
-        # Change names ('add-x' is common) can collide across repos, so once
-        # more than one root is in play every entry is prefixed with its
-        # repo dir (openspec/'s parent) to keep the display unambiguous. A
-        # single root — upward or downward — is never ambiguous, so it's
-        # left bare.
+        # multiple roots: prefix each entry with its repo dir to disambiguate colliding change names
         multi = len(roots) > 1
         out: list[tuple[str, int, int]] = []
         for root in roots:
@@ -90,11 +77,7 @@ class OpenSpec:
 
     @classmethod
     def _find_roots(cls, cwd: str, max_depth: int = _MAX_SCAN_DEPTH) -> list[str]:
-        """All openspec/ roots relevant to ``cwd``: the nearest ancestor (if
-        cwd sits inside a repo) plus every openspec/ found by recursively
-        walking down from cwd (for monorepo-of-repos layouts where sibling
-        or nested repos each carry their own openspec/). ``max_depth`` is
-        repo-levels below cwd; a value of 0 disables the downward scan."""
+        """Nearest ancestor openspec/ plus every openspec/ found walking down from cwd; max_depth=0 disables the downward scan."""
         if not cwd:
             return []
         seen: set[str] = set()
@@ -107,10 +90,7 @@ class OpenSpec:
 
         base = Path(cwd)
         if base.is_dir() and max_depth > 0:
-            # +1: openspec/ itself is one path segment deeper than the repo
-            # dir that contains it, so a repo-levels max_depth of N requires
-            # walking N+1 path segments to see its openspec/ entry.
-            for found in cls._scan_downward(base, max_depth + 1):
+            for found in cls._scan_downward(base, max_depth + 1):  # +1: openspec/ is one segment deeper than its repo dir
                 if found not in seen:
                     seen.add(found)
                     roots.append(found)

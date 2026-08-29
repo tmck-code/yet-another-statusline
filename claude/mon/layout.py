@@ -20,8 +20,7 @@ def _pad_or_clip(s: str, width: int) -> str:
     if vis < width:
         return s + ' ' * (width - vis)
     if vis > width:
-        # Clip: remove characters from the raw string until visible width == width
-        # Walk the raw string, skipping escape sequences.
+        # walk the raw string, skipping escape sequences, until visible width == width
         import re
         _ESC = re.compile(r'\033\[[0-9;]*m')
         result = []
@@ -97,32 +96,28 @@ def _centre_line(text: str, width: int) -> str:
     return ' ' * pad_left + text + ' ' * pad_right
 
 
-def format_empty_body(width: int, height: int) -> str:
-    """Return a multi-line string of exactly height lines with (no active sessions) centred."""
+def _centred_body(message: str, width: int, height: int) -> str:
+    """Return a multi-line string of exactly height lines with message centred."""
     if height <= 0:
         return ''
     blank = ' ' * width
-    msg_line = _centre_line('(no active sessions)', width)
+    msg_line = _centre_line(message, width)
     if height == 1:
         return msg_line
     mid = height // 2
     lines = [blank] * height
     lines[mid] = msg_line
     return '\n'.join(lines)
+
+
+def format_empty_body(width: int, height: int) -> str:
+    """Return a multi-line string of exactly height lines with (no active sessions) centred."""
+    return _centred_body('(no active sessions)', width, height)
 
 
 def format_narrow_body(width: int, height: int) -> str:
     """Return a multi-line string of exactly height lines with (terminal too narrow) centred."""
-    if height <= 0:
-        return ''
-    blank = ' ' * width
-    msg_line = _centre_line('(terminal too narrow)', width)
-    if height == 1:
-        return msg_line
-    mid = height // 2
-    lines = [blank] * height
-    lines[mid] = msg_line
-    return '\n'.join(lines)
+    return _centred_body('(terminal too narrow)', width, height)
 
 
 def clip_to_height(
@@ -138,8 +133,7 @@ def clip_to_height(
     for box in rendered_boxes:
         n_lines = box.count('\n') + 1
         if used + n_lines > available_height:
-            # This box doesn't fit; all remaining boxes are hidden.
-            break
+            break  # doesn't fit; all remaining boxes are hidden
         visible.append(box)
         used += n_lines
     hidden_count = len(rendered_boxes) - len(visible)

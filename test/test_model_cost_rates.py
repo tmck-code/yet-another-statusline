@@ -26,9 +26,6 @@ class TestModelCostRates:
         m = Model(id='gpt-5')
         assert m.cost_rates == (3.00, 15.00)
 
-    # ---------------------------------------------------------------------------
-    # 4.2  display_name is preferred over id for matching
-    # ---------------------------------------------------------------------------
 
     def test_display_name_preferred_over_id(self) -> None:
         # id says 'haiku' but display_name says 'Opus' → opus rates

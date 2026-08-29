@@ -114,7 +114,6 @@ def _make_workflow_subagent(
 class TestWorkflowDetection:
 
     def test_run_discovered_without_run_json(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(
@@ -123,10 +122,8 @@ class TestWorkflowDetection:
             mtime=now,
         )
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # expected
         expected = RunningWorkflow(
             run_id = 'wf_x',
             name   = 'wf_x',
@@ -135,40 +132,31 @@ class TestWorkflowDetection:
                 'a1de7949b753bf883', total_input=10, output=5, mtime=now, agent_type='')],
         )
 
-        # assert
         assert result == RunningWorkflows(workflows=[expected])
 
     def test_agent_id_derived_from_filename_stem(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_x', 'a1de7949b753bf883', mtime=now)
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # expected
         expected = 'a1de7949b753bf883'
 
-        # assert
         assert result.workflows[0].agents[0].agent_id == expected
 
     def test_workflow_and_ordinary_subagents_do_not_cross_contaminate(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_ordinary_subagent(root, 'agent-plain', mtime=now)
         _write_workflow_agent(root, 'wf_x', 'a1de7949b753bf883', mtime=now)
 
-        # run
         workflows = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
         subagents = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
 
-        # expected
         expected_wf_ids  = ['a1de7949b753bf883']
         expected_sub_ids = ['agent-plain']  # ordinary subagent id = jsonl stem (tree-view parent matching)
 
-        # assert
         assert [a.agent_id for w in workflows.workflows for a in w.agents] == expected_wf_ids
         assert [s.agent_id for s in subagents.subagents] == expected_sub_ids
         assert [s.agent_type for s in subagents.subagents] == ['Explore']
@@ -177,7 +165,6 @@ class TestWorkflowDetection:
 class TestWorkflowEnrichment:
 
     def test_run_json_sets_name_phase_and_agent_labels(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
@@ -192,33 +179,25 @@ class TestWorkflowEnrichment:
             ],
         })
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
-        # expected
         expected = ('my-workflow', 'Analyse', 'completed', 'fetch-thing')
 
-        # assert
         assert (result.name, result.phase, result.status, result.agents[0].agent_type) == expected
 
     def test_fallback_label_from_string_prompt(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         prompt = '{"type":"user","message":{"role":"user","content":"do the thing now"}}\n'
         _write_workflow_agent(root, 'wf_x', 'a1', jsonl_lines=[prompt], mtime=now)
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
-        # expected
         expected = ('wf_x', '', 'do the thing now')
 
-        # assert
         assert (result.name, result.phase, result.agents[0].agent_type) == expected
 
     def test_fallback_label_from_block_list_prompt(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         prompt = json.dumps({
@@ -227,29 +206,22 @@ class TestWorkflowEnrichment:
         }) + '\n'
         _write_workflow_agent(root, 'wf_x', 'a1', jsonl_lines=[prompt], mtime=now)
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
-        # expected
         expected = ('wf_x', '', 'analyse the data')
 
-        # assert
         assert (result.name, result.phase, result.agents[0].agent_type) == expected
 
     def test_malformed_run_json_degrades_to_fallback(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
         _write_run_json(root, 'wf_x', '{ not json')
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
-        # expected
         expected = ('wf_x', 'wf_x', '')
 
-        # assert
         assert (result.run_id, result.name, result.phase) == expected
 
 
@@ -264,7 +236,6 @@ def _write_workflow_script(root: Path, run_id: str, body: str) -> Path:
 class TestWorkflowPhaseParsing:
 
     def test_three_phase_script_yields_titles_in_order(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
@@ -278,13 +249,10 @@ class TestWorkflowPhaseParsing:
             };
         """)
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
-        # expected
         expected = ['Discover', 'Scan', 'Verify']
 
-        # assert
         assert result.phases == expected
 
     def test_missing_script_yields_empty_phases(self, tmp_home):
@@ -293,7 +261,6 @@ class TestWorkflowPhaseParsing:
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_x', 'a1', mtime=now)
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0]
 
         # assert: no phases, no exception raised
@@ -313,10 +280,8 @@ class TestWorkflowLiveness:
         )
         wfs = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # run
         result = wfs.visible(now, None)
 
-        # assert
         assert [w.run_id for w in result] == ['wf_x']
 
     def test_settled_run_retires(self, tmp_home):
@@ -330,10 +295,8 @@ class TestWorkflowLiveness:
         )
         wfs = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # run
         result = wfs.visible(now, None)
 
-        # assert
         assert result == []
 
     def test_stale_leftover_dir_retires(self, tmp_home):
@@ -343,10 +306,8 @@ class TestWorkflowLiveness:
         _write_workflow_agent(root, 'wf_x', 'a1', mtime=now - WORKFLOW_LIVENESS_SECONDS - 1)
         wfs = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # run
         result = wfs.visible(now, None)
 
-        # assert
         assert result == []
 
     def test_nonterminal_status_keeps_old_run_visible(self, tmp_home):
@@ -357,34 +318,27 @@ class TestWorkflowLiveness:
         _write_run_json(root, 'wf_x', {'runId': 'wf_x', 'workflowName': 'wf', 'status': 'running'})
         wfs = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # run
         result = wfs.visible(now, None)
 
-        # assert
         assert [w.run_id for w in result] == ['wf_x']
 
     def test_visible_sorted_most_recent_first(self, tmp_home):
-        # setup
         now  = time.time()
         root = _session_root(tmp_home)
         _write_workflow_agent(root, 'wf_old', 'a1', mtime=now - 30)
         _write_workflow_agent(root, 'wf_new', 'a2', mtime=now - 5)
         wfs = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR)
 
-        # run
         result = wfs.visible(now, None)
 
-        # expected
         expected = ['wf_new', 'wf_old']
 
-        # assert
         assert [w.run_id for w in result] == expected
 
 
 class TestWorkflowMetrics:
 
     def test_done_count_counts_only_ended_agents(self):
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x', name = 'wf_x', phase = '',
             agents = [
@@ -394,13 +348,10 @@ class TestWorkflowMetrics:
             ],
         )
 
-        # run
         result = run.done_count
 
-        # expected
         expected = 2
 
-        # assert
         assert result == expected
 
     def test_total_tokens_sums_per_agent_ignoring_run_json(self, tmp_home):
@@ -421,44 +372,34 @@ class TestWorkflowMetrics:
             'runId': 'wf_x', 'workflowName': 'wf', 'totalTokens': 999999,
         })
 
-        # run
         result = RunningWorkflows.from_session(SESSION_ID, PROJECT_DIR).workflows[0].total_tokens
 
-        # expected
         expected = (10 + 5 + 4) + (20 + 6)
 
-        # assert
         assert result == expected
 
 
 class TestWorkflowHeaderSummary:
 
     def test_header_contains_glyph_name_and_phase(self, strip_ansi):
-        # setup
         run = RunningWorkflow(run_id='wf_x', name='my-workflow', phase='Analyse')
 
-        # run
         result = strip_ansi(_r.workflow_header(run, 80))
 
-        # assert
         assert GLYPH_WF_HEADER in result
         assert 'my-workflow' in result
         assert '[Analyse]' in result
 
     def test_header_omits_phase_when_empty(self, strip_ansi):
-        # setup
         run = RunningWorkflow(run_id='wf_x', name='my-workflow', phase='')
 
-        # run
         result = strip_ansi(_r.workflow_header(run, 80))
 
-        # assert
         assert GLYPH_WF_HEADER in result
         assert 'my-workflow' in result
         assert '[' not in result
 
     def test_summary_contains_counts_and_tokens(self, strip_ansi):
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x', name = 'wf_x', phase = '',
             agents = [
@@ -467,26 +408,21 @@ class TestWorkflowHeaderSummary:
             ],
         )
 
-        # run
         result = strip_ansi(_r.workflow_summary(run, 80))
 
-        # assert
         assert GLYPH_WF_SUMMARY in result
         assert '2 agents' in result
         assert '1 done' in result
         assert '1.8K' in result
 
     def test_summary_appends_hidden_agents(self, strip_ansi):
-        # setup
         run = RunningWorkflow(
             run_id = 'wf_x', name = 'wf_x', phase = '',
             agents = [_make_workflow_subagent('a1')],
         )
 
-        # run
         result = strip_ansi(_r.workflow_summary(run, 80, hidden_agents=3))
 
-        # assert
         assert '+3 hidden' in result
 
     def test_summary_show_icons_false_drops_corner_glyph(self, strip_ansi):
@@ -500,10 +436,8 @@ class TestWorkflowHeaderSummary:
             ],
         )
 
-        # run
         result = strip_ansi(_r.workflow_summary(run, 80, show_icons=False))
 
-        # assert
         assert GLYPH_WF_SUMMARY not in result
         assert '2 agents' in result
         assert '1 done' in result
@@ -517,7 +451,6 @@ class TestWorkflowLayout:
         view.__dict__['workflows'] = RunningWorkflows(workflows=runs)
 
     def test_narrow_collapse_yields_header_and_summary_only(self, strip_ansi):
-        # setup
         now  = time.time()
         view = _view()
         run  = RunningWorkflow(
@@ -526,7 +459,6 @@ class TestWorkflowLayout:
         )
         self._inject(view, [run])
 
-        # run
         rows = layout.build_workflow_rows(view, 80, _r, per_agent=False)
         texts = [strip_ansi(row.content) for row in rows]
 
@@ -534,13 +466,11 @@ class TestWorkflowLayout:
         header_rows  = [t for t in texts if GLYPH_WF_HEADER in t]
         summary_rows = [t for t in texts if GLYPH_WF_SUMMARY in t]
 
-        # assert
         assert len(rows) == 2
         assert len(header_rows) == 1
         assert len(summary_rows) == 1
 
     def test_per_agent_yields_header_agent_rows_and_summary(self, strip_ansi):
-        # setup
         now  = time.time()
         view = _view()
         run  = RunningWorkflow(
@@ -552,7 +482,6 @@ class TestWorkflowLayout:
         )
         self._inject(view, [run])
 
-        # run
         rows = layout.build_workflow_rows(view, 160, _r, per_agent=True)
         texts = [strip_ansi(row.content) for row in rows]
 
@@ -585,7 +514,6 @@ class TestWorkflowLayout:
         )
         self._inject(view, [run])
 
-        # run
         rows = layout.build_workflow_rows(view, 120, _r, per_agent=True)
         texts = [strip_ansi(row.content) for row in rows]
         # strip the header (first) and summary (last) rows
@@ -622,7 +550,6 @@ class TestWorkflowLayout:
         )
         self._inject(view, [run])
 
-        # run
         rows  = layout.build_workflow_rows(view, 160, _r, per_agent=True)
         texts = [strip_ansi(row.content) for row in rows]
 
@@ -649,7 +576,6 @@ class TestWorkflowLayout:
         ]
         self._inject(view, runs)
 
-        # run
         rows  = layout.build_workflow_rows(view, 80, _r, per_agent=False)
         texts = [strip_ansi(row.content) for row in rows]
 

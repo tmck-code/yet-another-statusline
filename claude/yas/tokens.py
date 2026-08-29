@@ -1,27 +1,14 @@
-"""Token accounting, rate tracking, and daily-cost log helpers.
-
-Imports:
-  - yas.session  for Model and usage types
-  - yas.constants for the runtime/log path helpers (tokens_log, token_rate_log, render_log)
-"""
+"""Token accounting, rate tracking, and daily-cost log helpers."""
 
 from __future__ import annotations
 
 import functools
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from yas.constants import tokens_log, token_rate_log, render_log
 from yas.session import Model
 
-if TYPE_CHECKING:
-    pass
-
-
-# ---------------------------------------------------------------------------
-# TickRecord (forward-declared here to avoid circular imports — app.py imports
-# from layout.py which must not import from app.py)
-# ---------------------------------------------------------------------------
 
 class TickRecord:
     __slots__ = ('token_log', 'day_cost', 'tok_rate')
@@ -157,11 +144,7 @@ def _token_window() -> float:
 
 
 class TokenRate:
-    # Resolved lazily (see _token_window): evaluating it at import time forced a
-    # full Config.load() — and, when a yas.toml exists, the tomllib import — into
-    # every startup. None means "resolve from config on first use"; an explicit
-    # float (e.g. set by tests) is honoured as-is.
-    WINDOW: float | None = None
+    WINDOW: float | None = None  # None = resolve from config on first use (lazy, avoids Config.load() at import)
     KEEP = 300.0
 
     @classmethod
@@ -273,15 +256,7 @@ class TokenRate:
 # ---------------------------------------------------------------------------
 
 class RenderTiming:
-    """Per-session persistence of the last render's wall-clock duration.
-
-    A render can't know its own total time before it has finished drawing, so
-    the bottom-border annotation shows the *previous* run's duration: each run
-    reads the last value (to display) at the start and writes its own (for the
-    next run) at the end. Keyed by session_id in one log file — like
-    TokenRate — so panes don't show each other's timings; lines idle longer
-    than KEEP are pruned so the file can't grow without bound.
-    """
+    """Per-session persistence of the last render's wall-clock duration; bottom border shows the previous run's."""
 
     KEEP = 300.0
 
