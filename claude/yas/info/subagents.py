@@ -587,9 +587,14 @@ def parse_transcript(
                 u.get('output_tokens', 0) or 0,
             )
 
-        billed_in     = sum(billed for billed, _, _ in usage_by_id.values())
-        cache_read_in = sum(cached for _, cached, _ in usage_by_id.values())
-        output        = sum(out for _, _, out in usage_by_id.values())
+        # Each usage block already reports the CUMULATIVE prompt size for that
+        # turn (input + cache_creation + cache_read == the whole context sent
+        # on that call). The last turn in transcript order therefore already
+        # carries the full totals; summing across turns would double/N-tuple
+        # count the same growing history once per turn.
+        billed_in, cache_read_in, output = (
+            next(reversed(usage_by_id.values())) if usage_by_id else (0, 0, 0)
+        )
 
         # Never cache totals_only results (blanked fields would poison full parses).
         result = (billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts, run_start_ts)
@@ -602,6 +607,10 @@ def parse_transcript(
     # across those writes — the final one carries the message's real totals.
     # Accumulating only the first write (behind the dedup) freezes usage at
     # the first partial snapshot and undercounts output tokens.
+    # The OUTER aggregation (across message ids) is ALSO last-value-wins, not
+    # a sum: each usage block already reports the cumulative prompt for that
+    # turn, so the last id inserted (transcript order) already holds the
+    # run's real totals.
     usage_by_id = {}
     first_ts     = 0.0
     run_start_ts = 0.0
@@ -707,9 +716,12 @@ def parse_transcript(
                         model = m
     except OSError:
         pass
-    billed_in     = sum(billed for billed, _, _ in usage_by_id.values())
-    cache_read_in = sum(cached for _, cached, _ in usage_by_id.values())
-    output        = sum(out for _, _, out in usage_by_id.values())
+    # Same last-turn-wins fix as the totals_only path above: each usage block
+    # is already the cumulative context for that turn, so the last turn's
+    # values are the totals, not the sum across turns.
+    billed_in, cache_read_in, output = (
+        next(reversed(usage_by_id.values())) if usage_by_id else (0, 0, 0)
+    )
     # Activity reflects the final message. Prefer its last tool_use block —
     # a trailing text narration must not mask an actual tool call (Claude
     # often emits [text, tool_use, text]) — then the first non-empty line of

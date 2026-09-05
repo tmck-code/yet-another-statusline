@@ -115,7 +115,12 @@ def test_project_dir_with_leading_slash_produces_correct_slug(tmp_home: Path) ->
     assert len(result.subagents) == 1
 
 
-def test_token_totals_sum_across_assistant_entries(tmp_home: Path) -> None:
+def test_token_totals_use_last_turn_not_sum_across_assistant_entries(tmp_home: Path) -> None:
+    # Each usage block already reports the CUMULATIVE prompt size for that
+    # turn (input + cache_creation + cache_read == the whole context sent on
+    # that call). The last turn in transcript order already carries the run's
+    # real totals, so aggregating must take the last entry, not sum every
+    # turn's usage — summing double/N-tuple counts the same growing history.
     now = time.time()
     sdir = _subagents_dir(tmp_home)
     _write_agent(
@@ -129,8 +134,8 @@ def test_token_totals_sum_across_assistant_entries(tmp_home: Path) -> None:
 
     result = RunningSubagents.from_session(SESSION_ID, PROJECT_DIR)
     sub = result.subagents[0]
-    assert sub.billed_in == 6 + 14052 + 1 + 2824
-    assert sub.output    == 4 + 1528
+    assert sub.billed_in == 1 + 2824
+    assert sub.output    == 1528
 
 
 def test_duplicate_message_id_deduped(tmp_home: Path) -> None:
