@@ -1394,13 +1394,17 @@ def build_wide(
                     top_labels.append(('burn rate', _h7base + _h7[2 + _h7_shift]))
         # Cache countdown cell: anchor on the countdown value's own first
         # glyph (mirrors the token-offset approach used by the other
-        # cells above) rather than a fixed +2, so left-padding growth
+        # cells above) rather than a fixed offset, so left-padding growth
         # (`_c_left`/`_c_right` above) doesn't drift the label off the value.
+        # cache_content starts 3 cols after the cache vsep's │ (2 lead spaces
+        # + the │ itself land on cache_div_col, then 2 trailing spaces before
+        # the literal leading space `middle` adds ahead of cache_vsep — net
+        # +3 from cache_div_col to the first content column).
         if cache_section_w and cache_div_col is not None:
             _pc = _ANSI_RE.sub('', cache_content)
             _co = _token_offsets(_pc)
             if _co:
-                top_labels.append(('cache', cache_div_col + 2 + _co[0]))
+                top_labels.append(('cache', cache_div_col + 3 + _co[0]))
 
     if pill_pct:
         rows += [
