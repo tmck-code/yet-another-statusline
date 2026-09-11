@@ -1272,9 +1272,12 @@ def build_wide(
     helper_w    = _visible_width(helper_text)
 
     if cache_extra:
-        # last_extra (= pad) lands entirely on RHS; cache vsep trailing gives 2 LHS
-        # built-in spaces. Shift split so visible LHS ≈ visible RHS.
-        _c_left         = min(cache_extra, max(0, (cache_extra + last_extra - 2) // 2))
+        # Sibling cells (session/5h/7d) settle near a 3-column left margin
+        # after their vsep. cache_vsep's trailing already supplies 2 of
+        # those, so 1 more space matches the convention; the rest of the
+        # slack goes to the right, same as the "value hugs the divider,
+        # padding trails" shape the other cells converge on at this width.
+        _c_left         = min(cache_extra, 1)
         _c_right        = cache_extra - _c_left
         cache_content   = f'{" " * _c_left}{cache_content}{" " * _c_right}'
         cache_section_w += cache_extra
@@ -1389,9 +1392,19 @@ def build_wide(
                     top_labels.append(('used', _h7base + _h7[1 + _h7_shift]))
                 if len(_h7) >= 3 + _h7_shift:
                     top_labels.append(('burn rate', _h7base + _h7[2 + _h7_shift]))
-        # Cache countdown cell begins just after the cache │.
+        # Cache countdown cell: anchor on the countdown value's own first
+        # glyph (mirrors the token-offset approach used by the other
+        # cells above) rather than a fixed offset, so left-padding growth
+        # (`_c_left`/`_c_right` above) doesn't drift the label off the value.
+        # cache_content starts 3 cols after the cache vsep's │ (2 lead spaces
+        # + the │ itself land on cache_div_col, then 2 trailing spaces before
+        # the literal leading space `middle` adds ahead of cache_vsep — net
+        # +3 from cache_div_col to the first content column).
         if cache_section_w and cache_div_col is not None:
-            top_labels.append(('cache', cache_div_col + 2))
+            _pc = _ANSI_RE.sub('', cache_content)
+            _co = _token_offsets(_pc)
+            if _co:
+                top_labels.append(('cache', cache_div_col + 3 + _co[0]))
 
     if pill_pct:
         rows += [
