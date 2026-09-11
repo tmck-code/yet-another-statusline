@@ -1799,11 +1799,13 @@ class Renderer:
             cost_col = f'{cost_icon}{self.COST}${sess_cost:,.2f}{self.R}'
 
         def build_lines() -> str:
-            # Mirrors the tokens column's own glyph-pair convention (icon,
-            # bold value, a plain double-space gap before the next glyph
-            # pair) rather than the cost column's " / " separator, since
-            # read/changed are two independent counters (like in/out), not
-            # a session/day pair of the same counter.
+            # With icons on, mirrors the tokens column's own glyph-pair
+            # convention (icon, bold value, a plain double-space gap before
+            # the next glyph pair) since the two read/write glyphs already
+            # separate the counters visually. With icons off there is no
+            # glyph to do that separating, so a `/` divider takes its place
+            # (the border's `r/w` label centres on this same `/` — see
+            # `layout.py`'s tok_labels build).
             # ``build_lines`` is only ever invoked where ``lines is not None``
             # (guarded by the caller), but mypy can't narrow a captured
             # outer-scope variable across a closure boundary — assert it here
@@ -1818,10 +1820,7 @@ class Renderer:
                 read_icon    = f'{self.LABEL}{GLYPH_LINES_READ}  {self.R}'
                 changed_icon = f'{self.LABEL}  {GLYPH_LINES_CHANGED}  {self.R}'
             else:
-                # No glyphs: keep the same single inter-group gap the tokens
-                # column uses (gap1's minimum) so the two counters stay
-                # visually separated without a bare icon slot.
-                read_icon, changed_icon = '', '  '
+                read_icon, changed_icon = '', f' {self.LABEL}/{self.R} '
             return (f'{read_icon}{self.TOK}{read_s}{self.R}'
                     f'{changed_icon}{self.TOK}{changed_s}{self.R}')
 

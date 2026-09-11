@@ -18,6 +18,8 @@ from yas.info import SessionView
 from yas.info.git import GitInfo
 from yas.info.subagents import RunningSubagent, RunningSubagents
 from yas.info.tasks import Task, TaskList
+from yas.info.toolcounts import ToolCounts
+from yas.info.transcript import TranscriptUsage
 from yas.render.text import superscript
 from yas.tokens import TickRecord, TokenLog
 
@@ -146,10 +148,15 @@ def test_context_separator_labels_present():
         assert superscript(word) in blob, word
 
 
-def test_tokens_separator_sessday_suffix():
-    sep = _tokens_separator(_render_dict(_full_limits_dict()))
-    assert superscript('input sess/day') in sep
-    assert superscript('cost sess/day') in sep
+def test_tokens_separator_has_no_sessday_suffix():
+    # `sess/day` no longer names these labels -- the session/day value pair
+    # below is caption enough, so the row's labels are the bare field names.
+    lines = _render_dict(_full_limits_dict())
+    sep = _tokens_separator(lines)
+    blob = '\n'.join(strip_ansi(ln) for ln in lines)
+    assert superscript('input') in sep
+    assert superscript('cost') in sep
+    assert superscript('sess/day') not in blob
 
 
 def _tok_sep_and_content(lines: list[str]) -> tuple[str, str]:
@@ -164,6 +171,27 @@ def _tok_sep_and_content(lines: list[str]) -> tuple[str, str]:
 def _label_center(sep: str, word: str) -> float:
     start = sep.index(superscript(word))
     return start + (len(word) - 1) / 2
+
+
+def _realistic_usage_view(with_trailing: bool = False, show_icons: bool = True) -> SessionView:
+    """A view with real-magnitude token/loc numbers (day stats on) rather than
+    this fixture's all-zero transcript usage -- the `input`/`cache`/`output`
+    labels centre on their value's `/`, and small-enough (zero) values can
+    collide with neighbouring section titles in ways real sessions never hit.
+    `transcript_usage`/`tool_counts` are `cached_property`s on `SessionView`,
+    so pre-seeding `__dict__` short-circuits the cache (same pattern as
+    `_short_labels_view`'s skills injection below)."""
+    view = SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
+                       Config(labels=True, show_icons=show_icons))
+    view.__dict__['transcript_usage'] = TranscriptUsage(
+        input_tokens=31700, cache_creation_input_tokens=0,
+        cache_read_input_tokens=494100, output_tokens=8500,
+    )
+    view.__dict__['tool_counts'] = ToolCounts(lines_read=1600, lines_changed=522)
+    if with_trailing:
+        from yas.info.skills import LoadedSkills
+        view.__dict__['skills'] = LoadedSkills(names=['demo:skill'])
+    return view
 
 
 def _short_labels_view(with_trailing: bool = False) -> SessionView:
@@ -183,22 +211,14 @@ def _short_labels_view(with_trailing: bool = False) -> SessionView:
 
 
 @pytest.mark.parametrize('with_trailing', [True, False])
-def test_cost_label_centered_in_its_cell(with_trailing: bool):
-    # The cost cell always has a right-hand vsep to centre against -- the
-    # trailing "skills + plugins" divider is present whether or not any
-    # skills/plugins are loaded (bug: it used to vanish along with the
-    # section when the list was empty).
-    lines = _render_view(_short_labels_view(with_trailing=with_trailing))
-    sep, cont = _tok_sep_and_content(lines)
-    # border + 2 interior vseps normally, but at this width (200) the lines
-    # read/changed segment is also included (box_width >= LINES_SEGMENT_MIN_WIDTH),
-    # adding a 3rd interior vsep ahead of the cost cell. `bars` always ends with
-    # the row's right border (not a cost-cell vsep), so the cost cell is the pair
-    # immediately preceding it — i.e. the last two INTERIOR vseps — regardless of
-    # how many segments precede them.
-    bars = [i for i, ch in enumerate(cont) if ch == '│']
-    cell_center = (bars[-3] + bars[-2]) / 2                 # cost cell between vseps
-    assert abs(_label_center(sep, 'cost') - cell_center) <= 1
+def test_cost_label_anchored_at_cell_start(with_trailing: bool):
+    # `cost` is a section TITLE now (no `sess/day` suffix to centre against),
+    # so it anchors flush at its own cell's left edge -- immediately after
+    # the leading `┬` -- rather than being centred in the cell.
+    lines = _render_view(_realistic_usage_view(with_trailing=with_trailing))
+    sep, _cont = _tok_sep_and_content(lines)
+    idx = sep.index(superscript('cost'))
+    assert sep[idx - 1] == '┬'
 
 
 def test_skills_plugins_label_present_even_when_empty():
@@ -212,42 +232,56 @@ def test_skills_plugins_label_present_even_when_empty():
 def test_lines_and_cost_labels_present_with_icons_off():
     # Regression: with show_icons=False, tokens_cost's rendered row never
     # carries the read-lines glyph layout.py used to sniff for -- it used to
-    # silently drop the 'loc r/w' caption and mis-anchor 'cost sess/day' onto
-    # the elbow between the loc and cost cells (dropped as well) whenever the
-    # lines segment was actually present. Both labels must still render.
+    # silently drop the 'loc' caption and mis-anchor 'cost' onto the elbow
+    # between the loc and cost cells (dropped as well) whenever the lines
+    # segment was actually present. Both labels must still render.
     view = SessionView(session_mod.SessionInfo.from_dict(_full_limits_dict()),
                        Config(labels=True, show_day_stats=False, show_icons=False))
     sep, _cont = _tok_sep_and_content(_render_view(view))
-    assert superscript('loc r/w') in sep or superscript('loc read/write') in sep
+    assert superscript('loc') in sep
+    assert superscript('r/w') in sep
     assert superscript('cost') in sep
 
 
-def test_lines_label_centered_in_its_cell():
-    # 'loc read/write' almost always renders abbreviated ('loc r/w') in this
-    # cell -- centring must be computed against the abbreviation's length,
-    # not the long form's, or the placed text lands left of true centre
-    # (regression: the anchor used `len(LINES_LABEL)` while `_overlay_labels`
-    # placed the shorter abbreviated form).
-    lines = _render_view(_short_labels_view(with_trailing=True))
+def test_loc_label_anchored_at_cell_start():
+    # `loc` is a section TITLE (like `cost`) -- it anchors flush after its
+    # own cell's leading `┬`, not centred or fill-led.
+    lines = _render_view(_realistic_usage_view(with_trailing=True))
+    sep, _cont = _tok_sep_and_content(lines)
+    idx = sep.index(superscript('loc'))
+    assert sep[idx - 1] == '┬'
+
+
+def test_rw_label_centered_over_lines_slash():
+    # `r/w` (the loc segment's read/write divider caption) centres over the
+    # `/` that `tokens_cost`'s `build_lines` renders between the read and
+    # changed values (icons off -- see the `build_lines` docstring).
+    lines = _render_view(_realistic_usage_view(with_trailing=True, show_icons=False))
     sep, cont = _tok_sep_and_content(lines)
     bars = [i for i, ch in enumerate(cont) if ch == '│']
-    cell_center = (bars[1] + bars[2]) / 2                    # loc r/w cell
-    assert abs(_label_center(sep, 'loc r/w') - cell_center) <= 1
+    loc_start, loc_end = bars[1], bars[2]                    # loc cell's own bounding vseps
+    slash_i = cont.index('/', loc_start, loc_end)
+    assert abs(_label_center(sep, 'r/w') - slash_i) <= 1
 
 
-def test_cache_label_centered_over_parenthetical():
-    lines = _render_view(_short_labels_view(with_trailing=True))
+def test_cache_label_centered_over_slash():
+    lines = _render_view(_realistic_usage_view(with_trailing=True))
     sep, cont = _tok_sep_and_content(lines)
     open_i, close_i = cont.index('('), cont.index(')')
-    assert abs(_label_center(sep, 'cache') - (open_i + close_i) / 2) <= 1
+    slash_i = cont.index('/', open_i, close_i)
+    assert abs(_label_center(sep, 'cache') - slash_i) <= 1
 
 
 def test_cache_centering_never_mangles_input():
-    # With the long ` sess/day` labels the centred `cache` would reach back into
-    # `input`; it must fall back to left-anchoring so `input` is never truncated
+    # A `cache` label centred on its own `/` can sit close enough to `input`'s
+    # that the two would otherwise collide with no gap between them; `cache`
+    # must be clamped past `input`'s own end so `input` is never truncated
     # (the regression guard against `input` collapsing to a stub like "i").
     sep = _tokens_separator(_render_dict(_full_limits_dict()))
-    assert superscript('input sess/day') in sep
+    assert superscript('input') in sep
+    in_end    = sep.index(superscript('input')) + len('input')
+    cache_start = sep.index(superscript('cache'))
+    assert cache_start > in_end
 
 
 def test_changes_label_full_and_right_aligned():

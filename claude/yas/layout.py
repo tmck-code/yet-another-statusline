@@ -20,8 +20,6 @@ from yas.constants import (
     GLYPH_HOURGLASS,
     GLYPH_RENAMED,
     GLYPH_WF_DIVIDER,
-    LABEL_ABBREVIATIONS,
-    LINES_LABEL,
     NARROW_SIDE_BY_SIDE_MIN_WIDTH,
     PLAN_ONELINE_MIN_W,
     PLUGINS_TRAILING_MAX_W,
@@ -1000,7 +998,16 @@ def build_wide(
             helper_5h_w = _visible_width(helper_5h)
             has_7d      = bool(helper_7d)
             helper_7d_w = _visible_width(helper_7d) if has_7d else 0
-            helper_w    = helper_5h_w + (4 + helper_7d_w if has_7d else 0)
+            # Icons off + labels on: the `⁵ʰ`/`⁷ᵈ` window tags ride the top
+            # border, 2 glyph-columns wide, so each section's value needs a
+            # permanent 2-column reservation ahead of it (tag + one fill
+            # column) or `remain`/`used` reads flush against the tag at any
+            # width -- not just when `justify` happens to have spare slack
+            # to spend on it. Fold the reservation into the width budget
+            # here, unconditionally, so path sizing (below) already leaves
+            # room for it rather than a later pass trying to claw it back.
+            _tag_pad    = 2 if (view.cfg.labels and not view.cfg.show_icons) else 0
+            helper_w    = helper_5h_w + _tag_pad + (4 + helper_7d_w + _tag_pad if has_7d else 0)
 
             cache_content   = ''
             cache_section_w = 0
@@ -1137,20 +1144,36 @@ def build_wide(
         # total width is unchanged — inner growth is matched by outer shrink — so
         # the divider columns below are unaffected. The 5h section has two
         # separators (countdown↔pct, pct↔trend); 7d has one (pct↔trend).
+        # Window tags (icons off): `⁵ʰ`/`⁷ᵈ` ride the top border right after
+        # each section's leading ┬ (see `top_labels` below), so `remain`'s own
+        # anchor -- the value's real first column -- must clear the tag's 2
+        # glyph-columns or the anchor lands on a column the tag already wrote,
+        # dropping the label outright. Route ALL of this section's slack to
+        # outer padding (skip the inner-gap widening) so there's always
+        # room; symmetric outer padding also reads better than a lopsided
+        # inner gap in labelled-no-icon mode.
         h5_extra = _extras[_idx]
         _idx += 1
-        gap_5h   = 1 + min(2, h5_extra // 2)   # ≤3; both 5h separators at this width
-        h5_inner = 2 * (gap_5h - 1)
-        h5_outer = h5_extra - h5_inner
+        if view.cfg.labels and not view.cfg.show_icons:
+            gap_5h   = 1
+            h5_outer = h5_extra
+        else:
+            gap_5h   = 1 + min(2, h5_extra // 2)   # ≤3; both 5h separators at this width
+            h5_inner = 2 * (gap_5h - 1)
+            h5_outer = h5_extra - h5_inner
         h5_left  = h5_outer // 2
         h5_right = h5_outer - h5_left
         gap_7d   = 1
         if has_7d:
             h7_extra = _extras[_idx]
             _idx += 1
-            gap_7d   = 1 + min(2, h7_extra)    # ≤3; the single 7d separator
-            h7_inner = gap_7d - 1
-            h7_outer = h7_extra - h7_inner
+            if view.cfg.labels and not view.cfg.show_icons:
+                gap_7d   = 1
+                h7_outer = h7_extra
+            else:
+                gap_7d   = 1 + min(2, h7_extra)    # ≤3; the single 7d separator
+                h7_inner = gap_7d - 1
+                h7_outer = h7_extra - h7_inner
             # RHS has 2 more built-in spaces than LHS (sep_rate trailing=1 vs
             # explicit-space+cache_vsep-lead=3), so bias the split left by 1.
             h7_left  = (h7_outer + 2) // 2
@@ -1215,6 +1238,24 @@ def build_wide(
             else:
                 line_path = f'{line_path}{" " * path_extra}'
             path_w += path_extra
+    if view.cfg.labels and not view.cfg.show_icons:
+        # Structural floor, not a by-product of slack: the `⁵ʰ`/`⁷ᵈ` window
+        # tags are 2 glyph-columns wide, so `remain`/`used`'s own anchor --
+        # the value's real first column -- must clear both of those PLUS
+        # one more column, or the border reads `┬⁷ᵈused` with the tag and
+        # label flush against each other (or worse, the anchor lands on a
+        # column the tag already wrote and the label is dropped outright).
+        # Unconditional -- this is NOT gated on `justify`/slack the way the
+        # rest of this function's padding is: with `justify` off (or with
+        # zero slack), `h5_left`/`h7_left` never get a chance to earn this
+        # room from the N-way split above, so the base 2 columns has to be
+        # added here regardless. The width budget already reserved space
+        # for it (`_tag_pad` folded into `helper_w` before path sizing, in
+        # the shed closure above), so this never needs to borrow or grow
+        # the row -- it's already paid for.
+        h5_left = max(h5_left, 2)
+        if has_7d:
+            h7_left = max(h7_left, 2)
     if view.cfg.justify and _has_elapsed:
         # `elapsed_content` may already carry asymmetric leading padding
         # baked in by the renderer's fixed-width `rjust` (elapsed_section
@@ -1236,7 +1277,11 @@ def build_wide(
             elapsed_content = elapsed_content[:_b_end].rstrip(' ') + elapsed_content[_b_end:]
         _total_pad = _baked_left + elapsed_extra
         if _total_pad:
-            _e_left           = _total_pad // 2
+            # Ceiling on the left: an odd `_total_pad` biases the extra
+            # column ahead of `clear` rather than into the clear<->session
+            # gap, keeping the leading margin from reading thinner than the
+            # section's other outer paddings.
+            _e_left           = (_total_pad + 1) // 2
             _e_right          = _total_pad - _e_left
             elapsed_content   = f'{" " * _e_left}{elapsed_content}{" " * _e_right}'
             elapsed_section_w += elapsed_extra
@@ -1277,7 +1322,16 @@ def build_wide(
         # those, so 1 more space matches the convention; the rest of the
         # slack goes to the right, same as the "value hugs the divider,
         # padding trails" shape the other cells converge on at this width.
-        _c_left         = min(cache_extra, 1)
+        # In icons-off/labels-on mode, `middle`'s own literal leading space
+        # (ahead of cache_vsep, below) plus cache_vsep's 2-space trailing
+        # already puts the value flush at the section's 2-column margin, so
+        # the extra column growing the left margin further would overshoot
+        # the value's target column relative to the `cache` border label --
+        # route it all to the right there instead.
+        if view.cfg.labels and not view.cfg.show_icons:
+            _c_left = 0
+        else:
+            _c_left = min(cache_extra, 1)
         _c_right        = cache_extra - _c_left
         cache_content   = f'{" " * _c_left}{cache_content}{" " * _c_right}'
         cache_section_w += cache_extra
@@ -1332,7 +1386,12 @@ def build_wide(
         if _ps != -1:
             for _ci in range(_ps + 1, len(_pp) - 1):
                 if _pp[_ci] == ' ' and _pp[_ci + 1] in _DIRTY_CHARS:
-                    top_labels.append(('changes', max(3, 2 + path_w - len('changes') + 1)))
+                    # +3, not +1: the dirty block's right edge is column
+                    # `2 + path_w`, but the path's own trailing 2-space
+                    # margin (baked into `path_div_col = 3 + path_w + 2`)
+                    # sits between that edge and the divider -- so a +1
+                    # anchor lands 2 columns short of flush against the ┬.
+                    top_labels.append(('changes', max(3, 2 + path_w - len('changes') + 3)))
                     break
         # Elapsed cell: measured from the rendered timers. With a clear timer the
         # cell is [glyph, clear, session] (the clear-only degradation tier drops
@@ -1367,6 +1426,12 @@ def build_wide(
         _p5     = _ANSI_RE.sub('', padded_5h)
         _h5     = _token_offsets(_p5)
         _h5base = helper_anchor + 2
+        # No icon to carry the "which window" cue (show_icons off): the
+        # window tag rides the top border itself, right after the section's
+        # own leading ┬, one column ahead of where the icon would have sat.
+        _burn_label = 'burn rate' if view.cfg.show_icons else 'rate'
+        if not view.cfg.show_icons:
+            top_labels.append(('5h', helper_anchor + 1))
         if _h5:
             if view.cfg.show_icons:
                 top_labels.append(('5h', _h5base + _h5[0]))
@@ -1375,7 +1440,7 @@ def build_wide(
                 if len(_h5) >= 3 + _h5_shift:
                     top_labels.append(('used', _h5base + _h5[2 + _h5_shift]))
                 if len(_h5) >= 4 + _h5_shift:
-                    top_labels.append(('burn rate', _h5base + _h5[3 + _h5_shift]))
+                    top_labels.append((_burn_label, _h5base + _h5[3 + _h5_shift]))
             elif len(_h5) >= 2 + _h5_shift and _p5[_h5[1 + _h5_shift]] != '∞':
                 top_labels.append(('used', _h5base + _h5[1 + _h5_shift]))
         # 7d cell, when present: `7d` over the glyph, `used` over the pct, and
@@ -1385,13 +1450,15 @@ def build_wide(
             _p7     = _ANSI_RE.sub('', padded_7d)
             _h7     = _token_offsets(_p7)
             _h7base = sep_rate_col + 2
+            if not view.cfg.show_icons:
+                top_labels.append(('7d', sep_rate_col + 1))
             if _h7:
                 if view.cfg.show_icons:
                     top_labels.append(('7d', _h7base + _h7[0]))
                 if len(_h7) >= 2 + _h7_shift:
                     top_labels.append(('used', _h7base + _h7[1 + _h7_shift]))
                 if len(_h7) >= 3 + _h7_shift:
-                    top_labels.append(('burn rate', _h7base + _h7[2 + _h7_shift]))
+                    top_labels.append((_burn_label, _h7base + _h7[2 + _h7_shift]))
         # Cache countdown cell: anchor on the countdown value's own first
         # glyph (mirrors the token-offset approach used by the other
         # cells above) rather than a fixed offset, so left-padding growth
@@ -1404,7 +1471,11 @@ def build_wide(
             _pc = _ANSI_RE.sub('', cache_content)
             _co = _token_offsets(_pc)
             if _co:
-                top_labels.append(('cache', cache_div_col + 3 + _co[0]))
+                # +1 past the value's own first column: the superscript
+                # glyph is visually narrower than the digit it sits above,
+                # so nudging one column right centres it over the value
+                # instead of reading flush to its left edge.
+                top_labels.append(('cache', cache_div_col + 3 + _co[0] + 1))
 
     if pill_pct:
         rows += [
@@ -1462,12 +1533,14 @@ def build_wide(
     # where it cannot fit without overflow; then there are no vseps to thread, so
     # the seam carries no `ups`.
     if tokens_fits:
-        # Tokens/cost separator labels: input/cache/output measured over the
-        # three token columns left of the first vsep │ (input at the ↓ icon,
-        # cache at the '(' parenthetical, output at the ↑ icon after the ')'),
-        # cost centred in its own cell, and "skills + plugins" over the
-        # trailing column when present. The `sess/day` suffix names the
-        # session/day pair shown only when day stats are on.
+        # Tokens/cost separator labels: input/cache/output centred over the
+        # `/` in their own value (input's session/day split, cache's `(…)`
+        # parenthetical split, output's session/day split); `loc`/`cost` are
+        # section titles anchored flush at their own cell's start, `r/w`
+        # centres over the loc segment's own `/` divider, and "skills +
+        # plugins" labels the trailing column when present. None of these
+        # carry a `sess/day` suffix any more — the value row's session/day
+        # pairing speaks for itself.
         #
         # `vsep_cols` (0-3 entries) doesn't self-describe which segments it
         # bounds — (lines segment, trailing segment) are each independently
@@ -1477,10 +1550,10 @@ def build_wide(
         # re-derived by sniffing the rendered content for the read-lines
         # glyph — that glyph is itself gated on `show_icons`, so with icons
         # off the glyph-sniff silently read `False` even when the segment
-        # was present, dropping the 'loc r/w' label and mis-anchoring
-        # 'cost sess/day' onto the wrong (elbow) column. `has_trailing_seg`
-        # then follows from the arithmetic (vsep_cols length == 1 +
-        # has_lines + has_trailing).
+        # was present, dropping the 'loc'/'r/w' labels and mis-anchoring
+        # 'cost' onto the wrong (elbow) column. `has_trailing_seg` then
+        # follows from the arithmetic (vsep_cols length == 1 + has_lines +
+        # has_trailing).
         tok_labels: list[tuple[str, int]] = []
         if view.cfg.labels:
             _tp      = _ANSI_RE.sub('', line_tokens[0])
@@ -1493,54 +1566,58 @@ def build_wide(
                     _j += 1
                 if _j < len(_tp):
                     _out_i = _j
-            _suf = ' sess/day' if view.cfg.show_day_stats else ''
-            tok_labels.append((f'input{_suf}', 3))
+            # `sess/day` no longer names these labels (the value pair below
+            # already shows session/day without a caption); `input`/`cache`/
+            # `output` instead sit CENTRED over their own value's `/` divider,
+            # so the label reads directly above the split it names. `loc`/
+            # `cost` are section TITLES (no suffix to centre against), so
+            # they anchor at their own section's first column — flush after
+            # the leading `┬` — and `r/w` centres over the loc segment's own
+            # `/` divider (`tokens_cost`'s `build_lines`, icons-off form).
+            #
+            # All anchors are threaded through a single running `_prev_end`
+            # left-to-right across the WHOLE row (not just within one
+            # segment) — a centred label's natural position can, for small
+            # enough values, land close enough to its neighbour's (or even a
+            # fixed section-title anchor) to collide with no gap between
+            # them; each candidate anchor is clamped past the previous
+            # label's own end (+1 gap column) so no two labels ever overlap,
+            # falling back to plain left-to-right ordering rather than the
+            # (dropped) collision when centring can't be honoured exactly.
+            def _centre_on_slash(label: str, slash_i: int, fallback_col: int) -> int:
+                if slash_i == -1:
+                    return fallback_col
+                return max(3, 3 + slash_i - len(label) // 2)
+
+            _prev_end = 2  # column 3 is the row's own left edge; nothing precedes it
+
+            def _place(label: str, anchor: int) -> None:
+                nonlocal _prev_end
+                anchor = max(anchor, _prev_end + 1)
+                tok_labels.append((label, anchor))
+                _prev_end = anchor + len(label)
+
+            _place('input', _centre_on_slash('input', _tp.find('/'), 3))
             if _cache_i != -1:
-                # Centre `cache` over the `(…)` parenthetical (anchor = section
-                # midpoint − half the label width). When the column has room the
-                # label sits centred over its value; but with the long ` sess/day`
-                # suffix the centred label reaches back into the `input` columns,
-                # so fall back to the original left-anchor at the '(' rather than
-                # cannibalising `input` — centring is best-effort, applied only
-                # when it fits.
-                _cache_lbl = f'cache{_suf}'
-                _cache_end = _close_i if _close_i != -1 else _cache_i
-                _cache_mid = 3 + (_cache_i + _cache_end) // 2
-                _cache_anchor = max(3, _cache_mid - len(_cache_lbl) // 2)
-                if _cache_anchor < 3 + len(f'input{_suf}'):
-                    _cache_anchor = 3 + _cache_i
-                tok_labels.append((_cache_lbl, _cache_anchor))
+                _cache_end     = _close_i if _close_i != -1 else _cache_i
+                _cache_slash_i = _tp.find('/', _cache_i, _cache_end)
+                _place('cache', _centre_on_slash('cache', _cache_slash_i, 3 + _cache_i))
             if _out_i != -1:
-                tok_labels.append((f'output{_suf}', 3 + _out_i))
+                _out_slash_i = _tp.find('/', _out_i)
+                _place('output', _centre_on_slash('output', _out_slash_i, 3 + _out_i))
             _has_lines_seg    = has_lines_seg
             _has_trailing_seg = len(vsep_cols) > (1 + (1 if _has_lines_seg else 0))
-            # Centre `cost` within its cell instead of left-anchoring at the
-            # cell's start. The cell's left edge is the tokens│ (no lines
-            # segment) or lines│ (lines segment) vsep; its right edge is the
-            # cost│skills-plugins vsep when that trailing segment is present,
-            # else the cell runs unbounded to the row's own end (no right
-            # anchor to centre against, so left-anchor with a fixed offset).
-            _cost_left = vsep_cols[1] if _has_lines_seg else vsep_cols[0]
-            _cost_lbl  = f'cost{_suf}'
-            if _has_trailing_seg:
-                _cost_mid = (_cost_left + vsep_cols[-1]) // 2
-                tok_labels.append((_cost_lbl, max(_cost_left + 1, _cost_mid - len(_cost_lbl) // 2)))
-                tok_labels.append(('skills + plugins', vsep_cols[-1] + 2))
-            else:
-                tok_labels.append((_cost_lbl, _cost_left + 2))
-            # `lines read/changed` caption, centred between the first two vseps
-            # — only present when that segment itself is. The cell here is
-            # narrow enough that `_fit_label` (borders.py) almost always
-            # renders the abbreviated form ('loc r/w', LABEL_ABBREVIATIONS),
-            # not the full LINES_LABEL text passed through `tok_labels` — so
-            # centring must be computed against the abbreviation's length,
-            # not the long form's, or the placed text lands 3-4 columns left
-            # of true centre (the anchor is a start-of-text position, never
-            # re-centred once `_overlay_labels` picks a shorter rendered form).
             if _has_lines_seg:
-                _lines_disp = LABEL_ABBREVIATIONS.get(LINES_LABEL, LINES_LABEL)
-                _lines_mid  = (vsep_cols[0] + vsep_cols[1]) // 2
-                tok_labels.append((LINES_LABEL, max(vsep_cols[0] + 1, _lines_mid - len(_lines_disp) // 2)))
+                _place('loc', vsep_cols[0] + 1)
+                _rw_lbl        = 'r/w'
+                _lines_start_i = vsep_cols[0] - 2  # 0-indexed content offset just past the tokens│ vsep
+                _lines_end_i   = vsep_cols[1] - 3  # 0-indexed content offset of the lines│ vsep
+                _rw_slash_i    = _tp.find('/', _lines_start_i, _lines_end_i)
+                _place(_rw_lbl, _centre_on_slash(_rw_lbl, _rw_slash_i, vsep_cols[0] + 1))
+            _cost_left = vsep_cols[1] if _has_lines_seg else vsep_cols[0]
+            _place('cost', _cost_left + 1)
+            if _has_trailing_seg:
+                _place('skills + plugins', vsep_cols[-1] + 2)
         rows.append(RowSpec('separator_dim', downs=vsep_cols, labels=tok_labels))
         for lt in line_tokens:
             rows.append(RowSpec('content', content=lt))

@@ -387,9 +387,10 @@ def test_cache_label_aligns_with_value_when_icons_off(
 ) -> None:
     """With icons off, the cache vsep's leading space accounting differs from
     the icons-on case (no icon glyph precedes the value), so the anchor must
-    land on the same column as the value's own first glyph exactly — not just
-    within a tolerance. Regression test for the label drifting one column
-    left of the value when `show_icons=False`."""
+    land one column to the right of the value's own first glyph -- not
+    directly on top of it -- to read as centred over the digit rather than
+    flush to its left edge. Regression test for the label drifting off that
+    +1 offset when `show_icons=False`."""
     from helper import strip_ansi
     from yas.render.text import _SUPERSCRIPT_TO_ASCII
     _silence_dynamic(monkeypatch)
@@ -410,8 +411,230 @@ def test_cache_label_aligns_with_value_when_icons_off(
     label_col = top_line.find('cache')
 
     assert label_col != -1, 'cache label missing from top border'
-    assert label_col == value_col, (
-        f'cache label at col {label_col} not aligned with value at col {value_col} (icons off)'
+    assert label_col == value_col + 1, (
+        f'cache label at col {label_col} not one column right of value at col {value_col} (icons off)'
+    )
+
+
+def test_rate_limit_window_tags_when_icons_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With icons off, the 5h/7d rate-limit sections carry no icon to tell them
+    apart, so a `5h`/`7d` window tag must ride the top border immediately after
+    each section's own leading ┬ — otherwise the two sections are indistinguishable.
+    `burn rate` also shortens to `rate` in this mode so the label still fits."""
+    from helper import strip_ansi
+    from yas.render.text import _SUPERSCRIPT_TO_ASCII
+    _silence_dynamic(monkeypatch)
+    session = _session()
+    # Force both buckets into the full countdown+burn-rate form (resets_at in
+    # the future) so `remain`/`used`/`rate` are all present to check the
+    # `burn rate` -> `rate` shortening in this mode.
+    future = int(time.time()) + 4 * 3600
+    session.rate_limits = session_mod.RateLimits(
+        five_hour = session_mod.RateBucket(used_percentage=14.0, resets_at=future),
+        seven_day = session_mod.RateBucket(used_percentage=2.0,  resets_at=future + 3600),
+    )
+    view = SessionView(session, Config(justify=True, labels=True, show_icons=False))
+    spec = layout.build_wide(view, _tick(), 220, _r)
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    lines          = layout.render_layout(spec, _r)
+    top_line       = strip_ansi(lines[top_border_idx]).translate(_SUPERSCRIPT_TO_ASCII)
+
+    assert '5h' in top_line, 'expected a 5h window tag on the top border with icons off'
+    assert '7d' in top_line, 'expected a 7d window tag on the top border with icons off'
+    # `remain`/`used`/`rate` are the (possibly shortened) per-column labels;
+    # `burn rate` must NOT survive unshortened in this mode.
+    assert 'burn rate' not in top_line
+    assert 'rate' in top_line
+
+    # Each window tag lands on a fill column immediately after its section's
+    # own leading ┬ divider — never before it or detached from it.
+    downs = spec.rows[top_border_idx].downs
+    h5_div_col = downs[1] if len(downs) > 1 else downs[0]  # helper section's leading │/┬
+    tag5_col   = top_line.find('5h')
+    assert tag5_col != -1
+    assert tag5_col == h5_div_col, (
+        f'5h tag at col {tag5_col} not immediately after divider at col {h5_div_col}'
+    )
+
+
+def test_window_tag_gap_holds_across_width_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Structural invariant, not a by-product of slack: at ANY width where the
+    wide layout renders (icons off, labels on), the top border must never
+    read `┬⁷ᵈused` or `┬⁵ʰremain` — there must always be at least one fill
+    column between the `⁵ʰ`/`⁷ᵈ` window tag and the label that follows it.
+    Sweeps every width from MEDIUM_WIDTH (the narrowest width that still
+    selects the wide layout) up to 220, and additionally requires the
+    top/content/separator trio stay the same width as each other at every
+    step (the box must stay square even where the floor forces the row to
+    grow past the requested width)."""
+    from yas.constants import MEDIUM_WIDTH
+    from yas.render.text import _SUPERSCRIPT_TO_ASCII
+    _silence_dynamic(monkeypatch)
+
+    session = _session()
+    future = int(time.time()) + 3 * 3600 + 4 * 60
+    session.rate_limits = session_mod.RateLimits(
+        five_hour = session_mod.RateBucket(used_percentage=17.0, resets_at=future),
+        seven_day = session_mod.RateBucket(used_percentage=2.0,  resets_at=future + 7 * 24 * 3600),
+    )
+
+    # Sweep both `justify` states: the floor is NOT a by-product of the
+    # justify slack-distribution pass -- `justify=False` skips that pass
+    # entirely (leaving every `h5_left`/`h7_left` at their pre-floor 0), so
+    # this is the case that most directly exercises the unconditional floor
+    # rather than the "usually enough slack" happy path.
+    for justify in (True, False):
+        for width in range(MEDIUM_WIDTH, 221):
+            view = SessionView(session, Config(justify=justify, labels=True, show_icons=False))
+            spec = layout.build_wide(view, _tick(), width, _r)
+            lines = layout.render_layout(spec, _r)
+
+            row_widths = {len(_strip(ln)) for ln in lines[:3]}
+            assert len(row_widths) == 1, (
+                f'justify={justify} width={width}: top/content/separator rows not square: {row_widths}'
+            )
+
+            top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+            top_line = _strip(lines[top_border_idx]).translate(_SUPERSCRIPT_TO_ASCII)
+            downs    = spec.rows[top_border_idx].downs
+
+            # `downs` lists this row's divider columns in order: path,
+            # [elapsed], 5h, [7d], [cache]. A tag can only appear at all if
+            # its section's divider survived the shed loop, so just scan
+            # every divider column for a tag directly after it rather than
+            # assuming a fixed index.
+            for div_col in downs:
+                tag = top_line[div_col:div_col + 2]
+                if tag not in ('5h', '7d'):
+                    continue
+                nxt = top_line[div_col + 2] if div_col + 2 < len(top_line) else ''
+                assert not nxt.isalpha(), (
+                    f'justify={justify} width={width}: {tag!r} tag flush against its label '
+                    f'with no gap: {top_line[div_col:div_col + 12]!r}'
+                )
+
+
+def test_tokens_row_labels_square_across_width_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Structural invariant for the reworked bottom (tokens/cost) row labels,
+    icons off / labels on, swept across every width where the wide layout's
+    tokens/cost row renders: no `sess/day` suffix survives anywhere on the
+    row, `loc`/`cost` sit flush after their own section's leading `┬`
+    (never fill-led), and the tokens/cost/separator/content trio stays
+    square even where the floor forces the row to grow past the requested
+    width -- mirrors `test_window_tag_gap_holds_across_width_sweep` for the
+    top row."""
+    from yas.constants import TOKENS_COST_MIN_WIDTH
+    from yas.info.toolcounts import ToolCounts
+    from yas.info.transcript import TranscriptUsage
+    from yas.render.text import superscript
+    _silence_dynamic(monkeypatch)
+
+    session = _session()
+
+    for width in range(TOKENS_COST_MIN_WIDTH, 221):
+        view = SessionView(session, Config(labels=True, show_icons=False))
+        view.__dict__['transcript_usage'] = TranscriptUsage(
+            input_tokens=31700, cache_read_input_tokens=494100, output_tokens=8500,
+        )
+        view.__dict__['tool_counts'] = ToolCounts(lines_read=1600, lines_changed=522)
+        spec  = layout.build_wide(view, _tick(), width, _r)
+        lines = layout.render_layout(spec, _r)
+
+        row_widths = {len(_strip(ln)) for ln in lines[:3]}
+        assert len(row_widths) == 1, f'width={width}: top/content/separator rows not square: {row_widths}'
+
+        tok_row_idx = next(
+            (i for i, row in enumerate(spec.rows) if row.kind == 'content' and '$' in _strip(lines[i])),
+            None,
+        )
+        if tok_row_idx is None:
+            continue  # tokens/cost row shed entirely at this width
+        sep_idx = tok_row_idx - 1
+        sep     = _strip(lines[sep_idx])
+        cont    = _strip(lines[tok_row_idx])
+        assert len(sep) == len(cont) == width, f'width={width}: tokens row not square'
+        assert superscript('sess/day') not in sep, f'width={width}: stray sess/day suffix in {sep!r}'
+
+        for label in ('loc', 'cost'):
+            sup = superscript(label)
+            idx = sep.find(sup)
+            if idx == -1:
+                continue  # shed at this width -- shed ladder is exercised elsewhere
+            assert sep[idx - 1] == '┬', (
+                f'width={width}: {label!r} label not flush after its ┬: {sep[max(0, idx - 3):idx + 6]!r}'
+            )
+
+
+def _strip(s: str) -> str:
+    from helper import strip_ansi
+    return strip_ansi(s)
+
+
+def test_narrow_width_label_alignment_icons_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression for six alignment bugs that only surface once the wide row
+    is narrow enough that the 5h/7d/cache sections have little-to-no slack
+    (icons off, labels on): the `remain` label must survive (not collide
+    with the `5h` tag's own 2 glyph-columns), the `7d` tag must not run
+    straight into `used`, the `cache` label must sit one column right of its
+    value, the `changes` label must read flush against its divider, and the
+    box must stay square across all three rows."""
+    from helper import strip_ansi
+    from yas.info.git import GitInfo
+    from yas.render.text import _SUPERSCRIPT_TO_ASCII
+    _silence_dynamic(monkeypatch)
+
+    session = _session()
+    future = int(time.time()) + 3 * 3600 + 4 * 60
+    session.rate_limits = session_mod.RateLimits(
+        five_hour = session_mod.RateBucket(used_percentage=17.0, resets_at=future),
+        seven_day = session_mod.RateBucket(used_percentage=2.0,  resets_at=future + 7 * 24 * 3600),
+    )
+    view = SessionView(session, Config(justify=True, labels=True, show_icons=False))
+    view.__dict__['cache_countdown'] = (713.0, 38)
+    view.__dict__['clear_epoch']     = time.time() - (58 * 60 + 34)
+    view.__dict__['elapsed']         = '59:38'
+    view.__dict__['git'] = GitInfo(
+        branch='fix/colours-and-positioning', commit='', modified=2, untracked=1,
+    )
+
+    width = 165
+    spec  = layout.build_wide(view, _tick(), width, _r)
+    lines = layout.render_layout(spec, _r)
+
+    # Box stays square: every row renders to the exact requested width.
+    for kind, ln in zip((row.kind for row in spec.rows), lines):
+        assert len(strip_ansi(ln)) == width, f'{kind} row not square: {len(strip_ansi(ln))} != {width}'
+
+    top_border_idx = next(i for i, row in enumerate(spec.rows) if row.kind == 'top_border')
+    top_line = strip_ansi(lines[top_border_idx]).translate(_SUPERSCRIPT_TO_ASCII)
+    val_line = strip_ansi(lines[top_border_idx + 1])
+
+    # 1. `remain` survives and isn't glued to the `5h` tag.
+    assert '5hremain' not in top_line, '5h tag and remain label read flush with no gap'
+    assert 'remain' in top_line, 'remain label dropped at narrow width'
+
+    # 4. `7d` tag doesn't run straight into `used`.
+    assert '7dused' not in top_line, '7d tag and used label read flush with no gap'
+    assert 'used' in top_line
+
+    # 6. `changes` label ends flush against its divider (no trailing dashes
+    # between the label and the ┬ it anchors to).
+    changes_end = top_line.find('changes') + len('changes')
+    assert top_line[changes_end] == '┬', (
+        f'changes label not flush against its divider: next char {top_line[changes_end]!r}'
+    )
+
+    # 3. `cache` label sits exactly one column right of the cache value's
+    # own first column.
+    cache_div_col = spec.rows[top_border_idx].downs[-1]
+    after_div     = val_line[cache_div_col:]
+    left_pad      = len(after_div) - len(after_div.lstrip(' '))
+    value_col     = cache_div_col + left_pad
+    label_col     = top_line.find('cache')
+    assert label_col != -1, 'cache label missing from top border'
+    assert label_col == value_col + 1, (
+        f'cache label at col {label_col} not one column right of value at col {value_col}'
     )
 
 
@@ -1313,7 +1536,12 @@ def test_tree_labels_loc_slash_stacks_over_data_slash(monkeypatch: pytest.Monkey
     spec = layout.build_wide(view, _tick(), 200, _r)
     out  = layout.render_layout(spec, _r)
 
-    label_line = next(ln for ln in out if 'ʳᐟʷ' in strip_ansi(ln))
+    # Search for the combined 'ˡᵒᶜ ʳᐟʷ' (with its literal space) rather than
+    # bare 'ʳᐟʷ' -- the wide layout's own tokens/cost row now carries an
+    # independent, unrelated 'r/w' label (see build_wide's tok_labels) whose
+    # superscript is also a substring of 'ʳᐟʷ' and renders on an earlier row,
+    # so a bare search picks up the wrong line.
+    label_line = next(ln for ln in out if 'ˡᵒᶜ ʳᐟʷ' in strip_ansi(ln))
     data_line  = next(ln for ln in out if 'Explore' in strip_ansi(ln) or 'test desc' in strip_ansi(ln))
     label_plain = strip_ansi(label_line)
     data_plain  = strip_ansi(data_line)
