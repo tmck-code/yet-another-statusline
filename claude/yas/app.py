@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -118,6 +120,16 @@ def render(session_info: dict[str, object], width: int, *, bg_shift: str = 'warm
     if parse_cache is not None:
         parse_cache.save()
     return apply_glyphs(out, glyph_mode, single_width)
+
+
+def arm_watchdog(seconds: float) -> None:
+    '''Hard-exit the process after `seconds`, even while blocked reading stdin.'''
+    # os._exit, not sys.exit: it must work from a non-main thread and must not
+    # flush a half-built render onto stdout. Never call from `main` itself --
+    # tests call `main` in-process and the timer would kill pytest.
+    timer = threading.Timer(seconds, os._exit, args=(0,))
+    timer.daemon = True
+    timer.start()
 
 
 def main(t0: float | None = None) -> None:

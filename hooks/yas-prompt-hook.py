@@ -13,8 +13,20 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
+
+# Duplicates yas.constants.WATCHDOG_SECONDS (see that comment for the why);
+# same bare-script constraint as _state_path below.
+_WATCHDOG_SECONDS = 10.0
+
+
+def _arm_watchdog(seconds: float) -> None:
+    '''Hard-exit the process after `seconds`, even while blocked reading stdin.'''
+    timer = threading.Timer(seconds, os._exit, args=(0,))
+    timer.daemon = True
+    timer.start()
 
 
 def _state_path() -> Path:
@@ -71,4 +83,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    _arm_watchdog(_WATCHDOG_SECONDS)
     main()
