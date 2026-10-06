@@ -14,11 +14,13 @@ Requires Python 3.10+, and a [Nerd Font](https://www.nerdfonts.com/font-download
 curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | bash
 ```
 
-Alongside `statusLine.command`, the installer also wires a `UserPromptSubmit`
-hook (`yas-prompt-hook.py`) that records per-session prompt timestamps, enabling
-**accurate turn-scoped subagent display**. It is upserted idempotently — foreign
-hooks are preserved, stale paths are rewritten on upgrade — and removed on
-uninstall.
+YAS also runs a `UserPromptSubmit` hook (`yas-prompt-hook.py`) that records
+per-session prompt timestamps, enabling **accurate turn-scoped subagent display**.
+A plugin install registers it through the plugin's own `hooks/hooks.json`, so the
+installer keeps it out of `settings.json` (and removes a copy an older installer
+wrote there). For a git-clone install, or with the plugin disabled, the installer
+upserts it into `settings.json` instead: foreign hooks are preserved, stale paths
+are rewritten on upgrade, and it is removed on uninstall.
 
 Or install manually:
 

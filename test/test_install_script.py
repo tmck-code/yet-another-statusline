@@ -124,6 +124,89 @@ def test_wire_only_output_is_valid_json(wire_env):
     assert data['other'] == 123
 
 
+def _plugin_cache_root(config_dir: Path) -> Path:
+    """A plugin root laid out like a real marketplace install, hooks.json included."""
+    root = config_dir / 'plugins' / 'cache' / 'yet-another-statusline' / 'yas' / '9.9.9'
+    (root / 'claude').mkdir(parents=True)
+    (root / 'claude' / 'statusline_command.py').write_text('# fake renderer\n')
+    (root / 'hooks').mkdir()
+    (root / 'hooks' / 'hooks.json').write_text('{"hooks": {}}\n')
+    return root
+
+
+def test_wire_only_enabled_plugin_leaves_hook_to_hooks_json(wire_env):
+    config_dir, _, env = wire_env
+    root = _plugin_cache_root(config_dir)
+    stale = {'matcher': '', 'hooks': [{'type': 'command',
+             'command': '"python3" "/old/0.9.3/hooks/yas-prompt-hook.py"'}]}
+    (config_dir / 'settings.json').write_text(json.dumps({
+        'enabledPlugins': {'yas@yet-another-statusline': True},
+        'hooks': {'UserPromptSubmit': [stale]},
+    }))
+    result = run_install(env_extra={**env, 'CLAUDE_PLUGIN_ROOT': str(root)})
+    assert result.returncode == 0, result.stderr
+    data = json.loads((config_dir / 'settings.json').read_text())
+    assert data['statusLine']['command'].endswith('statusline_command.py"')
+    assert 'hooks' not in data  # stale YAS copy removed, nothing re-added
+    assert 'Removed duplicate settings.json prompt hook' in result.stdout
+
+
+def test_wire_only_disabled_plugin_still_wires_hook(wire_env):
+    config_dir, _, env = wire_env
+    root = _plugin_cache_root(config_dir)
+    (config_dir / 'settings.json').write_text(json.dumps({
+        'enabledPlugins': {'yas@yet-another-statusline': False},
+    }))
+    result = run_install(env_extra={**env, 'CLAUDE_PLUGIN_ROOT': str(root)})
+    assert result.returncode == 0, result.stderr
+    data = json.loads((config_dir / 'settings.json').read_text())
+    [entry] = data['hooks']['UserPromptSubmit']
+    assert 'yas-prompt-hook.py' in entry['hooks'][0]['command']
+
+
+def _local_checkout(tmp_path: Path) -> Path:
+    root = tmp_path / 'checkout'
+    (root / 'claude').mkdir(parents=True)
+    (root / 'claude' / 'statusline_command.py').write_text('# fake renderer\n')
+    (root / 'hooks').mkdir()
+    (root / 'hooks' / 'hooks.json').write_text('{"hooks": {}}\n')
+    return root
+
+
+def _seed_marketplace(config_dir: Path, source: dict) -> None:
+    (config_dir / 'plugins').mkdir(exist_ok=True)
+    (config_dir / 'plugins' / 'known_marketplaces.json').write_text(
+        json.dumps({'yet-another-statusline': {'source': source}})
+    )
+    (config_dir / 'settings.json').write_text(json.dumps({
+        'enabledPlugins': {'yas@yet-another-statusline': True},
+    }))
+
+
+def test_wire_only_directory_marketplace_leaves_hook_to_hooks_json(wire_env, tmp_path):
+    # A local-directory marketplace runs the plugin in place from its checkout.
+    config_dir, _, env = wire_env
+    root = _local_checkout(tmp_path)
+    _seed_marketplace(config_dir, {'source': 'directory', 'path': str(root)})
+    result = run_install(env_extra={**env, 'CLAUDE_PLUGIN_ROOT': str(root)})
+    assert result.returncode == 0, result.stderr
+    data = json.loads((config_dir / 'settings.json').read_text())
+    assert 'hooks' not in data
+
+
+def test_wire_only_dev_checkout_still_wires_hook(wire_env, tmp_path):
+    # `make dev/wire`: the enabled plugin comes from GitHub, so the checkout's
+    # own hooks.json is not loaded and the settings.json copy is needed.
+    config_dir, _, env = wire_env
+    root = _local_checkout(tmp_path)
+    _seed_marketplace(config_dir, {'source': 'github', 'repo': 'tmck-code/yet-another-statusline'})
+    result = run_install(env_extra={**env, 'CLAUDE_PLUGIN_ROOT': str(root)})
+    assert result.returncode == 0, result.stderr
+    data = json.loads((config_dir / 'settings.json').read_text())
+    [entry] = data['hooks']['UserPromptSubmit']
+    assert 'yas-prompt-hook.py' in entry['hooks'][0]['command']
+
+
 # ---------------------------------------------------------------------------
 # Task 7.2 — wire-only proves no jq dependency
 # ---------------------------------------------------------------------------

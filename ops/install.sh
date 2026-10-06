@@ -523,8 +523,8 @@ elif op == "wire":
     #   both mutations share a single backup/validate/restore. Foreign hooks (e.g.
     #   a user's docker-skill-nudge.py) are preserved; the YAS entry is matched by
     #   the "yas-prompt-hook.py" substring and replaced (idempotent / stale-path).
-    #   Double-fire note: a plugin-enabled user also gets the hook via hooks.json,
-    #   firing it twice per prompt — harmless (identical last-write-wins timestamp).
+    #   An empty HOOK_CMD removes the YAS entry instead (the enabled plugin's
+    #   hooks.json provides it), collapsing empty containers like del-hook.
     data = load(sys.argv[2])
     if not isinstance(data, dict):
         data = {}
@@ -549,10 +549,37 @@ elif op == "wire":
             for h in entry.get("hooks", []) or []
         )
     ups = [e for e in ups if not _is_yas(e)]
-    ups.append({"matcher": "", "hooks": [{"type": "command", "command": sys.argv[4]}]})
-    hooks["UserPromptSubmit"] = ups
-    data["hooks"] = hooks
+    if sys.argv[4]:
+        ups.append({"matcher": "", "hooks": [{"type": "command", "command": sys.argv[4]}]})
+    if ups:
+        hooks["UserPromptSubmit"] = ups
+    else:
+        hooks.pop("UserPromptSubmit", None)
+    if hooks:
+        data["hooks"] = hooks
+    else:
+        data.pop("hooks", None)
     sys.stdout.write(json.dumps(data, indent=2))
+
+elif op == "plugin-enabled":
+    # plugin-enabled FILE   print <marketplace> of every enabled "yas@<marketplace>"
+    #                       .enabledPlugins key, one per line (empty if none)
+    data = load(sys.argv[2])
+    plugins = data.get("enabledPlugins") if isinstance(data, dict) else None
+    if isinstance(plugins, dict):
+        for k, v in plugins.items():
+            name, _, mkt = str(k).partition("@")
+            if name == "yas" and mkt and v is True:
+                sys.stdout.write(mkt + "\n")
+
+elif op == "marketplace-dir":
+    # marketplace-dir FILE NAME   print the source path of known marketplace NAME
+    #                             when it is a local directory (empty otherwise)
+    data = load(sys.argv[2])
+    entry = data.get(sys.argv[3]) if isinstance(data, dict) else None
+    src = entry.get("source") if isinstance(entry, dict) else None
+    if isinstance(src, dict) and src.get("source") == "directory" and src.get("path"):
+        sys.stdout.write(str(src["path"]) + "\n")
 
 elif op == "get-hook":
     # get-hook FILE   print the current YAS hook command (empty if absent)
@@ -966,6 +993,25 @@ do_wire() {
     HOOK_SCRIPT="$PLUGIN_ROOT/hooks/yas-prompt-hook.py"
     printf '%b  Plugin root: %s%b\n' "$C_DIM" "$PLUGIN_ROOT" "$C_RESET"
 
+    # An enabled plugin already registers the prompt hook via its hooks.json.
+    # A second copy in settings.json fires it twice per prompt, and settings.json
+    # hooks are also run by other agents that read Claude Code's config (e.g.
+    # Cursor's third-party hooks), which plugin hooks are not. Claude Code runs
+    # the plugin from the plugin cache, or in place from a local-directory
+    # marketplace; any other root (git clone, `make dev/wire`) needs the copy.
+    local PLUGIN_HOOKS=0 YAS_MKT MKT_DIR
+    YAS_MKT=$(json_py plugin-enabled "$SETTINGS" 2>/dev/null | head -1)
+    if [ -n "$YAS_MKT" ] && [ -f "$PLUGIN_ROOT/hooks/hooks.json" ]; then
+        case "$PLUGIN_ROOT" in
+            */plugins/cache/*|*\\plugins\\cache\\*) PLUGIN_HOOKS=1 ;;
+        esac
+        MKT_DIR=$(json_py marketplace-dir "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" "$YAS_MKT" 2>/dev/null)
+        if [ -n "$MKT_DIR" ] \
+            && [ "$(cd "$MKT_DIR" 2>/dev/null && pwd -P)" = "$(cd "$PLUGIN_ROOT" && pwd -P)" ]; then
+            PLUGIN_HOOKS=1
+        fi
+    fi
+
     # Legacy cleanup
     for f in "$CLAUDE_CONFIG_DIR"/statusline-info-*; do
         [ -e "$f" ] || continue
@@ -1006,6 +1052,7 @@ do_wire() {
     local NEW_CMD OLD_CMD NEW_HOOK_CMD OLD_HOOK_CMD
     NEW_CMD="\"$PYTHON_BIN\" \"$SCRIPT\""
     NEW_HOOK_CMD="\"$PYTHON_BIN\" \"$HOOK_SCRIPT\""
+    [ "$PLUGIN_HOOKS" = "1" ] && NEW_HOOK_CMD=""
     OLD_CMD=$(json_py get-key "$SETTINGS" statusLine.command 2>/dev/null || printf '')
     OLD_HOOK_CMD=$(json_py get-hook "$SETTINGS" 2>/dev/null || printf '')
     if [ "$OLD_CMD" = "$NEW_CMD" ] && [ "$OLD_HOOK_CMD" = "$NEW_HOOK_CMD" ]; then
@@ -1018,7 +1065,11 @@ do_wire() {
     # dry-run wiring
     if [ "$DRY_RUN" = "1" ]; then
         printf '%b  Would wire statusLine.command → %s%b\n' "$C_DIM" "$NEW_CMD" "$C_RESET"
-        printf '%b  Would wire UserPromptSubmit hook → %s%b\n' "$C_DIM" "$NEW_HOOK_CMD" "$C_RESET"
+        if [ -n "$NEW_HOOK_CMD" ]; then
+            printf '%b  Would wire UserPromptSubmit hook → %s%b\n' "$C_DIM" "$NEW_HOOK_CMD" "$C_RESET"
+        else
+            printf '%b  Would leave the prompt hook to the plugin hooks.json%b\n' "$C_DIM" "$C_RESET"
+        fi
         exit 0
     fi
 
@@ -1050,9 +1101,14 @@ do_wire() {
     fi
 
     [ -n "$OLD_CMD" ] && [ "$OLD_CMD" != "$NEW_CMD" ] && printf '%b  Replaced stale path: %s%b\n' "$C_DIM" "$OLD_CMD" "$C_RESET"
-    [ -n "$OLD_HOOK_CMD" ] && [ "$OLD_HOOK_CMD" != "$NEW_HOOK_CMD" ] && printf '%b  Replaced stale hook path: %s%b\n' "$C_DIM" "$OLD_HOOK_CMD" "$C_RESET"
+    [ -n "$OLD_HOOK_CMD" ] && [ -n "$NEW_HOOK_CMD" ] && [ "$OLD_HOOK_CMD" != "$NEW_HOOK_CMD" ] && printf '%b  Replaced stale hook path: %s%b\n' "$C_DIM" "$OLD_HOOK_CMD" "$C_RESET"
+    [ -n "$OLD_HOOK_CMD" ] && [ -z "$NEW_HOOK_CMD" ] && printf '%b  Removed duplicate settings.json prompt hook: %s%b\n' "$C_DIM" "$OLD_HOOK_CMD" "$C_RESET"
     printf '%b  statusLine set → %s%b\n' "$C_GREEN" "$NEW_CMD" "$C_RESET"
-    printf '%b  prompt hook set → %s%b\n' "$C_GREEN" "$NEW_HOOK_CMD" "$C_RESET"
+    if [ -n "$NEW_HOOK_CMD" ]; then
+        printf '%b  prompt hook set → %s%b\n' "$C_GREEN" "$NEW_HOOK_CMD" "$C_RESET"
+    else
+        printf '%b  prompt hook: provided by the plugin hooks.json%b\n' "$C_GREEN" "$C_RESET"
+    fi
     printf '%b  Config dir: %s%b\n' "$C_DIM" "$CLAUDE_CONFIG_DIR" "$C_RESET"
     ok "  Done. Reload Claude Code to activate the statusline."
 }
