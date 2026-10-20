@@ -24,6 +24,7 @@ from yas.info.transcript import TranscriptUsage
 from yas.info.toolcounts import ToolCounts
 from yas.info.clear import read_clear_epoch
 from yas.info.parsecache import TranscriptCache
+from yas.guard import guarded
 
 
 # ---------------------------------------------------------------------------
@@ -73,30 +74,42 @@ def _fmt_elapsed(mtime: float | None, now: float) -> str:
     return _fmt_duration_ms(int(max(0, now - mtime) * 1000))
 
 
+def _no_changes() -> list[tuple[str, int, int]]:
+    return []
+
+
+def _no_epoch() -> float | None:
+    return None
+
+
 # ---------------------------------------------------------------------------
 # SessionView
 # ---------------------------------------------------------------------------
 
 class SessionView:
-    def __init__(self, session: SessionInfo, cfg: Config, now: float | None = None, cache: TranscriptCache | None = None) -> None:
+    def __init__(self, session: SessionInfo, cfg: Config, now: float | None = None, cache: TranscriptCache | None = None, minimal: bool = False) -> None:
         self.session     = session
         self.cfg         = cfg
         self.now         = time.time() if now is None else now
         self.parse_cache = cache
+        # Optional gathers that raised this render (names, for the marker), and
+        # the retry mode that skips every optional gather (see yas.guard).
+        self.failed: list[str] = []
+        self.minimal           = minimal
 
     # ------------------------------------------------------------------
     # Leaf readers — each delegates to its existing classmethod
     # ------------------------------------------------------------------
 
-    @cached_property
+    @guarded(GitInfo)
     def git(self) -> GitInfo:
         return GitInfo.from_cwd(self.session.cwd, status=self.cfg.show_git_status)
 
-    @cached_property
+    @guarded(LoadedSkills)
     def skills(self) -> LoadedSkills:
         return LoadedSkills.from_transcript(self.session.transcript_path, cache=self.parse_cache)
 
-    @cached_property
+    @guarded(RunningSubagents)
     def subagents(self) -> RunningSubagents:
         return RunningSubagents.from_session(
             self.session.session_id,
@@ -104,22 +117,22 @@ class SessionView:
             cache=self.parse_cache,
         )
 
-    @cached_property
+    @guarded(RunningWorkflows)
     def workflows(self) -> RunningWorkflows:
         return RunningWorkflows.from_session(
             self.session.session_id,
             self.session.workspace.project_dir,
         )
 
-    @cached_property
+    @guarded(TaskList)
     def tasks(self) -> TaskList:
         return TaskList.from_session(self.session.transcript_path, cache=self.parse_cache)
 
-    @cached_property
+    @guarded(TranscriptUsage)
     def transcript_usage(self) -> TranscriptUsage:
         return TranscriptUsage.from_transcript(self.session.transcript_path, cache=self.parse_cache)
 
-    @cached_property
+    @guarded(TranscriptUsage)
     def rate_limit_usage(self) -> TranscriptUsage:
         """Main + every subagent transcript's usage, for the rate-limit simulator only.
 
@@ -136,11 +149,11 @@ class SessionView:
             main_usage=self.transcript_usage,
         )
 
-    @cached_property
+    @guarded(_no_changes)
     def changes(self) -> list[tuple[str, int, int]]:
         return OpenSpec.from_cwd(self.session.cwd, max_depth=self.cfg.openspec_scan_depth).changes
 
-    @cached_property
+    @guarded(ToolCounts)
     def tool_counts(self) -> ToolCounts:
         """Per-tool (main, sub) tool_use counts, plus session and per-agent line totals.
 
@@ -200,7 +213,7 @@ class SessionView:
         elapsed_pct = max(0, min(100, 100 - round(remaining * 100 / cache_ttl)))
         return (remaining, elapsed_pct)
 
-    @cached_property
+    @guarded(_no_epoch)
     def clear_epoch(self) -> float | None:
         """Epoch of the most-recent /clear marker in this transcript, or None.
 

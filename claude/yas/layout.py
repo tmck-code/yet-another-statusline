@@ -141,18 +141,24 @@ class LayoutSpec:
         self.rows       = rows if rows is not None else []
 
 
-def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer) -> None:
-    """Append a compact yas.toml config-error row above the bottom border.
+def append_error_row(rows: list[RowSpec], cfg: Config, width: int, r: Renderer, failed: list[str] | None = None) -> None:
+    """Append a compact error row above the bottom border.
 
-    No-op when ``cfg`` has no errors. The row is plain content (no elbows or
-    dividers); the closing border's elbows shift up onto a dim separator placed
-    above the row, so the box math is unchanged. Truncated to the render width
-    via ``_visible_width`` so a long list of rejected knobs never breaks the box.
+    Covers yas.toml rejections (``cfg.errors``) and optional sections that
+    raised this render (``failed``, see ``yas.guard``). No-op when both are
+    empty. The row is plain content (no elbows or dividers); the closing
+    border's elbows shift up onto a dim separator placed above the row, so the
+    box math is unchanged. Truncated to the render width via
+    ``_visible_width`` so a long list never breaks the box.
     """
-    if not cfg.errors:
+    parts = []
+    if cfg.errors:
+        parts.append(f'yas.toml: {len(cfg.errors)} values ignored ({", ".join(cfg.errors)})')
+    if failed:
+        parts.append(f'yas: skipped {", ".join(failed)} (see errors.log)')
+    if not parts:
         return
-    names = ', '.join(cfg.errors)
-    text  = f'{GLYPH_CONFIG_WARN} yas.toml: {len(cfg.errors)} values ignored ({names})'
+    text  = f'{GLYPH_CONFIG_WARN} {" | ".join(parts)}'
     avail = max(1, width - 4)  # inner content area between "│ " and " │"
     if _visible_width(text) > avail:
         text = text[:avail - 1] + ELLIPSIS
@@ -775,7 +781,7 @@ def build_narrow(
         rows.append(RowSpec('separator_dim', ups=tail_ups))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
-    append_error_row(rows, view.cfg, width, r)
+    append_error_row(rows, view.cfg, width, r, view.failed)
     spec.rows = rows
     return spec
 
@@ -860,7 +866,7 @@ def build_medium(
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
-    append_error_row(rows, view.cfg, width, r)
+    append_error_row(rows, view.cfg, width, r, view.failed)
     spec.rows = rows
     return spec
 
@@ -1830,7 +1836,7 @@ def build_wide(
     else:
         rows.append(RowSpec('bottom_border', ups=pending_ups + tail_ups))
 
-    append_error_row(rows, view.cfg, width, r)
+    append_error_row(rows, view.cfg, width, r, view.failed)
     spec.rows = rows
     return spec
 

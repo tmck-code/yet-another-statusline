@@ -82,6 +82,11 @@ def render_log() -> Path:
     return runtime_dir() / 'render.log'
 
 
+def errors_log() -> Path:
+    'Bounded log of exceptions swallowed by the render guard (see yas.guard).'
+    return runtime_dir() / 'errors.log'
+
+
 def rate_limit_log() -> Path:
     """Per-session cumulative-token samples backing the [rate_limits] simulator.
 
@@ -112,6 +117,8 @@ def settings_path() -> Path:
 
 
 MIN_WIDTH    = 40
+ERRORS_LOG_MAX_BYTES  = 32_768       # errors.log keeps whole newest entries within this size
+ERRORS_LOG_ENTRY_MARK = '=== yas error'  # starts every errors.log entry
 DEFAULT_MAX_WIDTH    = 140
 # Repo-levels (not path segments) the OpenSpec downward scan descends below
 # cwd before pruning. 1 (the historic hardcoded behavior) finds a nested

@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 from yas.config import Config
+from yas.guard import note_failure, record_failure
 from yas.constants import (
     MIN_WIDTH, NARROW_WIDTH, MEDIUM_WIDTH, VERSION,
     config_path, session_payload_path, sessions_dir, version_file,
@@ -132,6 +133,38 @@ def arm_watchdog(seconds: float) -> None:
     timer.start()
 
 
+def fallback_line(info: dict[str, object]) -> str:
+    'Last-resort one-line statusline: model, cwd basename and an error marker (plain ASCII).'
+    model = info.get('model')
+    name  = _as_str(model.get('display_name')) if isinstance(model, dict) else ''
+    cwd   = _as_str(info.get('cwd'))
+    base  = os.path.basename(cwd.rstrip('/\\'))
+    return ' | '.join(p for p in (name, base, 'yas: render error') if p)
+
+
+def render_guarded(info: dict[str, object], width: int, *, bg_shift: str, theme: Theme, cfg: Config, timing: str, view: SessionView | None) -> str:
+    """`render`, but one failing section never blanks the statusline.
+
+    1. Normal render. 2. On any exception: log it, retry once with a minimal
+    SessionView (every optional gather skipped) carrying a failure marker.
+    3. If that raises too: a plain one-line fallback. Never raises, never
+    prints a traceback; details go to errors.log (yas.guard).
+    """
+    kwargs = dict(bg_shift=bg_shift, theme=theme, glyph_mode=cfg.glyph_mode, single_width=cfg.single_width, timing=timing)
+    try:
+        return render(info, width, view=view, **kwargs)  # type: ignore[arg-type]
+    except Exception as exc:
+        record_failure('render', exc)
+    try:
+        session = view.session if view is not None else SessionInfo.from_dict(info)
+        minimal = SessionView(session, cfg, minimal=True)
+        minimal.failed.append('optional sections')
+        return render(info, width, view=minimal, **kwargs)  # type: ignore[arg-type]
+    except Exception as exc:
+        record_failure('render-retry', exc)
+    return fallback_line(info)
+
+
 def main(t0: float | None = None) -> None:
     # Wall-clock start for the bottom-border run-time annotation. The entry
     # shim passes a perf_counter() stamped before importing the app so the
@@ -181,7 +214,10 @@ def main(t0: float | None = None) -> None:
         session     = SessionInfo.from_dict(info)
         parse_cache = TranscriptCache.load(session.session_id) if cfg.transcript_cache else None
         view        = SessionView(session, cfg, cache=parse_cache)
-        session.rate_limits = _apply_rate_limit_sim(info, cfg, view.rate_limit_usage)
+        try:
+            session.rate_limits = _apply_rate_limit_sim(info, cfg, view.rate_limit_usage)
+        except Exception as exc:
+            note_failure(view.failed, 'rate_limits', exc)
 
     # Write payload so the multi-session observer can index it. Keyed by
     # session_id and overwritten in place under yas/state/sessions/, so the
@@ -215,6 +251,6 @@ def main(t0: float | None = None) -> None:
     else:
         width = max(MIN_WIDTH, min(cfg.max_width, raw_tw - 6))
 
-    sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme, glyph_mode=cfg.glyph_mode, single_width=cfg.single_width, timing=timing, view=view))
+    sys.stdout.write(render_guarded(info, width, bg_shift=bg_shift, theme=theme, cfg=cfg, timing=timing, view=view))
     if cfg.show_render_time:
         RenderTiming.write(session_id, (time.perf_counter() - t0) * 1000.0)
