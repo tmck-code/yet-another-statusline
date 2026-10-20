@@ -21,7 +21,7 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 
 from yas.constants import (
     DEFAULT_CONTEXT_LABELS,
@@ -468,6 +468,171 @@ def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
     return tuple(nums)
 
 
+SHELL_COMMAND_STYLES = ('badge', 'list')
+SHELL_COMMAND_POSITIONS = ('right', 'below')
+SHELL_COMMAND_CPU_MODES = ('current', 'average')
+
+
+class ElapsedConfig(NamedTuple):
+    """The ``[shell_commands.elapsed]`` group."""
+    enabled: bool = True
+
+
+class CpuConfig(NamedTuple):
+    """The ``[shell_commands.cpu]`` group."""
+    enabled:      bool  = True
+    mode:         str   = 'current'    # current | average
+    warn_percent: float = 80.0
+
+
+class MemoryConfig(NamedTuple):
+    """The ``[shell_commands.memory]`` group."""
+    enabled: bool  = True
+    warn_mb: float = 1024.0
+
+
+class ShellCommandsConfig(NamedTuple):
+    """The ``[shell_commands]`` table: running shell command display."""
+    enabled:           bool          = True
+    style:             str           = 'badge'      # badge | list
+    position:          str           = 'right'      # right | below
+    max_items:         int           = 5
+    max_command_width: int           = 40
+    elapsed:           ElapsedConfig = ElapsedConfig()
+    cpu:               CpuConfig     = CpuConfig()
+    memory:            MemoryConfig  = MemoryConfig()
+
+
+DEFAULT_SHELL_COMMANDS = ShellCommandsConfig()
+
+
+def _int_min(minimum: int) -> Callable[[object, str], int]:
+    def parse(raw: object, origin: str) -> int:
+        if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+            raise ValueError('expected an integer')
+        n = int(raw)
+        if n < minimum:
+            raise ValueError(f'must be >= {minimum}')
+        return n
+    return parse
+
+
+def _nonneg_number(raw: object, origin: str) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise ValueError('expected a number')
+    x = float(raw)
+    if not x >= 0:  # also rejects NaN
+        raise ValueError('must be >= 0')
+    return x
+
+
+def _choice(options: tuple[str, ...]) -> Callable[[object, str], str]:
+    def parse(raw: object, origin: str) -> str:
+        v = str(raw).strip().lower()
+        if v in options:
+            return v
+        raise ValueError(f"expected one of {', '.join(options)}, got {v!r}")
+    return parse
+
+
+_SHELL_COMMAND_PARSERS: dict[str, Callable[[object, str], object]] = {
+    'enabled':           _parse_bool,
+    'style':             _choice(SHELL_COMMAND_STYLES),
+    'position':          _choice(SHELL_COMMAND_POSITIONS),
+    'max_items':         _int_min(1),
+    'max_command_width': _int_min(8),
+}
+
+_SHELL_COMMAND_GROUPS: dict[str, tuple[Callable[..., object], dict[str, Callable[[object, str], object]]]] = {
+    'elapsed': (ElapsedConfig, {'enabled': _parse_bool}),
+    'cpu':     (CpuConfig, {
+        'enabled':      _parse_bool,
+        'mode':         _choice(SHELL_COMMAND_CPU_MODES),
+        'warn_percent': _nonneg_number,
+    }),
+    'memory':  (MemoryConfig, {'enabled': _parse_bool, 'warn_mb': _nonneg_number}),
+}
+
+
+def _parse_shell_command_group(
+    name: str, raw: object, errors: list[str], debug: list[str],
+) -> object:
+    """Validate one [shell_commands.<name>] group; a bool is shorthand for ``enabled``."""
+    cls, parsers = _SHELL_COMMAND_GROUPS[name]
+    label = f'shell_commands.{name}'
+    if isinstance(raw, bool):
+        return cls(enabled=raw)
+    if not isinstance(raw, dict):
+        errors.append(label)
+        debug.append(f'{label}: value {raw!r} rejected (expected a boolean or a table)')
+        return cls()
+    defaults = cls()
+    values: dict[str, object] = {}
+    for key, parse in parsers.items():
+        if key in raw:
+            values[key] = _resolve(
+                f'{label}.{key}', [('toml', raw[key])], parse,
+                getattr(defaults, key), errors, debug)
+    return cls(**values)
+
+
+def _parse_shell_commands(raw: object, errors: list[str], debug: list[str]) -> ShellCommandsConfig:
+    """Validate the [shell_commands] table; a bad key falls back to its default."""
+    if not isinstance(raw, dict):
+        return DEFAULT_SHELL_COMMANDS
+    values: dict[str, Any] = {}  # kwargs for the NamedTuple, one type per field
+    for key, parse in _SHELL_COMMAND_PARSERS.items():
+        if key in raw:
+            values[key] = _resolve(
+                f'shell_commands.{key}', [('toml', raw[key])], parse,
+                getattr(DEFAULT_SHELL_COMMANDS, key), errors, debug)
+    for name in _SHELL_COMMAND_GROUPS:
+        if name in raw:
+            values[name] = _parse_shell_command_group(name, raw[name], errors, debug)
+    return ShellCommandsConfig(**values)
+
+
+class ResourceUsageConfig(NamedTuple):
+    """The ``[agents].resource_usage`` group: per-subagent process columns."""
+    enabled: bool = True
+    cpu:     bool = True
+    memory:  bool = True
+    elapsed: bool = True
+
+
+class AgentsConfig(NamedTuple):
+    """The ``[agents]`` table."""
+    resource_usage: ResourceUsageConfig = ResourceUsageConfig()
+
+
+DEFAULT_AGENTS = AgentsConfig()
+RESOURCE_USAGE_KEYS = ('enabled', 'cpu', 'memory', 'elapsed')
+
+
+def _parse_resource_usage(raw: object, errors: list[str], debug: list[str]) -> ResourceUsageConfig:
+    """Validate ``agents.resource_usage``; a bool is shorthand for ``enabled``."""
+    label = 'agents.resource_usage'
+    if isinstance(raw, bool):
+        return ResourceUsageConfig(enabled=raw)
+    if not isinstance(raw, dict):
+        errors.append(label)
+        debug.append(f'{label}: value {raw!r} rejected (expected a boolean or a table)')
+        return ResourceUsageConfig()
+    defaults = ResourceUsageConfig()
+    values = {
+        key: _resolve(f'{label}.{key}', [('toml', raw[key])], _parse_bool, getattr(defaults, key), errors, debug)
+        for key in RESOURCE_USAGE_KEYS if key in raw
+    }
+    return ResourceUsageConfig(**values)
+
+
+def _parse_agents(raw: object, errors: list[str], debug: list[str]) -> AgentsConfig:
+    """Validate the [agents] table; a bad key falls back to its default."""
+    if not isinstance(raw, dict) or 'resource_usage' not in raw:
+        return DEFAULT_AGENTS
+    return AgentsConfig(resource_usage=_parse_resource_usage(raw['resource_usage'], errors, debug))
+
+
 class Config:
     __slots__ = (
         'max_width', 'full_width', 'justify', 'labels', 'soft_limit',
@@ -475,7 +640,7 @@ class Config:
         'show_day_stats', 'context_state', 'context_labels', 'context_thresholds',
         'show_render_time', 'show_git_status', 'show_tool_uses', 'show_tokens_over_time', 'soft_limit_models',
         'openspec_scan_depth', 'show_icons', 'transcript_cache', 'rate_limit_rules',
-        'rate_limit_weights', 'errors', 'debug_lines',
+        'rate_limit_weights', 'shell_commands', 'agents', 'errors', 'debug_lines',
     )
 
     max_width:          int
@@ -502,6 +667,8 @@ class Config:
     transcript_cache:   bool
     rate_limit_rules:   dict[str, RateLimitRule]
     rate_limit_weights: RateLimitWeights
+    shell_commands:     ShellCommandsConfig
+    agents:             AgentsConfig
     errors:             tuple[str, ...]
     debug_lines:        tuple[str, ...]
 
@@ -531,6 +698,8 @@ class Config:
         transcript_cache:   bool = DEFAULT_TRANSCRIPT_CACHE,
         rate_limit_rules:   dict[str, RateLimitRule] | None = None,
         rate_limit_weights: RateLimitWeights = DEFAULT_RATE_LIMIT_WEIGHTS,
+        shell_commands:     ShellCommandsConfig = DEFAULT_SHELL_COMMANDS,
+        agents:             AgentsConfig = DEFAULT_AGENTS,
         errors:             tuple[str, ...] = (),
         debug_lines:        tuple[str, ...] = (),
     ) -> None:
@@ -559,6 +728,8 @@ class Config:
         s(self, 'transcript_cache', transcript_cache)
         s(self, 'rate_limit_rules', rate_limit_rules if rate_limit_rules is not None else {})
         s(self, 'rate_limit_weights', rate_limit_weights)
+        s(self, 'shell_commands', shell_commands)
+        s(self, 'agents', agents)
         s(self, 'errors', errors)
         s(self, 'debug_lines', debug_lines)
 
@@ -582,6 +753,8 @@ class Config:
                 f'show_icons={self.show_icons}, transcript_cache={self.transcript_cache}, '
                 f'rate_limit_rules={self.rate_limit_rules!r}, '
                 f'rate_limit_weights={self.rate_limit_weights!r}, '
+                f'shell_commands={self.shell_commands!r}, '
+                f'agents={self.agents!r}, '
                 f'errors={self.errors!r}, debug_lines={self.debug_lines!r})')
 
     @classmethod
@@ -726,6 +899,9 @@ class Config:
         rate_limit_weights = _parse_rate_limit_weights(
             rate_limits_table.get('weights'), errors, debug)
 
+        shell_commands = _parse_shell_commands(_table('shell_commands'), errors, debug)
+        agents = _parse_agents(_table('agents'), errors, debug)
+
         return cls(
             max_width=max_width,
             full_width=full_width,
@@ -751,6 +927,8 @@ class Config:
             transcript_cache=transcript_cache,
             rate_limit_rules=rate_limit_rules,
             rate_limit_weights=rate_limit_weights,
+            shell_commands=shell_commands,
+            agents=agents,
             errors=tuple(errors),
             debug_lines=tuple(debug),
         )

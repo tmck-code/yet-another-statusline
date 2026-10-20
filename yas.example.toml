@@ -183,3 +183,40 @@
 # cache_creation = 1.25
 # cache_read     = 0.1
 # output         = 5.0
+
+# [shell_commands]  # every running Bash-tool command, foreground and background
+# enabled = true            # bool; show running shell commands at all
+# style = "badge"           # "badge" = a compact one-line summary;
+#                           #   "list" = a header plus one line per command
+# position = "right"        # "right" = badge on the first subagent row, or the list as a
+#                           #   section beside the subagents (falls back to "below" when the
+#                           #   box is too narrow or there are no subagents);
+#                           #   "below" = rows under the subagents (a badge gets its own row)
+# max_items = 5             # int >= 1; most commands listed (style = "list")
+# max_command_width = 40    # int >= 8; command text is truncated to this many columns (list below, badge,
+#                           #   and a squeezed side section). In the side section the command grows into free
+#                           #   space; the cap applies only when space is short. With no subagents the list
+#                           #   may grow to 2x this and is closed by a divider if >= 60 columns stay empty
+#                           #   to its right. Leading `cd <path> &&` segments are not shown.
+#
+# Each group below is an inline table. It may instead be written as a
+# [shell_commands.cpu] sub-table (identical), or as a bool shorthand:
+# `cpu = false` hides CPU and keeps the other keys at their defaults;
+# `cpu = true` means all defaults. Missing keys take their defaults.
+# elapsed = { enabled = true }    # time since the command started
+# cpu     = { enabled = true, mode = "current", warn_percent = 80.0 }
+#   mode: "current" = CPU used since the previous refresh divided by wall time
+#           (blank on the first refresh);
+#         "average" = total CPU time / time since the command started
+#   warn_percent: number >= 0; CPU at or above this is drawn in the warn colour
+# memory  = { enabled = true, warn_mb = 1024.0 }
+#   warn_mb: number >= 0; memory at or above this (MB) is drawn in the warn colour
+
+# [agents]
+# resource_usage = { enabled = true, cpu = true, memory = true, elapsed = true }
+#   A running Bash process started by a subagent shows its CPU, memory and elapsed
+#   time at the right end of that subagent's row, and is removed from the shell
+#   commands section. Columns are summed per subagent (elapsed = longest) and aligned
+#   across rows. Accepts a bool shorthand: `resource_usage = false` keeps subagent
+#   processes in the shell commands section; `true` means all defaults.
+#   Warn colours use [shell_commands].cpu.warn_percent and .memory.warn_mb.

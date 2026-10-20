@@ -81,18 +81,21 @@ def fold_file(
     subkey: str,
     init: Callable[[], _S],
     fold: Callable[[_S, list[bytes]], _S],
+    version: int = 0,
 ) -> _S:
     """Resume or restart an incremental fold over the complete lines of `path`.
 
     init() returns a fresh JSON-serialisable state; fold(state, lines) returns
     the new state for the given new complete lines (bytes, no newline). With
     cache=None this is a full parse with no store. An unreadable file yields
-    init() and stores nothing.
+    init() and stores nothing. `version` is the schema version of the state:
+    bump it whenever init()/fold() change the state shape, so entries stored
+    under an older shape are re-folded from 0 instead of resumed.
     """
     state = init()
     offset = 0
     if cache is not None and st is not None:
-        hit = cache.get_fold(path, st, key, subkey)
+        hit = cache.get_fold(path, st, key, subkey, version)
         if hit is not None:
             state, offset = hit
 
@@ -106,7 +109,7 @@ def fold_file(
 
     state = fold(state, chunk.split(b'\n')[:-1])
     if cache is not None and st is not None:
-        cache.put_fold(path, st, key, subkey, state, new_offset, check)
+        cache.put_fold(path, st, key, subkey, state, new_offset, check, version)
     return state
 
 
@@ -596,12 +599,13 @@ class TranscriptCache:
         self._dirty = True
 
     def get_fold(
-        self, path: str, st: os.stat_result, key: str, subkey: str = ''
+        self, path: str, st: os.stat_result, key: str, subkey: str = '', version: int = 0
     ) -> tuple[Any, int] | None:
         """Return (state, offset) for an incremental fold, or None to re-parse from 0.
 
         Valid only while dev/ino match `st`, st_size >= offset, and the stored
-        prefix-check bytes still match the file. Independent of mtime.
+        prefix-check bytes still match the file and the stored state `version`
+        (absent = 0) equals `version`. Independent of mtime.
         """
         entry = self._entries.get(path)
         folds = entry.get('fold') if entry is not None else None
@@ -617,6 +621,7 @@ class TranscriptCache:
             or not isinstance(offset, int)
             or st.st_size < offset
             or 'state' not in rec
+            or rec.get('ver', 0) != version
         ):
             return None
 
@@ -633,10 +638,11 @@ class TranscriptCache:
         state: Any,
         offset: int,
         check: str,
+        version: int = 0,
     ) -> None:
         """Store fold state at `offset`.
 
-        Layout: entry['fold'][key][subkey] = {dev, ino, off, chk, state}.
+        Layout: entry['fold'][key][subkey] = {dev, ino, off, chk, state, ver}.
         Subkeys are trimmed to TRANSCRIPT_CACHE_SUBKEY_MAX.
         """
         entry = self._entries.setdefault(path, {})
@@ -651,7 +657,7 @@ class TranscriptCache:
             subs = folds[key] = {}
 
         subs[subkey] = {
-            'dev': st.st_dev, 'ino': st.st_ino, 'off': offset, 'chk': check, 'state': state,
+            'dev': st.st_dev, 'ino': st.st_ino, 'off': offset, 'chk': check, 'state': state, 'ver': version,
         }
         if len(subs) > TRANSCRIPT_CACHE_SUBKEY_MAX:
             for old_key in sorted(subs)[:-TRANSCRIPT_CACHE_SUBKEY_MAX]:

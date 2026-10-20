@@ -643,6 +643,7 @@ def write_transcript(
     base_time: float | None = None,
     cache_anchor_secs_ago: float | None = None,
     cache_1h_tier: bool = False,
+    bash_calls: list[tuple[str, bool]] | None = None,
 ) -> None:
     if base_time is None:
         base_time = time.time()
@@ -730,6 +731,20 @@ def write_transcript(
                     'content': [content],
                 },
             })
+    for i, (command, background) in enumerate(bash_calls or []):
+        msgs.append({
+            'type': 'assistant',
+            'timestamp': _iso(base_time),
+            'message': {
+                'id': f'msg_bash_{i}',
+                'role': 'assistant',
+                'content': [{
+                    'type': 'tool_use',
+                    'name': 'Bash',
+                    'input': {'command': command, 'run_in_background': background},
+                }],
+            },
+        })
     transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
 
 
@@ -947,6 +962,116 @@ class ScenarioConfig:
     cache_anchor_secs_ago: float | None      = None
     cache_1h_tier:         bool              = False
     columns:       int | None                = None
+    # (command, rss_mb, cpu_seconds, elapsed_seconds, background) per running
+    # shell command; rendered via the YAS_SHELL_COMMANDS_FIXTURE process table.
+    shell_commands: list[tuple[str, int, float, float, bool]] = field(default_factory=list)
+
+
+_SHELL_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore',         'Search codebase - looking for token tracking', 3_200,   420, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+_SHELL_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('make demo/img',                                              600,  300.0,  120.0, False),
+    ('tail -f /var/log/very/long/path/to/application/output/' * 2 + 'server.log', 40, 0.5, 3_600.0, True),
+    ('uv run pytest -q',                                         3_072,   40.0,   95.0, False),
+]
+
+_SHELL_LONG_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('cd /home/user/dev/project/.scratch/feat-section-taxonomy/reanalyse/w2 && '
+     "jq -c '.[]' results.json | ./run.sh --tracks 54 --out /tmp/reanalysed.json | tail -3", 27, 12.0, 282.0, False),
+    ('make demo/img', 600, 300.0, 120.0, False),
+]
+
+_SHELL_LONG_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore', 'Search codebase - looking for token tracking', 3_200, 420,
+     ('Bash', {'command': 'jq -c ".[]" results.json; ./run.sh | tail -3'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+
+_USAGE_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore', 'Build the release binary', 4_100, 600, ('Bash', {'command': 'cargo build --release --workspace'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+# The first command is run by the first subagent above (matched by its text); the second by the main thread.
+_USAGE_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('cargo build --release --workspace', 900, 240.0, 95.0, False),
+    ('make demo/img',                     600, 300.0, 120.0, False),
+]
+
+
+_SHELL_BADGE_TOML = '''
+[shell_commands]
+enabled = true
+style = "badge"
+position = "right"
+cpu = { mode = "average", warn_percent = 150 }
+memory = { warn_mb = 2048 }
+'''
+
+_SHELL_LIST_TOML = '''
+[shell_commands]
+enabled = true
+style = "list"
+position = "below"
+max_items = 2
+max_command_width = 40
+elapsed = { enabled = true }
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+_SHELL_SIDE_TOML = '''
+[shell_commands]
+enabled = true
+style = "list"
+position = "right"
+max_items = 2
+max_command_width = 40
+elapsed = { enabled = true }
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+# The -200 shell-commands scenarios fill the terminal instead of stopping at max_width.
+_SHELL_WIDTHS = (('', None, ''), ('-80', 80, ''), ('-200', 200, '[layout]\nfull_width = true\nlabels = true\n'))
+
+
+def _subagent_bash_commands(subagents: list[tuple[object, ...]]) -> set[str]:
+    'Commands of the Bash tool_use actions in a scenario\'s subagents (their transcripts, not the main one, record them).'
+    out: set[str] = set()
+    for row in subagents:
+        action = row[4] if len(row) > 4 else None
+        if isinstance(action, tuple) and len(action) == 2 and action[0] == 'Bash' and isinstance(action[1], dict):
+            out.add(str(action[1].get('command', '')))
+    return out
+
+
+def build_shell_fixture(commands: list[tuple[str, int, float, float, bool]]) -> dict[str, object]:
+    """Process table: statusline -> sh -> claude -> wrapper bash -> child."""
+    procs: list[dict[str, object]] = [
+        {'pid': 10, 'ppid': 1,  'rss_kb': 300_000, 'cpu_s': 900.0, 'elapsed_s': 7_200.0, 'argv': '/usr/bin/claude'},
+        {'pid': 20, 'ppid': 10, 'rss_kb': 2_000,   'cpu_s': 0.1,   'elapsed_s': 1.0,     'argv': '/bin/sh -c statusline'},
+        {'pid': 30, 'ppid': 20, 'rss_kb': 30_000,  'cpu_s': 0.1,   'elapsed_s': 1.0,     'argv': 'python3 statusline_command.py'},
+    ]
+    for i, (command, rss_mb, cpu_s, elapsed_s, _bg) in enumerate(commands):
+        pid = 100 + 10 * i
+        argv = (
+            '/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1.sh'
+            f" && eval '{command}' < /dev/null && pwd -P >| /tmp/claude-{i:04x}-cwd"
+        )
+        procs.append({'pid': pid, 'ppid': 10, 'rss_kb': 4_000, 'cpu_s': 0.0, 'elapsed_s': elapsed_s, 'argv': argv})
+        for j in range(2):
+            procs.append({
+                'pid': pid + 1 + j, 'ppid': pid,
+                'rss_kb': (rss_mb * 1024 - 4_000) // 2,
+                'cpu_s': cpu_s / 2, 'elapsed_s': elapsed_s,
+                'argv': f'worker-{j} {command.split()[0]}',
+            })
+    return {'self_pid': 30, 'processes': procs}
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -1576,6 +1701,66 @@ five_hour = { budget = 90_000, window = "5h", anchor = "rolling" }
 seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * * 0" }
 ''',
     ),
+    *(
+        ScenarioConfig(
+            # Shell-commands badge on the right of the first subagent row.
+            name           = f'shell-commands-badge{suffix}',
+            subagents      = _SHELL_SUBAGENTS,
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_BADGE_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    *(
+        ScenarioConfig(
+            # Shell-commands list below the rows, capped so `+1 more` shows.
+            name           = f'shell-commands-list{suffix}',
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_LIST_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    ScenarioConfig(
+        # Subagents present, list below: the list block is closed by a divider like the no-subagent list.
+        name           = 'shell-commands-list-subagents-200',
+        subagents      = _SHELL_SUBAGENTS,
+        shell_commands = _SHELL_COMMANDS,
+        columns        = 200,
+        yas_toml       = _SHELL_WIDTHS[2][2] + _SHELL_LIST_TOML,
+    ),
+    *(
+        ScenarioConfig(
+            # Shell-commands list as a side section right of the subagents; -80 falls back to below.
+            name           = f'shell-commands-side{suffix}',
+            subagents      = _SHELL_SUBAGENTS,
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_SIDE_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    *(
+        ScenarioConfig(
+            # A running Bash command owned by a subagent shows on that subagent's row (cpu / mem / time);
+            # the main-thread command stays in the shell commands section.
+            name           = f'subagent-resource-usage{suffix}',
+            subagents      = _USAGE_SUBAGENTS,
+            shell_commands = _USAGE_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_SIDE_TOML,
+        )
+        for suffix, cols, layout_toml in (_SHELL_WIDTHS[0], _SHELL_WIDTHS[2])
+    ),
+    ScenarioConfig(
+        # Wide terminal: the command grows into the free space and the subagent side keeps its natural width.
+        name           = 'shell-commands-side-300',
+        subagents      = _SHELL_LONG_SUBAGENTS,
+        shell_commands = _SHELL_LONG_COMMANDS,
+        columns        = 300,
+        yas_toml       = '[layout]\nfull_width = true\nlabels = true\n' + _SHELL_SIDE_TOML,
+    ),
 ]
 
 
@@ -1675,6 +1860,7 @@ def render_scenario(
         tasks=cfg.tasks or None,
         cache_anchor_secs_ago=cfg.cache_anchor_secs_ago,
         cache_1h_tier=cfg.cache_1h_tier,
+        bash_calls=[(c[0], c[4]) for c in cfg.shell_commands if c[0] not in _subagent_bash_commands(cfg.subagents)] or None,
     )
     write_settings(claude, cfg.plugins)
     yas_toml_path = claude / 'yas.toml'
@@ -1755,6 +1941,12 @@ def render_scenario(
     snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
     if theme is not None:
         snap_env['YAS_THEME'] = theme
+    if cfg.shell_commands:
+        fixture_p = tmpdir / 'shell-commands-fixture.json'
+        fixture_p.write_text(json.dumps(build_shell_fixture(cfg.shell_commands)))
+        snap_env['YAS_SHELL_COMMANDS_FIXTURE'] = str(fixture_p)
+    else:
+        snap_env.pop('YAS_SHELL_COMMANDS_FIXTURE', None)
     out = render_once(snap_env, json.dumps(raw))
     stem = theme if theme is not None else cfg.name
     out_dir.mkdir(parents=True, exist_ok=True)

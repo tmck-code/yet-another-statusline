@@ -8,7 +8,7 @@ import zlib
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, NamedTuple, TYPE_CHECKING
 
 from yas.render.borders import BorderRenderer
 from yas.constants import (
@@ -80,6 +80,9 @@ from yas.constants import (
     GLYPH_WF_HEADER,
     GLYPH_WF_SUMMARY,
     ICON_COST,
+    ICON_TERMINAL,
+    SHELL_COL_GAP,
+    SHELL_LIST_INDENT,
     ICON_LIMIT_5H,
     ICON_LIMIT_7D,
     ICON_TOK_RATE,
@@ -118,6 +121,8 @@ from yas.session import ContextWindow, RateBucket, RateLimits
 from yas.info.subagents import RunningSubagent
 from yas.info.workflows import RunningWorkflow
 from yas.info.tasks import TaskList
+from yas.info.shell_commands import AgentUsage, RunningShellCommands, ShellCommand, strip_leading_cd
+from yas.config import ResourceUsageConfig, ShellCommandsConfig
 from yas.render.text import _middle_ellipsis, _visible_width, clip_visible, fmt_tok, fmt_tok_fixed, strike
 from yas.tokens import TokenRate
 
@@ -156,6 +161,13 @@ TOOL_ARG_KEY: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Context-fill helpers
 # ---------------------------------------------------------------------------
+
+def _fmt_rss(kb: int) -> str:
+    mb = kb / 1024
+    if mb < 1024:
+        return f'{mb:.0f}M'
+    return f'{mb / 1024:.1f}G'
+
 
 def _ctx_used_tokens(ctx: ContextWindow) -> int:
     """The effective context-token count that drives the bar, label, and colour.
@@ -246,6 +258,32 @@ def _strike_activity(activity: str) -> str:
 # ---------------------------------------------------------------------------
 # Renderer
 # ---------------------------------------------------------------------------
+
+class ShellPlan(NamedTuple):
+    shown:   Sequence[ShellCommand]
+    cmds:    list[str]               # display text per shown command (leading `cd` removed)
+    cols:    list[str]               # styled number columns per shown command
+    right_w: int                     # width of the number block
+    cmd_w:   int                     # command column width
+    fields:  list[tuple[str, int]]   # (label, column width) per enabled number column
+
+
+class UsagePlan(NamedTuple):
+    'Per-subagent resource columns: the block each row gets at its right end.'
+    width:  int                      # columns taken from every row, leading gap included
+    cells:  dict[str, str]           # styled block per agent id (exactly width - SHELL_COL_GAP wide)
+    blank:  str                      # block for rows without a process
+    fields: list[tuple[str, int]]    # (label, column width) per enabled column
+
+    def labels(self, start_col: int) -> list[tuple[str, int]]:
+        'Border labels right-aligned over the columns; `start_col` is the 1-indexed border column of the block start.'
+        out = []
+        offset = SHELL_COL_GAP
+        for name, w in self.fields:
+            out.append((name, start_col + offset + w - len(name)))
+            offset += w + SHELL_COL_GAP
+        return out
+
 
 class Renderer:
     def __init__(self, bg_shift: str = 'warm', theme: Theme | None = None) -> None:
@@ -913,6 +951,137 @@ class Renderer:
         else:
             sep_desc = f' {self.LABEL}·{self.R} {self.CTX}{ITALIC}{desc_text}{self.R}'
         return sep_desc, 3 + desc_w
+
+    def shell_commands_badge(self, sc: RunningShellCommands, cfg: ShellCommandsConfig) -> str:
+        'One-segment summary of the running shell commands for the right end of a row.'
+        warn_cpu = sc.total_cpu_percent is not None and sc.total_cpu_percent > cfg.cpu.warn_percent
+        parts = [f'{self.SKILLS}{ICON_TERMINAL} {sc.count}{self.R}']
+        if cfg.elapsed.enabled:
+            parts.append(f'{self.CTX_DIM}{fmt_duration(sc.longest_elapsed_s)}{self.R}')
+        if cfg.cpu.enabled and sc.total_cpu_percent is not None:
+            clr = CLR_WARN if warn_cpu else self.CTX_DIM
+            parts.append(f'{clr}{sc.total_cpu_percent:.0f}%{self.R}')
+        if cfg.memory.enabled:
+            clr = CLR_WARN if sc.total_rss_kb > cfg.memory.warn_mb * 1024 else self.CTX_DIM
+            parts.append(f'{clr}{_fmt_rss(sc.total_rss_kb)}{self.R}')
+        return ' '.join(parts)
+
+    def shell_commands_list(
+        self, sc: RunningShellCommands, cfg: ShellCommandsConfig, inner: int, *, header: bool = True,
+    ) -> list[str]:
+        'Side-section block, left-aligned at the list indent and padded to exactly `inner` columns.'
+        indent = ' ' * SHELL_LIST_INDENT
+        block = self.shell_commands_side(sc, cfg, max_width=max(1, inner - SHELL_LIST_INDENT), header=header)
+        return [indent + line + ' ' * max(0, inner - SHELL_LIST_INDENT - _visible_width(line)) for line in block]
+
+    def _shell_plan(
+        self, sc: RunningShellCommands, cfg: ShellCommandsConfig, max_width: int | None, *, grow: bool = False,
+    ) -> ShellPlan:
+        """Shared column maths for the shell commands section.
+
+        Number columns are as wide as their widest value or label, separated by
+        `SHELL_COL_GAP` spaces, with the same gap after the command column. The
+        command column is capped at `max_command_width` unless `grow` is set (side
+        section), where it takes the free room up to the longest command. `max_width`
+        always limits the whole block.
+        """
+        shown = sc.commands[:cfg.max_items]
+        cmds = [strip_leading_cd(c.command) for c in shown]
+        specs = (
+            ('cpu',  cfg.cpu.enabled and any(c.cpu_percent is not None for c in shown),
+             [f'{c.cpu_percent:.0f}%' if c.cpu_percent is not None else '' for c in shown]),
+            ('mem',  cfg.memory.enabled, [_fmt_rss(c.rss_kb) for c in shown]),
+            ('time', cfg.elapsed.enabled, [fmt_duration(c.elapsed_s) for c in shown]),
+        )
+        fields = [(name, max([len(name)] + [len(v) for v in vals]), vals) for name, on, vals in specs if on]
+        cols = [
+            (' ' * SHELL_COL_GAP).join(
+                f'{self._shell_value_clr(name, c, cfg)}{vals[i].rjust(w)}{self.R}' for name, w, vals in fields)
+            for i, c in enumerate(shown)
+        ]
+        right_w = sum(w for _, w, _ in fields) + SHELL_COL_GAP * max(0, len(fields) - 1)
+        longest = max((len(c) for c in cmds), default=0)
+        cmd_w = max(1, longest if grow else min(cfg.max_command_width, longest))
+        if max_width is not None:
+            cmd_w = max(1, min(cmd_w, max_width - 4 - (SHELL_COL_GAP + right_w if right_w else 0)))
+        return ShellPlan(shown, cmds, cols, right_w, cmd_w, [(n, w) for n, w, _ in fields])
+
+    def _shell_value_clr(self, name: str, c: ShellCommand | AgentUsage, cfg: ShellCommandsConfig) -> str:
+        if name == 'cpu' and c.cpu_percent is not None and c.cpu_percent > cfg.cpu.warn_percent:
+            return CLR_WARN
+        if name == 'mem' and c.rss_kb > cfg.memory.warn_mb * 1024:
+            return CLR_WARN
+        return self.CTX_DIM
+
+    def agent_usage_plan(
+        self, usage: dict[str, AgentUsage], cfg: ShellCommandsConfig, opts: ResourceUsageConfig, *, labelled: bool,
+    ) -> UsagePlan | None:
+        """Column maths for the subagent resource columns, or None when nothing would show.
+
+        Same number formats, gap and warn thresholds as the shell commands section.
+        Column widths follow the widest value (or label, when labels are on).
+        """
+        if not usage or not opts.enabled:
+            return None
+        agents = list(usage.values())
+        specs: tuple[tuple[str, bool, Callable[[AgentUsage], str]], ...] = (
+            ('cpu',  opts.cpu and any(u.cpu_percent is not None for u in agents),
+             lambda u: f'{u.cpu_percent:.0f}%' if u.cpu_percent is not None else ''),
+            ('mem',  opts.memory, lambda u: _fmt_rss(u.rss_kb)),
+            ('time', opts.elapsed, lambda u: fmt_duration(u.elapsed_s)),
+        )
+        fields = []
+        for name, on, fmt in specs:
+            if on:
+                vals = {aid: fmt(u) for aid, u in usage.items()}
+                fields.append((name, max([len(name) if labelled else 0] + [len(v) for v in vals.values()]), vals))
+        if not fields:
+            return None
+        cells = {
+            aid: (' ' * SHELL_COL_GAP).join(
+                f'{self._shell_value_clr(name, u, cfg)}{vals[aid].rjust(w)}{self.R}' for name, w, vals in fields)
+            for aid, u in usage.items()
+        }
+        inner_w = sum(w for _, w, _ in fields) + SHELL_COL_GAP * (len(fields) - 1)
+        return UsagePlan(SHELL_COL_GAP + inner_w, cells, ' ' * inner_w, [(n, w) for n, w, _ in fields])
+
+    def shell_commands_labels(
+        self, sc: RunningShellCommands, cfg: ShellCommandsConfig, start_col: int, max_width: int | None = None,
+        *, grow: bool = False,
+    ) -> list[tuple[str, int]]:
+        """Border labels replacing the header row: the section title and the number-column names.
+
+        `start_col` is the 1-indexed border column of the block's first character. Column
+        names are right-aligned over their columns; disabled columns get no label.
+        """
+        plan = self._shell_plan(sc, cfg, max_width, grow=grow)
+        labels = [(f'shell commands ({sc.count})', start_col)]
+        offset = 4 + plan.cmd_w + SHELL_COL_GAP
+        for name, width in plan.fields:
+            labels.append((name, start_col + offset + width - len(name)))
+            offset += width + SHELL_COL_GAP
+        return labels
+
+    def shell_commands_side(
+        self, sc: RunningShellCommands, cfg: ShellCommandsConfig, max_width: int | None = None,
+        *, header: bool = True, grow: bool = False,
+    ) -> list[str]:
+        'Header (optional) plus command rows at their natural width (all lines equal width); numbers sit right after the command column. `max_width` truncates commands so rows fit; `grow` lets the command column exceed `max_command_width`.'
+        plan = self._shell_plan(sc, cfg, max_width, grow=grow)
+        cmd_w = plan.cmd_w
+        head = f'{self.SKILLS}{ICON_TERMINAL}{self.R} {self.CTX_DIM}shell commands ({sc.count}){self.R}'
+        width = 4 + cmd_w + (SHELL_COL_GAP + plan.right_w if plan.right_w else 0)
+        lines = [head] if header else []
+        if header:
+            width = max(width, _visible_width(head))
+        for c, command, right in zip(plan.shown, plan.cmds, plan.cols):
+            cmd = command if len(command) <= cmd_w else command[:cmd_w - 1] + '…'
+            tail = ' ' * SHELL_COL_GAP + right if right else ''
+            lines.append(f'{self.CTX_DIM}{"bg" if c.background else "fg"}{self.R}  {self.PWD}{cmd.ljust(cmd_w)}{self.R}{tail}')
+        hidden = sc.count - len(plan.shown)
+        if hidden > 0:
+            lines.append(f'    {self.CTX_DIM}+{hidden} more{self.R}')
+        return [line + ' ' * (width - _visible_width(line)) for line in lines]
 
     def subagent_row(
         self,

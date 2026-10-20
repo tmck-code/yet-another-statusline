@@ -8,6 +8,7 @@ transcript parse cache for deduplication but never writes it.
 
 from __future__ import annotations
 
+import os
 import time
 from functools import cached_property
 
@@ -16,6 +17,7 @@ from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec
 from yas.session import SessionInfo
 from yas.info.skills import LoadedSkills
+from yas.info.shell_commands import AgentUsage, RunningShellCommands, main_inflight, split_by_owner
 from yas.info.subagents import RunningSubagents
 from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
@@ -103,6 +105,47 @@ class SessionView:
             self.session.workspace.project_dir,
             cache=self.parse_cache,
         )
+
+    @cached_property
+    def _shell_all(self) -> RunningShellCommands:
+        if not self.cfg.shell_commands.enabled:
+            return RunningShellCommands()
+        # A live session always has a transcript on disk; without one (example
+        # payloads, tests) the live process table must not be consulted.
+        if not self.session.transcript_path or not os.path.isfile(self.session.transcript_path):
+            return RunningShellCommands()
+        return RunningShellCommands.from_session(
+            self.session.session_id,
+            self.session.transcript_path,
+            self.cfg.shell_commands,
+            cache=self.parse_cache,
+        )
+
+    @cached_property
+    def _shell_split(self) -> tuple[RunningShellCommands, dict[str, AgentUsage]]:
+        'Main-thread commands, and the resource usage of the processes each running subagent owns.'
+        every = self._shell_all
+        if not every or not self.cfg.agents.resource_usage.enabled:
+            return every, {}
+        owners = {s.agent_id: s.bash_inflight for s in self.subagents.subagents
+                  if s.status == 'running' and s.bash_inflight}
+        if not owners:
+            return every, {}
+        mine, theirs = split_by_owner(
+            every.commands, owners,
+            lambda: main_inflight(self.session.transcript_path, self.parse_cache), self.now,
+        )
+        return RunningShellCommands(commands=mine), {o: AgentUsage.of(cs) for o, cs in theirs.items()}
+
+    @cached_property
+    def shell_commands(self) -> RunningShellCommands:
+        'Shell commands of the main thread (those owned by a subagent show on its row instead).'
+        return self._shell_split[0]
+
+    @cached_property
+    def subagent_usage(self) -> dict[str, AgentUsage]:
+        'Resource usage per subagent id, only for subagents that own a running process.'
+        return self._shell_split[1]
 
     @cached_property
     def workflows(self) -> RunningWorkflows:

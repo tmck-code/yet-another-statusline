@@ -1032,3 +1032,180 @@ def test_env_show_git_status_zero_overrides_toml(tmp_path: Path) -> None:
     (tmp_path / 'yas.toml').write_text('[layout]\nshow_git_status = true\n')
     cfg = config.Config.load(env={'YAS_SHOW_GIT_STATUS': '0'}, config_dir=tmp_path)
     assert cfg.show_git_status is False
+
+
+# [shell_commands] table
+
+def test_shell_commands_defaults(tmp_path: Path) -> None:
+    sc = config.Config.load(env={}, config_dir=tmp_path).shell_commands
+    assert sc.enabled is True
+    assert sc.style == 'badge'
+    assert sc.position == 'right'
+    assert sc.max_items == 5
+    assert sc.max_command_width == 40
+    assert sc.elapsed == config.ElapsedConfig(enabled=True)
+    assert sc.cpu == config.CpuConfig(enabled=True, mode='current', warn_percent=80.0)
+    assert sc.memory == config.MemoryConfig(enabled=True, warn_mb=1024.0)
+
+
+def _load_sc(tmp_path: Path, body: str) -> config.Config:
+    (tmp_path / 'yas.toml').write_text(body)
+    return config.Config.load(env={}, config_dir=tmp_path)
+
+
+@requires_tomllib
+def test_shell_commands_inline_tables_parsed(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, (
+        '[shell_commands]\n'
+        'enabled = false\nstyle = "list"\nposition = "below"\nmax_items = 3\nmax_command_width = 20\n'
+        'elapsed = { enabled = false }\n'
+        'cpu = { enabled = false, mode = "average", warn_percent = 50 }\n'
+        'memory = { enabled = false, warn_mb = 256.5 }\n'))
+    assert cfg.shell_commands == config.ShellCommandsConfig(
+        enabled=False, style='list', position='below', max_items=3, max_command_width=20,
+        elapsed=config.ElapsedConfig(enabled=False),
+        cpu=config.CpuConfig(enabled=False, mode='average', warn_percent=50.0),
+        memory=config.MemoryConfig(enabled=False, warn_mb=256.5))
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+def test_shell_commands_sub_table_form_matches_inline(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, (
+        '[shell_commands]\nmax_items = 2\n'
+        '[shell_commands.cpu]\nmode = "average"\nwarn_percent = 50\n'
+        '[shell_commands.memory]\nwarn_mb = 256.5\n'))
+    sc = cfg.shell_commands
+    assert sc.cpu == config.CpuConfig(enabled=True, mode='average', warn_percent=50.0)
+    assert sc.memory == config.MemoryConfig(enabled=True, warn_mb=256.5)
+    assert sc.max_items == 2
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+@pytest.mark.parametrize('flag', (True, False))
+def test_shell_commands_bool_shorthand_sets_enabled_only(tmp_path: Path, flag: bool) -> None:
+    body = str(flag).lower()
+    cfg = _load_sc(tmp_path, f'[shell_commands]\nelapsed = {body}\ncpu = {body}\nmemory = {body}\n')
+    sc = cfg.shell_commands
+    assert sc.elapsed == config.ElapsedConfig(enabled=flag)
+    assert sc.cpu == config.CpuConfig(enabled=flag)
+    assert sc.memory == config.MemoryConfig(enabled=flag)
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+def test_shell_commands_partial_group_defaults_missing_keys(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, '[shell_commands]\ncpu = { mode = "average" }\nmemory = {}\n')
+    assert cfg.shell_commands.cpu == config.CpuConfig(mode='average')
+    assert cfg.shell_commands.memory == config.MemoryConfig()
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+@pytest.mark.parametrize('key, bad', [
+    ('enabled', '"yes"'),
+    ('style', '"table"'),
+    ('style', '1'),
+    ('position', '"left"'),
+    ('max_items', '0'),
+    ('max_items', '"many"'),
+    ('max_items', 'true'),
+    ('max_command_width', '7'),
+])
+def test_shell_commands_invalid_value_falls_back(tmp_path: Path, key: str, bad: str) -> None:
+    cfg = _load_sc(tmp_path, f'[shell_commands]\n{key} = {bad}\n')
+    assert getattr(cfg.shell_commands, key) == getattr(config.DEFAULT_SHELL_COMMANDS, key)
+    assert f'shell_commands.{key}' in cfg.errors
+
+
+@requires_tomllib
+@pytest.mark.parametrize('group, key, bad', [
+    ('elapsed', 'enabled', '1'),
+    ('cpu', 'enabled', '"true"'),
+    ('cpu', 'mode', '"peak"'),
+    ('cpu', 'warn_percent', '-1'),
+    ('cpu', 'warn_percent', 'true'),
+    ('memory', 'enabled', '0'),
+    ('memory', 'warn_mb', '-0.5'),
+    ('memory', 'warn_mb', '"lots"'),
+])
+def test_shell_commands_invalid_group_key_falls_back(
+    tmp_path: Path, group: str, key: str, bad: str,
+) -> None:
+    cfg = _load_sc(tmp_path, f'[shell_commands]\n{group} = {{ {key} = {bad} }}\n')
+    got = getattr(getattr(cfg.shell_commands, group), key)
+    assert got == getattr(getattr(config.DEFAULT_SHELL_COMMANDS, group), key)
+    assert f'shell_commands.{group}.{key}' in cfg.errors
+
+
+@requires_tomllib
+@pytest.mark.parametrize('group', ('elapsed', 'cpu', 'memory'))
+@pytest.mark.parametrize('bad', ('"yes"', '3', '[1, 2]'))
+def test_shell_commands_group_wrong_type_falls_back(tmp_path: Path, group: str, bad: str) -> None:
+    cfg = _load_sc(tmp_path, f'[shell_commands]\n{group} = {bad}\n')
+    assert getattr(cfg.shell_commands, group) == getattr(config.DEFAULT_SHELL_COMMANDS, group)
+    assert f'shell_commands.{group}' in cfg.errors
+
+
+@requires_tomllib
+@pytest.mark.parametrize('line', (
+    'show_elapsed = false', 'show_cpu = false', 'cpu_mode = "average"',
+    'cpu_warn_percent = 1', 'show_memory = false', 'memory_warn_mb = 1',
+))
+def test_shell_commands_old_flat_keys_have_no_effect(tmp_path: Path, line: str) -> None:
+    cfg = _load_sc(tmp_path, f'[shell_commands]\n{line}\n')
+    assert cfg.shell_commands == config.DEFAULT_SHELL_COMMANDS
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+def test_shell_commands_one_bad_key_keeps_others(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[shell_commands]\nmax_items = 0\nposition = "below"\n')
+    sc = config.Config.load(env={}, config_dir=tmp_path).shell_commands
+    assert sc.max_items == 5
+    assert sc.position == 'below'
+
+
+# ---------------------------------------------------------------------------
+# [agents] table
+# ---------------------------------------------------------------------------
+
+def test_agents_resource_usage_defaults(tmp_path: Path) -> None:
+    ru = config.Config.load(env={}, config_dir=tmp_path).agents.resource_usage
+    assert ru == config.ResourceUsageConfig(enabled=True, cpu=True, memory=True, elapsed=True)
+
+
+@requires_tomllib
+@pytest.mark.parametrize('flag', (True, False))
+def test_agents_resource_usage_bool_shorthand_sets_enabled_only(tmp_path: Path, flag: bool) -> None:
+    (tmp_path / 'yas.toml').write_text(f'[agents]\nresource_usage = {str(flag).lower()}\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.agents.resource_usage == config.ResourceUsageConfig(enabled=flag)
+    assert cfg.errors == ()
+
+
+@requires_tomllib
+def test_agents_resource_usage_partial_table_keeps_other_defaults(tmp_path: Path) -> None:
+    (tmp_path / 'yas.toml').write_text('[agents]\nresource_usage = { memory = false }\n')
+    ru = config.Config.load(env={}, config_dir=tmp_path).agents.resource_usage
+    assert ru == config.ResourceUsageConfig(memory=False)
+
+
+@requires_tomllib
+@pytest.mark.parametrize('key', ('enabled', 'cpu', 'memory', 'elapsed'))
+@pytest.mark.parametrize('bad', ('"yes"', '1', '[true]'))
+def test_agents_resource_usage_bad_inner_value_falls_back(tmp_path: Path, key: str, bad: str) -> None:
+    (tmp_path / 'yas.toml').write_text(f'[agents]\nresource_usage = {{ {key} = {bad} }}\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.agents.resource_usage == config.ResourceUsageConfig()
+    assert f'agents.resource_usage.{key}' in cfg.errors
+
+
+@requires_tomllib
+@pytest.mark.parametrize('bad', ('"on"', '3', '[1]'))
+def test_agents_resource_usage_wrong_type_falls_back(tmp_path: Path, bad: str) -> None:
+    (tmp_path / 'yas.toml').write_text(f'[agents]\nresource_usage = {bad}\n')
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+    assert cfg.agents.resource_usage == config.ResourceUsageConfig()
+    assert 'agents.resource_usage' in cfg.errors

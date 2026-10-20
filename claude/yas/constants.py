@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Keep in sync with pyproject.toml's [project] version — pyproject isn't
 # shipped with the runtime copy under ~/.claude, so the value lives here too.
-VERSION    = '0.9.9'
+VERSION    = '0.10.0'
 # Bumped by any future on-disk relayout under yas/; stamped into
 # state/version.json by yas.migrate so a future migration can detect and
 # convert an older layout.
@@ -68,6 +68,10 @@ def toml_cache_path() -> Path:
 
 def transcript_cache_path(session_id: str) -> Path:
     return cache_dir() / f'transcripts.{session_id}.json'
+
+
+def shell_cpu_cache_path(session_id: str) -> Path:
+    return cache_dir() / f'shell-cpu.{session_id}.json'
 
 
 def tokens_log() -> Path:
@@ -135,7 +139,9 @@ DEFAULT_LABELS         = False
 DEFAULT_CONTEXT_STATE      = False
 DEFAULT_CONTEXT_LABELS:     tuple[str, ...] = ('Smart', 'Coasting', 'Foggy', 'Cooked', 'Dumb')
 DEFAULT_CONTEXT_THRESHOLDS: tuple[int, ...] = (25, 50, 70, 90)
-TRANSCRIPT_CACHE_VERSION   = 3
+TRANSCRIPT_CACHE_VERSION   = 4
+# Schema version of the per-subagent parse fold state; bump on any state shape change.
+PARSE_FOLD_VERSION         = 2
 TRANSCRIPT_CACHE_KEEP_SECONDS = 86400.0  # 24 h — comfortably beyond ABANDONED_HORIZON_SECONDS = 1800
 TRANSCRIPT_CACHE_SUBKEY_MAX = 4          # max sub-keys retained per transcript per result kind
 DEFAULT_TRANSCRIPT_CACHE   = True
@@ -382,6 +388,7 @@ GLYPH_HOURGLASS     = '\uf253' # nf-fa-hourglass_half (subagent context size)
 GLYPH_PIE           = '\uf200' # nf-fa-pie_chart     (subagent session share)
 GLYPH_CONFIG_WARN   = '\u26a0' # U+26A0 WARNING SIGN (config-error row marker)
 GLYPH_CACHE         = '\uf49b'  # nf-oct-cache  (cache countdown)
+ICON_TERMINAL       = '\uf120'  # nf-fa-terminal  (shell commands section)
 GLYPH_WF_HEADER     = '\u25b8'  # \u25b8 U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE (workflow run header)
 GLYPH_WF_SUMMARY    = '\u2514'  # \u2514 U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (workflow run summary)
 GLYPH_WF_CURRENT    = '\u276f'  # \u276f U+276F HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT (current-phase marker)
@@ -483,6 +490,7 @@ ASCII_GLYPHS: dict[str, str] = {
     GLYPH_PIE:          '%',
     GLYPH_CACHE:        '~',
     GLYPH_CLEAR:        'C',
+    ICON_TERMINAL:      '>',
     ICON_LIMIT_5H:      'T',
     ICON_LIMIT_7D:      'D',
     GLYPH_MODEL_LIGHT:  '@',
@@ -597,6 +605,7 @@ UNICODE_PUA: dict[str, str] = {
     GLYPH_PIE:          '◕',  # pie-chart
     GLYPH_CACHE:        '↻',  # cache
     GLYPH_CLEAR:        '⟳',  # refresh (since-last-/clear)
+    ICON_TERMINAL:      '›',  # terminal prompt (shell commands)
     ICON_LIMIT_5H:      '◴',  # 5h rate-limit timer
     ICON_LIMIT_7D:      '◵',  # 7d rate-limit window
     GLYPH_MODEL_LIGHT:  '⊡',  # single model-pill
@@ -654,6 +663,11 @@ WORKFLOW_RUN_CAP          = 2
 # At most SUBAGENT_DISPLAY_CAP subagent rows render in the standalone cohort;
 # the layout builders keep the most recent (latest-started) rows and drop the
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
+# Spaces before the shell commands list content; border_line adds one more,
+# so rows start 2 columns in, like the subagent rows.
+SHELL_LIST_INDENT = 1
+SHELL_COL_GAP     = 2  # spaces between the command column and each number column
+
 SUBAGENT_DISPLAY_CAP      = 6
 
 # A terminal (completed/killed/stopped/failed) subagent row is retained for at

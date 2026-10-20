@@ -18,7 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from yas.constants import _sanitize, last_prompt_path, projects_dir, subagent_is_terminal, subagent_status
+from yas.constants import PARSE_FOLD_VERSION, _sanitize, last_prompt_path, projects_dir, subagent_is_terminal, subagent_status
+from yas.info.bash_inflight import fold_line as bash_fold_line, inflight as bash_inflight
 from yas.info.parsecache import fold_file
 
 if TYPE_CHECKING:
@@ -461,6 +462,7 @@ def _parse_init(resume_after: float) -> dict[str, Any]:
         'run_start_ts': 0.0,
         'end_ts':       0.0,
         'model':        '',
+        'bash':         {},
         'cur': {'mid': '', 'tool': None, 'text': None, 'has_content': False},
     }
 
@@ -472,6 +474,7 @@ def _parse_fold(state: dict[str, Any], lines: list[bytes]) -> dict[str, Any]:
     cur          = state['cur']
     for raw in lines:
         ln = raw.decode('utf-8', errors='ignore')
+        bash_fold_line(state['bash'], ln)
         # Keep reading timestamped lines past the first one only while a
         # resume boundary was supplied and its run_start_ts is not yet found.
         need_run_start = resume_after > 0.0 and state['run_start_ts'] == 0.0
@@ -577,6 +580,29 @@ def _parse_result(state: dict[str, Any], totals_only: bool) -> _ParseTuple:
     )
 
 
+def parse_transcript_state(
+    jsonl: Path,
+    resume_after: float = 0.0,
+    *,
+    cache: TranscriptCache | None = None,
+    st: os.stat_result | None = None,
+) -> dict[str, Any] | None:
+    """The fold state behind parse_transcript, or None when the file cannot be stat'd.
+
+    Besides the metric walk it carries the in-flight Bash calls (`bash`), so one
+    read of the transcript serves both the metrics and the process attribution.
+    """
+    if cache is not None and st is None:
+        try:
+            st = jsonl.stat()
+        except OSError:
+            return None
+    return fold_file(
+        cache, str(jsonl), st, 'parse', repr(float(resume_after)),
+        lambda: _parse_init(resume_after), _parse_fold, PARSE_FOLD_VERSION,
+    )
+
+
 def parse_transcript(
     jsonl: Path,
     resume_after: float = 0.0,
@@ -604,16 +630,8 @@ def parse_transcript(
     full parse of the same file. ``totals_only`` shares the same state and
     blanks ``model`` and ``last_activity`` in the returned tuple.
     """
-    if cache is not None and st is None:
-        try:
-            st = jsonl.stat()
-        except OSError:
-            return _EMPTY_PARSE
-    state = fold_file(
-        cache, str(jsonl), st, 'parse', repr(float(resume_after)),
-        lambda: _parse_init(resume_after), _parse_fold,
-    )
-    return _parse_result(state, totals_only)
+    state = parse_transcript_state(jsonl, resume_after, cache=cache, st=st)
+    return _EMPTY_PARSE if state is None else _parse_result(state, totals_only)
 
 
 def _build_tree_index(
@@ -857,7 +875,7 @@ class RunningSubagent:
         'agent_type', 'description', 'billed_in', 'output', 'first_timestamp',
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
         'mtime', 'agent_id', 'jsonl_path', 'parent_id', 'spawn_depth',
-        'status', 'run_count', 'is_fork', 'resumed', 'run_start_ts',
+        'status', 'run_count', 'is_fork', 'resumed', 'run_start_ts', 'bash_inflight',
     )
 
     def __init__(
@@ -882,6 +900,7 @@ class RunningSubagent:
         is_fork:         bool = False,  # meta.json "isFork" (equivalently agentType == "fork")
         resumed:         bool = False,  # a later notification/activity postdates the last-seen notification
         run_start_ts:    float | None = None,  # start of the CURRENT run; see subagent_dur_str
+        bash_inflight:   tuple[tuple[str, float], ...] = (),  # (normalised command, tool_use ts) of Bash calls still running
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -902,6 +921,7 @@ class RunningSubagent:
         self.run_count        = run_count
         self.is_fork          = is_fork
         self.resumed          = resumed
+        self.bash_inflight    = bash_inflight
         # Per-run start anchor for duration display: the start of the CURRENT
         # run, not the agent's original spawn. Equals first_timestamp when
         # unset (never-resumed agents, and callers like info/workflows.py
@@ -920,7 +940,7 @@ class RunningSubagent:
             self.last_activity, self.end_ts, self.mtime, self.agent_id,
             self.jsonl_path, self.parent_id, self.spawn_depth,
             self.status, self.run_count, self.is_fork, self.resumed,
-            self.run_start_ts,
+            self.run_start_ts, self.bash_inflight,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -1183,9 +1203,11 @@ class RunningSubagents:
                         use_totals_only = True
                         totals_only_ids[jsonl.stem] = boundary_ts
 
+                walk = parse_transcript_state(jsonl, boundary_ts, cache=cache, st=st)
                 billed_in, cache_read_in, output, first_ts, model, last_activity, transcript_end_ts, parsed_run_start = (
-                    parse_transcript(jsonl, boundary_ts, cache=cache, st=st, totals_only=use_totals_only)
+                    _EMPTY_PARSE if walk is None else _parse_result(walk, use_totals_only)
                 )
+                bash_calls = bash_inflight(walk.get('bash', {})) if walk is not None else ()
 
                 # Mark as terminal in cache if conclusively retired.
                 if cache is not None and _conclusively_retired(now, status, end_ts, mtime):
@@ -1236,6 +1258,7 @@ class RunningSubagents:
                     is_fork         = is_fork,
                     resumed         = resumed,
                     run_start_ts    = run_start_ts,
+                    bash_inflight   = bash_calls,
                 ))
         except OSError:
             pass

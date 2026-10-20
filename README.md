@@ -201,7 +201,75 @@ thresholds = [25, 50, 70, 90]
 
 [openspec]
 scan_depth = 1
+
+[shell_commands]
+enabled = true
+style = "badge"          # "badge" or "list"
+position = "right"       # "right" or "below"
+max_items = 5
+max_command_width = 40
+elapsed = { enabled = true }
+cpu     = { enabled = true, mode = "current", warn_percent = 80.0 }  # mode: or "average"
+memory  = { enabled = true, warn_mb = 1024.0 }
 ```
+
+`[shell_commands]` controls the display of running Bash-tool commands
+(foreground and background):
+
+- `style` picks what is drawn: `"badge"` is a compact summary, `"list"` is a
+  header plus one line per command, up to `max_items` lines, each command cut
+  to `max_command_width` columns (the cap applies in the list below, and in the
+  side section only when space is short). Leading `cd <path> &&` / `;` segments
+  are not shown. Number columns are right-aligned, 2 spaces apart. `position`
+  picks where:
+  - `badge` + `right`: the badge at the right end of the first subagent row.
+  - `badge` + `below`: the badge on its own row under the subagents.
+  - `list` + `below`: the list rows under the subagents, full width.
+  - `list` + `right`: the list as its own section beside the subagents, split
+    by a `│` divider. The subagents keep the width their longest row needs;
+    the list takes the rest, and its command column grows to fill it (up to
+    the longest command). If both do not fit, the command is capped at
+    `max_command_width` and the subagents are truncated. If the subagents
+    would lose their name or model, it falls back to `list` + `below`.
+  - With no subagents, `list` shows as a compact block (command up to
+    2 x `max_command_width`). It is closed by a `│` divider when at least
+    60 columns stay empty to its right; otherwise it has no divider.
+- `elapsed`, `cpu` and `memory` are groups. Each can be an inline table, a
+  `[shell_commands.cpu]` sub-table, or a bool shorthand (`cpu = false` hides
+  CPU and keeps the other keys at their defaults; `cpu = true` means defaults).
+  Missing keys take their defaults.
+- `cpu.mode = "current"` shows CPU used since the previous refresh divided by
+  wall time (blank on the first refresh). `"average"` shows total CPU time
+  divided by time since the command started.
+- CPU at or above `cpu.warn_percent`, and memory at or above `memory.warn_mb`,
+  are drawn in the warn colour.
+- An invalid value falls back to its default like every other knob and is
+  reported with its dotted name (for example `shell_commands.cpu.mode`).
+
+Per-subagent resource usage is set in the `[agents]` table:
+
+```toml
+[agents]
+resource_usage = { enabled = true, cpu = true, memory = true, elapsed = true }
+```
+
+- A running Bash process that belongs to a subagent is shown on that subagent's
+  row instead of in the shell commands section: CPU and memory summed over its
+  processes, and the longest elapsed time, right-aligned in columns shared by all
+  subagent rows (rows without a process stay blank). With `labels = true`, `cpu`,
+  `mem` and `time` labels are drawn over them. The log column shrinks first.
+- A process belongs to a subagent when its command text equals a Bash call of that
+  subagent that has no result yet, or was run in the background. If several owners
+  have the same command, the call closest to the process start wins; a tie keeps
+  it in the shell commands section. The section shows only main-thread commands
+  and is hidden when none remain.
+- `resource_usage = false` turns it off (processes stay in the shell commands
+  section); `true` means all defaults. Each inner key is a bool; a bad value falls
+  back to its default and is reported as e.g. `agents.resource_usage.cpu`.
+- Number formats and warn colours come from `[shell_commands]`
+  (`cpu.warn_percent`, `memory.warn_mb`).
+- On narrow layouts the columns are omitted when the subagent row would drop below
+  its minimum width.
 
 > **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.
 > On Python 3.10 the file is silently skipped; **environment variables work on

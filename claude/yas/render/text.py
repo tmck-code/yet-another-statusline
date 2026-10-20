@@ -279,7 +279,7 @@ _SUPERSCRIPT = {
     'R': 'ᴿ', 'T': 'ᵀ', 'U': 'ᵁ', 'V': 'ⱽ', 'W': 'ᵂ',
     '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶',
     '7': '⁷', '8': '⁸', '9': '⁹',
-    '+': '⁺', '/': 'ᐟ', ' ': ' ',
+    '+': '⁺', '/': 'ᐟ', '(': '⁽', ')': '⁾', ' ': ' ',
 }
 
 
@@ -363,17 +363,6 @@ def fmt_tok_fixed(n: int) -> str:
         if len(s.split('.')[0]) == 3 - decimals:
             return f'{s}{suf}'
     return f'{val:.0f}{suf}'  # defensive fallback; every n above should hit the loop
-
-
-def fmt_dur(seconds: float) -> str:
-    s = int(seconds)
-    if s < 0:
-        s = 0
-    if s < 60:
-        return f'{s}s'
-    if s < 3600:
-        return f'{s // 60}m{s % 60:02d}s'
-    return f'{s // 3600}h{(s % 3600) // 60:02d}m'
 
 
 def sparkline_width(terminal_width: int) -> int:
