@@ -244,8 +244,9 @@ def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
     """Read config_dir/yas.toml.
 
     Returns (data, error). Missing file → ({}, None), i.e. silently skipped.
-    On Python 3.10 (no stdlib tomllib) the tomli backport is used instead, so
-    TOML is still parsed. A parse failure → ({}, "yas.toml: parse error").
+    On Python 3.10 (no stdlib tomllib) the tomli backport is used instead.
+    A missing backport → ({}, "yas.toml: needs Python 3.11+ or tomli").
+    A parse failure → ({}, "yas.toml: parse error").
 
     A binary (marshal) cache of the parsed dict lives under
     config_dir/yas/cache/config.toml.cache, no longer beside the source file.
@@ -278,7 +279,10 @@ def _load_toml(config_dir: Path) -> tuple[dict[str, object], str | None]:
     if sys.version_info >= (3, 11):
         import tomllib
     else:  # Python 3.10 — use the tomli backport
-        import tomli as tomllib
+        try:
+            import tomli as tomllib
+        except ImportError:
+            return {}, 'yas.toml: needs Python 3.11+ or tomli'
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, ValueError):

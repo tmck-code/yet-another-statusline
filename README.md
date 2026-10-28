@@ -203,9 +203,10 @@ thresholds = [25, 50, 70, 90]
 scan_depth = 1
 ```
 
-> **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.
-> On Python 3.10 the file is silently skipped; **environment variables work on
-> every Python version**.
+> **`yas.toml` uses the stdlib `tomllib` on Python 3.11+**, or the `tomli`
+> backport on Python 3.10. If `tomli` is missing, the file is ignored with a
+> `yas.toml: needs Python 3.11+ or tomli` warning; **environment variables work
+> on every supported Python version**.
 
 Bad config never crashes the statusline. A malformed `yas.toml` is ignored
 wholesale, and a single bad / out-of-range / wrong-type value drops only that

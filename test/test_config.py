@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,9 +30,8 @@ from yas.themes import CLAUDE_DARK
 SESSION = (Path(__file__).parent.parent / 'ops'
            / 'session-info-example.json')
 
-# yas.toml parsing needs stdlib tomllib (Python 3.11+). On 3.10 the file is
-# silently skipped (env + defaults still apply — see the degrade test below),
-# so tests that assert toml-sourced values are applied can't run there.
+# These tests require stdlib tomllib (Python 3.11+). Python 3.10 uses tomli;
+# the available-parser and missing-backport tests below cover that path.
 requires_tomllib = pytest.mark.skipif(
     importlib.util.find_spec('tomllib') is None,
     reason='yas.toml parsing requires tomllib (Python 3.11+)',
@@ -469,6 +469,23 @@ def test_toml_loads_via_available_parser(tmp_path: Path) -> None:
     assert cfg.max_width == 200              # toml honored via the available parser
     assert cfg.soft_limit == 1_000_000       # env still applies
     assert cfg.errors == ()                  # parsed cleanly, no error
+
+
+def test_missing_tomli_ignores_toml_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / 'yas.toml').write_text('[layout]\nmax_width = 200\n')
+    monkeypatch.setattr(sys, 'version_info', (3, 10, 0))
+    monkeypatch.setitem(sys.modules, 'tomli', None)
+
+    assert config._load_toml(tmp_path) == ({}, 'yas.toml: needs Python 3.11+ or tomli')
+    cfg = config.Config.load(env={'YAS_SOFT_LIMIT': '1000000'}, config_dir=tmp_path)
+
+    assert cfg.max_width == 140
+    assert cfg.soft_limit == 1_000_000
+    assert cfg.errors == ('yas.toml: needs Python 3.11+ or tomli',)
+    assert cfg.debug_lines == cfg.errors
+    assert not (tmp_path / 'yas' / 'cache' / 'config.toml.cache').exists()
 
 
 # 4.6 soft_limit env cases (folds PR #32)
@@ -925,6 +942,23 @@ def test_warm_cache_hit_skips_tomllib(tmp_path: Path, monkeypatch: pytest.Monkey
     cfg = config.Config.load(env={}, config_dir=tmp_path)
     assert cfg.max_width == 200  # value came from the cache, not a reparse
     assert_blocked()
+
+
+def test_warm_cache_hit_does_not_need_tomli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    toml = tmp_path / 'yas.toml'
+    toml.write_text('[layout]\nmax_width = 200\n')
+    st = toml.stat()
+    config._write_toml_cache(
+        tmp_path / 'yas' / 'cache' / 'config.toml.cache',
+        st.st_mtime_ns, st.st_size, {'layout': {'max_width': 200}},
+    )
+    monkeypatch.setattr(sys, 'version_info', (3, 10, 0))
+    monkeypatch.setitem(sys.modules, 'tomli', None)
+
+    cfg = config.Config.load(env={}, config_dir=tmp_path)
+
+    assert cfg.max_width == 200
+    assert cfg.errors == ()
 
 
 @requires_tomllib
