@@ -156,4 +156,4 @@ class TestFallbackToFull:
     def test_missing_file_yields_zeroes(self, tmp_home: Path, tmp_path: Path) -> None:
         result = parse_transcript(tmp_path / 'nope.jsonl', cache=TranscriptCache('s7'))
 
-        assert result == (0, 0, 0, 0.0, '', ('', '', {}), 0.0, 0.0)
+        assert result == (0, 0, 0, 0.0, '', ('', '', {}), 0.0, 0.0, 0.0)

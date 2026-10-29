@@ -13,11 +13,15 @@ import time
 from functools import cached_property
 
 from yas.config import Config
+from yas.constants import subagent_status
 from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec
 from yas.session import SessionInfo
 from yas.info.skills import LoadedSkills
-from yas.info.shell_commands import AgentUsage, RunningShellCommands, main_inflight, split_by_owner
+from yas.info.shell_commands import (
+    MAIN_AGENT_ID, AgentUsage, RunningShellCommands, main_inflight, split_by_owner,
+)
+from yas.info.main_activity import MainActivity, read_main_activity
 from yas.info.subagents import RunningSubagents
 from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
@@ -99,11 +103,21 @@ class SessionView:
         return LoadedSkills.from_transcript(self.session.transcript_path, cache=self.parse_cache)
 
     @cached_property
-    def subagents(self) -> RunningSubagents:
+    def _raw_subagents(self) -> RunningSubagents:
         return RunningSubagents.from_session(
             self.session.session_id,
             self.session.workspace.project_dir,
             cache=self.parse_cache,
+        )
+
+    @cached_property
+    def subagents(self) -> RunningSubagents:
+        # A running Bash tool call with no live process is a finished tool
+        # whose result hasn't landed yet; show the agent as thinking, not as
+        # still running its previous command.
+        return self._raw_subagents.with_activity(
+            self.now,
+            self._shell_split[1],
         )
 
     @cached_property
@@ -117,7 +131,9 @@ class SessionView:
         return RunningShellCommands.from_session(
             self.session.session_id,
             self.session.transcript_path,
-            self.cfg.shell_commands,
+            self.cfg.shell_commands._replace(
+                command_mode=self.cfg.shell_commands.effective_command_mode,
+            ),
             cache=self.parse_cache,
         )
 
@@ -127,7 +143,7 @@ class SessionView:
         every = self._shell_all
         if not every or not self.cfg.agents.resource_usage.enabled:
             return every, {}
-        owners = {s.agent_id: s.bash_inflight for s in self.subagents.subagents
+        owners = {s.agent_id: s.bash_inflight for s in self._raw_subagents.subagents
                   if s.status == 'running' and s.bash_inflight}
         if not owners:
             return every, {}
@@ -144,8 +160,106 @@ class SessionView:
 
     @cached_property
     def subagent_usage(self) -> dict[str, AgentUsage]:
-        'Resource usage per subagent id, only for subagents that own a running process.'
-        return self._shell_split[1]
+        """Resource usage per subagent: a running process, or a thinking timer.
+
+        Thinking subagents get a zero-CPU/memory entry so the existing
+        `[agents].resource_usage` columns also stay meaningful between tool
+        calls, not only while a process is alive.
+        """
+        if not self.cfg.agents.resource_usage.enabled:
+            return {}
+        usage = dict(self._shell_split[1])
+        for sub in self.subagents.subagents:
+            if sub.agent_id in usage or sub.status != 'running':
+                continue
+            kind = sub.last_activity[0]
+            if kind == 'waiting':
+                usage[sub.agent_id] = AgentUsage.waiting_for(self.now - sub.last_activity_ts)
+                continue
+            # `with_activity` has already rewritten a finished Bash call to
+            # `thinking`; leave Read/Grep/text rows alone.
+            if kind != 'thinking':
+                continue
+            thinking = self._thinking_usage(
+                kind, sub.last_activity_ts, sub.mtime,
+            )
+            if thinking is not None:
+                usage[sub.agent_id] = thinking
+        return usage
+
+    @cached_property
+    def main_activity(self) -> MainActivity:
+        'Last activity of the main transcript (for the synthetic main agent row).'
+        return read_main_activity(self.session.transcript_path, cache=self.parse_cache)
+
+    @cached_property
+    def main_usage(self) -> AgentUsage | None:
+        """Main-thread resource usage for the agents style.
+
+        Running main-thread commands come first. With none, a live top-level
+        subagent means main is waiting on it: zero CPU/memory plus a timer
+        started when that child began. Otherwise a thinking transcript gets the
+        thinking timer.
+        """
+        try:
+            mine = self._shell_split[0]
+        except Exception:
+            return None
+        if mine:
+            return AgentUsage.of(mine.commands)
+        # An actively-thinking main thread is working, not waiting; only an
+        # idle/finished turn is blocked on its children.
+        if not self.main_activity.thinking:
+            waiting_since = self._main_waiting_since()
+            if waiting_since is not None:
+                return AgentUsage.waiting_for(self.now - waiting_since)
+        return self._thinking_usage(
+            self.main_activity.kind, self.main_activity.since, self.main_activity.mtime,
+        )
+
+    def _main_waiting_since(self) -> float | None:
+        'Start of the newest live top-level subagent, or None when main is not waiting on one.'
+        subs = self.subagents.subagents
+        ids = {s.agent_id for s in subs} | {s.agent_id.removeprefix('agent-') for s in subs}
+        starts = [
+            s.run_start_ts or s.first_timestamp
+            for s in subs
+            if (not s.parent_id or s.parent_id not in ids)
+            and (subagent_status(s) == 'running' or s.end_ts == 0 or s.bash_inflight)
+        ]
+        return max(starts) if starts else None
+
+    @cached_property
+    def agent_usage(self) -> dict[str, AgentUsage]:
+        """Resource usage for the agents style: subagents plus the main session.
+
+        A running subagent with no owned process but a thinking last activity
+        gets a zero-CPU/memory entry whose elapsed time is the thinking timer.
+        """
+        usage = dict(self.subagent_usage)
+        main = self.main_usage
+        if main is not None:
+            usage[MAIN_AGENT_ID] = main
+        return usage
+
+    def _thinking_usage(self, kind: str, since: float, mtime: float) -> AgentUsage | None:
+        """A thinking AgentUsage, or None when the agent is not processing or is stale.
+
+        A running agent with no live Bash process is *processing*: between tool
+        calls the transcript often still carries the previous `tool_use` as its
+        last activity until the next thinking/text block is written. Use the
+        transcript's mtime as the start of that gap. A recorded `thinking`
+        block is authoritative and keeps its own first-line timestamp.
+        """
+        if kind == 'thinking' and since > 0:
+            start = since
+        elif kind in ('tool_use', 'text', '') and mtime > 0:
+            start = mtime
+        else:
+            return None
+        if self.now - mtime > RunningSubagents.ABANDONED_HORIZON_SECONDS:
+            return None
+        return AgentUsage.thinking_for(self.now - start)
 
     @cached_property
     def workflows(self) -> RunningWorkflows:

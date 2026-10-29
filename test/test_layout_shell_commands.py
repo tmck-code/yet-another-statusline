@@ -373,23 +373,28 @@ def test_header_row_kept_when_labels_off(monkeypatch: pytest.MonkeyPatch, width:
 def test_column_labels_sit_over_their_columns(monkeypatch: pytest.MonkeyPatch, width: int, position: str, subs: int) -> None:
     lines = _label_lines(monkeypatch, width, position, subs, labels=True)
     sep = next(line for line in lines if LABEL_TITLE in line)
+    # The agent section may carry its own cpu/mem/time labels (thinking rows);
+    # only the shell section's labels follow the shell title.
     row = next(line for line in lines if 'bg  uv run pytest -q' in line)
-    cpu_end = row.index('%') + 1
-    mem_end = row.index('M') + 1
-    time_end = row.index('1:12') + 4
-    assert sep.index('ᶜᵖᵘ') + 3 == cpu_end
+    cmd_base = row.index('bg  uv run pytest -q')
+    cpu_end = row.index('%', cmd_base) + 1
+    mem_end = row.index('M', cmd_base) + 1
+    time_end = row.index('1:12', cmd_base) + 4
+    assert sep.index('ᶜᵖᵘ', sep.index(LABEL_TITLE)) + 3 == cpu_end
     if subs:  # without subagents the tokens-row elbows can land on the mem label and drop it
-        assert sep.index('ᵐᵉᵐ') + 3 == mem_end
-    assert sep.index('ᵗⁱᵐᵉ') + 4 == time_end
+        assert sep.index('ᵐᵉᵐ', sep.index(LABEL_TITLE)) + 3 == mem_end
+    assert sep.index('ᵗⁱᵐᵉ', sep.index(LABEL_TITLE)) + 4 == time_end
 
 
 @pytest.mark.parametrize('position,subs', LABEL_LAYOUTS)
 def test_disabled_column_has_no_label(monkeypatch: pytest.MonkeyPatch, position: str, subs: int) -> None:
     lines = _label_lines(monkeypatch, 200, position, subs, labels=True, cpu=CpuConfig(enabled=False))
     sep = next(line for line in lines if LABEL_TITLE in line)
-    assert 'ᶜᵖᵘ' not in sep
+    # Ignore the agent section's own labels; only the shell section is under test.
+    shell_labels = sep[sep.index(LABEL_TITLE):]
+    assert 'ᶜᵖᵘ' not in shell_labels
     if subs:  # without subagents tokens-row elbows can drop a label
-        assert 'ᵐᵉᵐ' in sep and 'ᵗⁱᵐᵉ' in sep
+        assert 'ᵐᵉᵐ' in shell_labels and 'ᵗⁱᵐᵉ' in shell_labels
 
 
 @pytest.mark.parametrize('seconds', (7, 72, 599, 600, 840, 3599, 3600, 3725))
@@ -498,9 +503,10 @@ def test_number_columns_have_equal_gaps_and_right_aligned_labels(monkeypatch: py
     assert cpu_end - cpu_w - cmd_end == 2
     assert mem_end - mem_w - cpu_end == 2
     assert time_end - time_w - mem_end == 2
-    assert sep.index('ᶜᵖᵘ') + 3 == cpu_end
-    assert sep.index('ᵐᵉᵐ') + 3 == mem_end
-    assert sep.index('ᵗⁱᵐᵉ') + 4 == time_end
+    shell_start = sep.index('ˢʰᵉˡˡ ᶜᵒᵐᵐᵃⁿᵈˢ ⁽²⁾')
+    assert sep.index('ᶜᵖᵘ', shell_start) + 3 == cpu_end
+    assert sep.index('ᵐᵉᵐ', shell_start) + 3 == mem_end
+    assert sep.index('ᵗⁱᵐᵉ', shell_start) + 4 == time_end
 
 
 CLOSED_CMDS = (_cmd('make test', cpu=99.0), _cmd('sleep 240', cpu=0.0))

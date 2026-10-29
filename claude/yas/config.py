@@ -468,9 +468,10 @@ def _parse_context_thresholds(raw: object, origin: str) -> tuple[int, ...]:
     return tuple(nums)
 
 
-SHELL_COMMAND_STYLES = ('badge', 'list')
+SHELL_COMMAND_STYLES = ('badge', 'list', 'agents')
 SHELL_COMMAND_POSITIONS = ('right', 'below')
 SHELL_COMMAND_CPU_MODES = ('current', 'average')
+SHELL_COMMAND_COMMAND_MODES = ('chain', 'current')
 
 
 class ElapsedConfig(NamedTuple):
@@ -494,13 +495,24 @@ class MemoryConfig(NamedTuple):
 class ShellCommandsConfig(NamedTuple):
     """The ``[shell_commands]`` table: running shell command display."""
     enabled:           bool          = True
-    style:             str           = 'badge'      # badge | list
+    style:             str           = 'badge'      # badge | list | agents
     position:          str           = 'right'      # right | below
+    command_mode:      str           = 'chain'      # chain | current
     max_items:         int           = 5
     max_command_width: int           = 40
     elapsed:           ElapsedConfig = ElapsedConfig()
     cpu:               CpuConfig     = CpuConfig()
     memory:            MemoryConfig  = MemoryConfig()
+
+    @property
+    def effective_command_mode(self) -> str:
+        """Process-selection mode actually used for this style.
+
+        Agents rows exist to show *current* activity, so they always follow the
+        live child process. ``command_mode`` only controls the separate badge /
+        list display, where ``"chain"`` remains the documented default.
+        """
+        return 'current' if self.style == 'agents' else self.command_mode
 
 
 DEFAULT_SHELL_COMMANDS = ShellCommandsConfig()
@@ -539,6 +551,7 @@ _SHELL_COMMAND_PARSERS: dict[str, Callable[[object, str], object]] = {
     'enabled':           _parse_bool,
     'style':             _choice(SHELL_COMMAND_STYLES),
     'position':          _choice(SHELL_COMMAND_POSITIONS),
+    'command_mode':      _choice(SHELL_COMMAND_COMMAND_MODES),
     'max_items':         _int_min(1),
     'max_command_width': _int_min(8),
 }

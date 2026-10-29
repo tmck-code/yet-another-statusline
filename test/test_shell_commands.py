@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from yas.info import shell_commands as sc
-from yas.info.shell_commands import ProcEntry, RunningShellCommands, strip_leading_cd
+from yas.info.shell_commands import ProcEntry, RunningShellCommands, first_command, strip_leading_cd
 
 NOW = 10_000.0
 CFG_AVG = SimpleNamespace(cpu=SimpleNamespace(mode='average'))
@@ -104,6 +104,118 @@ def test_tree_aggregation_and_average_cpu():
     assert cmd.elapsed_s == 100
 
 
+CFG_CUR_COMMAND = SimpleNamespace(
+    cpu=SimpleNamespace(mode='average'), command_mode='current',
+)
+
+
+def test_current_mode_single_sample_chain_reports_average_not_zero():
+    # From yas-0-cpu-example.txt: one Bash tool call containing a git/make/tail
+    # chain. `current` used to need a second sample and rendered 0%; the first
+    # sample must fall back to the tree's lifetime average.
+    chain = (
+        'git worktree add .claude/worktrees/feat-mandala-promotion -b feat-mandala-promotion master 2>&1 | tail -2 '
+        '&& mkdir -p .claude/worktrees/feat-mandala-promotion/.scratch/feat-mandala-promotion/orchestrator-promote '
+        '&& make -C .claude/worktrees/feat-mandala-promotion devshell-up 2>&1 | tail -3; '
+        'ls backend-rs/migrations | tail -3'
+    )
+    table = base_table(
+        pe(40, 10, wrapper(chain), cpu=0.2, elapsed=76, rss=67 * 1024),
+        pe(41, 40, 'git worktree add .claude/worktrees/feat-mandala-promotion', cpu=0.1, elapsed=75, rss=0),
+        pe(42, 40, 'make -C .claude/worktrees/feat-mandala-promotion devshell-up', cpu=0.5, elapsed=70, rss=0),
+        pe(43, 40, 'tail -2', cpu=0.0, elapsed=76, rss=0),
+    )
+    (cmd,) = RunningShellCommands.from_session(
+        's1', None, CFG_CUR, now=NOW, table=table, self_pid=30,
+    ).commands
+    assert cmd.cpu_percent == pytest.approx(0.8 / 76 * 100)
+    assert cmd.cpu_percent > 0
+    assert cmd.rss_kb == 67 * 1024
+
+
+def test_command_mode_current_shows_busiest_child_and_its_stats():
+    chain = "gate.sh make test 2>&1 | tail -4; grep 'test result' gate.log"
+    table = base_table(
+        pe(40, 10, wrapper(chain), cpu=1, elapsed=200, rss=100),
+        pe(41, 40, 'gate.sh make test', cpu=2, elapsed=190, rss=200),
+        pe(42, 40, 'cargo test --test all generator::', cpu=50, elapsed=150, rss=300),
+        pe(43, 40, 'tail -4', cpu=0, elapsed=200, rss=10),
+        pe(44, 42, 'rustc --test generator', cpu=10, elapsed=140, rss=400),
+    )
+    res = RunningShellCommands.from_session(
+        's1', None, CFG_CUR_COMMAND, now=NOW, table=table, self_pid=30,
+    )
+    (cmd,) = res.commands
+    assert cmd.command == chain                # ownership/background still use the chain
+    assert cmd.display_command == 'cargo test --test all generator::'
+    assert cmd.shown_command == 'cargo test --test all generator::'
+    assert cmd.pid == 42
+    assert cmd.cpu_percent == pytest.approx(40.0)   # (50 + 10) / 150
+    assert cmd.rss_kb == 700                        # cargo + rustc
+    assert cmd.elapsed_s == 150                     # cargo's own age, not the wrapper's
+
+
+def test_command_mode_current_falls_back_to_the_chain_when_no_child_remains():
+    res = RunningShellCommands.from_session(
+        's1', None, CFG_CUR_COMMAND, now=NOW,
+        table=base_table(pe(40, 10, wrapper('sleep 9'), cpu=5, elapsed=100, rss=50)),
+        self_pid=30,
+    )
+    (cmd,) = res.commands
+    assert cmd.display_command == 'sleep 9'
+    assert cmd.shown_command == 'sleep 9'
+
+
+def test_command_mode_current_fallback_shows_the_first_command_of_a_chain():
+    chain = 'cd /work/tree && git add -A backend-rs docs'
+    (cmd,) = RunningShellCommands.from_session(
+        's1', None, CFG_CUR_COMMAND, now=NOW,
+        table=base_table(pe(40, 10, wrapper(chain), cpu=5, elapsed=100, rss=50)),
+        self_pid=30,
+    ).commands
+    assert cmd.display_command == 'cd /work/tree'
+    assert cmd.shown_command == 'cd /work/tree'
+    assert cmd.command == chain
+
+
+CFG_CHAIN_COMMAND = SimpleNamespace(
+    cpu=SimpleNamespace(mode='average'), command_mode='chain',
+)
+
+
+def test_command_mode_chain_keeps_the_full_chain_with_live_children():
+    chain = 'cd /work/tree && git add -A backend-rs docs; git status'
+    table = base_table(
+        pe(40, 10, wrapper(chain), cpu=1, elapsed=200),
+        pe(41, 40, 'git add -A backend-rs docs', cpu=20, elapsed=150),
+    )
+    (cmd,) = RunningShellCommands.from_session(
+        's1', None, CFG_CHAIN_COMMAND, now=NOW, table=table, self_pid=30,
+    ).commands
+    assert cmd.shown_command == chain
+    # Agent-row previews always show the live child, independent of command_mode.
+    assert cmd.preview_command == 'git add -A backend-rs docs'
+
+
+def test_command_mode_current_keeps_background_matching_on_the_chain(tmp_path):
+    tp = tmp_path / 't.jsonl'
+    chain = 'gate.sh make test | tail -4'
+    tp.write_text(json.dumps({'message': {'content': [{
+        'type': 'tool_use', 'name': 'Bash',
+        'input': {'command': chain, 'run_in_background': True},
+    }]}}) + '\n')
+    table = base_table(
+        pe(40, 10, wrapper(chain), cpu=1, elapsed=200, rss=100),
+        pe(41, 40, 'cargo test', cpu=20, elapsed=150, rss=300),
+    )
+    res = RunningShellCommands.from_session(
+        's1', str(tp), CFG_CUR_COMMAND, now=NOW, table=table, self_pid=30,
+    )
+    (cmd,) = res.commands
+    assert cmd.display_command == 'cargo test'
+    assert cmd.background is True
+
+
 def test_totals():
     table = base_table(
         pe(40, 10, wrapper('a'), cpu=10, elapsed=100, rss=1),
@@ -124,10 +236,11 @@ def test_current_first_none_then_value_and_pid_reuse(tmp_home):
             's1', None, CFG_CUR, now=now, table=t, self_pid=30,
         ).commands[0].cpu_percent
 
-    assert go(table(10, 100), NOW) is None
+    # first refresh has no delta: fall back to the lifetime average
+    assert go(table(10, 100), NOW) == pytest.approx(10.0)
     assert go(table(15, 110), NOW + 10) == pytest.approx(50.0)
-    # same pid, different start time: reused pid is ignored
-    assert go(table(1, 5), NOW + 20) is None
+    # same pid, different start time: reused pid is ignored and falls back to average
+    assert go(table(1, 5), NOW + 20) == pytest.approx(20.0)
 
 
 def test_ps_time_parsing():
@@ -298,3 +411,19 @@ def test_background_scan_resumes_from_last_offset(tmp_path, tmp_home, monkeypatc
 ])
 def test_strip_leading_cd_for_display(command: str, shown: str) -> None:
     assert strip_leading_cd(command) == shown
+
+
+@pytest.mark.parametrize('command, first', [
+    ('cd /a && git add -A docs', 'cd /a'),
+    ('cd /a; export X=1; make test', 'cd /a'),
+    ('make test | tail -4', 'make test'),
+    ('make test || true', 'make test'),
+    ('make\ntest', 'make'),
+    ('echo "a|b" && ls', 'echo "a|b"'),
+    ("echo 'a;b' && ls", "echo 'a;b'"),
+    ('echo a\\;b', 'echo a\\;b'),
+    ('make test', 'make test'),
+    ('', ''),
+])
+def test_first_command_of_a_chain(command: str, first: str) -> None:
+    assert first_command(command) == first

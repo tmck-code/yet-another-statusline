@@ -24,9 +24,17 @@ SESSION = Path(__file__).parent.parent / 'ops' / 'session-info-example.json'
 NOW = 100_000.0
 
 
-def _cmd(command: str, *, elapsed: float = 60, cpu: float | None = 5.0, rss_kb: int = 20 * 1024) -> ShellCommand:
+def _cmd(
+    command: str, *,
+    elapsed: float = 60,
+    cpu: float | None = 5.0,
+    rss_kb: int = 20 * 1024,
+    display_command: str = '',
+    live_command: str = '',
+) -> ShellCommand:
     return ShellCommand(pid=1, command=command, background=False, elapsed_s=elapsed,
-                        cpu_percent=cpu, rss_kb=rss_kb)
+                        cpu_percent=cpu, rss_kb=rss_kb, display_command=display_command,
+                        live_command=live_command)
 
 
 def _use(tid: str, command: str, ts: float, *, bg: bool = False) -> str:
@@ -173,7 +181,9 @@ def _owned_view(monkeypatch, **kw) -> SessionView:
 def test_shell_section_excludes_owned_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     view = _owned_view(monkeypatch)
     assert [c.command for c in view.shell_commands.commands] == ['make demo']
-    assert set(view.subagent_usage) == {'a1'}
+    # a1 owns the live process; a2 has no process and is thinking.
+    assert set(view.subagent_usage) == {'a1', 'a2'}
+    assert view.subagent_usage['a2'].thinking is True
 
 
 def test_usage_sums_cpu_and_memory_and_takes_longest_elapsed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,8 +239,9 @@ def test_owning_row_shows_cpu_mem_elapsed_and_other_row_is_blank(monkeypatch: py
     rows = _agent_rows(_build(_owned_view(monkeypatch), width))
     own = next(r for r in rows if 'a1' in r)
     other = next(r for r in rows if 'a2' in r)
-    assert own.rstrip().endswith('12%  100M  0:20')
-    assert not other.rstrip().endswith('0:20')
+    # Resources sit left of the activity/log column.
+    assert '12%  100M  0:20' in own
+    assert '12%' not in other and '100M' not in other
     assert _visible_width(own) == _visible_width(other)
 
 
@@ -241,8 +252,16 @@ def test_columns_align_across_rows(monkeypatch: pytest.MonkeyPatch, width: int) 
     rows = _agent_rows(_build(_view(monkeypatch, subs, cmds), width))
     assert len(rows) == 2
     assert len({len(r.rstrip()) for r in rows}) == 1
-    assert rows[0].rstrip().endswith('  3%    5M     1:39')
-    assert rows[1].rstrip().endswith('250%  2.0G  1:06:30')
+    assert '  3%    5M     1:39' in rows[0]
+    assert '250%  2.0G  1:06:30' in rows[1]
+    # Wide rows put the resource block left of the activity/log column; narrow
+    # one-line rows keep it right-aligned at the row end.
+    if width > 100:
+        assert rows[0].index('3%') < rows[0].index('Bash[')
+        assert rows[1].index('250%') < rows[1].index('Bash[')
+    else:
+        assert rows[0].index('Bash[') < rows[0].index('3%')
+        assert rows[1].index('Bash[') < rows[1].index('250%')
 
 
 @pytest.mark.parametrize('width', (80, 140, 200))
@@ -267,7 +286,7 @@ def test_labels_are_painted_over_the_columns(monkeypatch: pytest.MonkeyPatch) ->
     # (border column - 3 is the content offset)
     assert data[cols['time'] - 3 + len('time') - 1] == '0'
     assert data[cols['cpu'] - 3 + len('cpu') - 1] == '%'
-    assert cols['cpu'] < cols['mem'] < cols['time']
+    assert cols['cpu'] < cols['mem'] < cols['time'] < cols['log']
 
 
 def test_disabled_columns_are_omitted_with_their_labels(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -277,12 +296,107 @@ def test_disabled_columns_are_omitted_with_their_labels(monkeypatch: pytest.Monk
     assert {'agent', 'cpu'} <= names
     assert not names & {'mem', 'time'}
     own = next(strip_ansi(c) for c in _contents(spec) if 'a1' in strip_ansi(c))
-    assert own.rstrip().endswith('12%')
+    assert '12%' in own
+    assert '100M' not in own and '0:20' not in own
+
+
+def test_command_mode_current_rewrites_subagent_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    sub = _sub('a1', [('gate.sh make test | tail -4', NOW - 21)])
+    cmd = _cmd(
+        'gate.sh make test | tail -4',
+        elapsed=20,
+        cpu=12.0,
+        rss_kb=100 * 1024,
+        display_command='cargo test --test all generator::',
+    )
+    shell = ShellCommandsConfig(
+        style='list', position='below', command_mode='current',
+    )
+    row = next(r for r in _agent_rows(_build(_view(monkeypatch, [sub], [cmd], shell=shell), 140)) if 'a1' in r)
+    assert 'Bash[cargo test --test all generator::]' in row
+    assert 'gate.sh make test' not in row
+    assert '12%' in row and '100M' in row
+
+
+def test_default_rows_prefer_the_live_child_even_with_command_mode_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = 'gate.sh make test | tail -4'
+    sub = _sub('a1', [(chain, NOW - 21)])
+    cmd = _cmd(chain, elapsed=20, cpu=12.0, live_command='make test')
+    shell = ShellCommandsConfig(style='list', position='below', command_mode='chain')
+    row = next(r for r in _agent_rows(_build(_view(monkeypatch, [sub], [cmd], shell=shell), 140)) if 'a1' in r)
+    assert 'Bash[make test]' in row
+    assert 'gate.sh make test' not in row
+    assert '12%' in row
+
+
+def test_non_bash_current_tool_call_wins_over_owned_background_bash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The agent still owns a long-running background Bash process, but its
+    # current activity is a Write call: show the Write, not the Bash command.
+    sub = _sub('a1', [('cargo build', NOW - 95)])
+    sub.last_activity = ('tool_use', 'Write', {'file_path': '/repo/src/main.py'})
+    cmd = _cmd('cargo build', elapsed=95, cpu=12.0, rss_kb=100 * 1024)
+    row = next(r for r in _agent_rows(_build(_view(monkeypatch, [sub], [cmd]), 200)) if 'a1' in r)
+    assert 'Write[main.py]' in row
+    assert 'Bash[' not in row
+    # The owned process still drives the resource columns.
+    assert '12%' in row and '100M' in row and '1:35' in row
+
+
+def test_thinking_is_not_masked_by_an_owned_background_bash_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sub = _sub('a1', [('cargo build', NOW - 95)])
+    sub.last_activity = ('thinking', '', {})
+    sub.last_activity_ts = NOW - 27
+    cmd = _cmd('cargo build', elapsed=95, cpu=12.0, rss_kb=100 * 1024)
+    row = next(r for r in _agent_rows(_build(_view(monkeypatch, [sub], [cmd]), 200)) if 'a1' in r)
+    assert '(thinking)' in row
+    assert 'Bash[' not in row
+    assert '12%' in row and '100M' in row
+
+
+def test_read_activity_is_not_treated_as_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
+    sub = _sub('a1')
+    sub.last_activity = ('tool_use', 'Read', {'file_path': 'x.py'})
+    view = _view(monkeypatch, [sub], [])
+    assert view.subagent_usage == {}
+
+
+def test_waiting_parent_row_shows_waiting_and_zero_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+    parent = _sub('a1')
+    parent.last_activity = ('text', 'dispatched the worker', {})
+    child = _sub('a2', [('sleep 30', NOW - 47)])
+    child.parent_id = 'a1'
+    child.first_timestamp = NOW - 47
+    child.run_start_ts = NOW - 47
+    row = next(r for r in _agent_rows(_build(_view(monkeypatch, [parent, child], []), 140)) if 'a1' in r)
+    assert '(waiting)' in row
+    assert '0%' in row and '0M' in row
+    assert '0:47' in row
+
+
+def test_parent_running_a_command_is_not_marked_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    parent = _sub('a1', [('sleep 30', NOW - 21)])
+    child = _sub('a2')
+    child.parent_id = 'a1'
+    child.first_timestamp = NOW - 47
+    child.run_start_ts = NOW - 47
+    view = _view(monkeypatch, [parent, child], [_cmd('sleep 30', elapsed=20)])
+    assert 'waiting' not in view.subagents.subagents[0].last_activity[0]
+    row = next(r for r in _agent_rows(_build(view, 140)) if 'a1' in r)
+    assert '(waiting)' not in row
 
 
 def test_no_columns_reserved_without_an_owned_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    plain = _agent_rows(_build(_view(monkeypatch, [_sub('a1'), _sub('a2')], [_cmd('make demo')]), 140))
-    assert all(r.rstrip().endswith('Bash[pytest]') for r in plain)
+    rows = _agent_rows(_build(_view(monkeypatch, [_sub('a1'), _sub('a2')], [_cmd('make demo')]), 140))
+    # With no live process the rows are processing/thinking: they get the
+    # thinking activity and the zero-resource columns, not a stale Bash label.
+    assert all('(thinking)' in r for r in rows)
+    assert all('0%' in r and '0M' in r for r in rows)
 
 
 def test_activity_column_truncates_to_make_room(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,7 +405,8 @@ def test_activity_column_truncates_to_make_room(monkeypatch: pytest.MonkeyPatch)
                  [_cmd('sleep 30', elapsed=20)])
     rows = _agent_rows(_build(view, 140))
     assert all('…' in r or 'x' * 120 not in r for r in rows)
-    assert rows[0].rstrip().endswith('0:20')
+    assert '0:20' in rows[0]
+    assert rows[0].index('0:20') < rows[0].index('Bash[')
 
 
 def test_side_section_is_balanced_and_keeps_owned_columns(monkeypatch: pytest.MonkeyPatch) -> None:

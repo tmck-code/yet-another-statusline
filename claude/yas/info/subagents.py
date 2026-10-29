@@ -10,6 +10,7 @@ the previous render without rescanning the whole transcript."""
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -62,6 +63,12 @@ def _parse_iso_to_epoch(ts: str) -> float:
 # treated as still-running — never as done — per the bias rule: prose/absence
 # is never a completion signal, only this structured tag is.
 _TERMINAL_STATUSES = frozenset(('completed', 'killed', 'failed', 'stopped'))
+
+# Bash-family tool calls whose in-flight process can be shown as a live
+# command preview. Only a CURRENT call from this family may be replaced by an
+# owned live process; other tools (Read/Write/Edit/…) stay visible even while
+# the agent still owns a background Bash process.
+BASH_TOOL_NAMES = frozenset(('Bash', 'BashOutput', 'KillBash'))
 
 _TASK_NOTIF_RE      = re.compile(r'<task-notification>(.*?)</task-notification>', re.DOTALL)
 _TASK_ID_TAG_RE      = re.compile(r'<task-id>(.*?)</task-id>', re.DOTALL)
@@ -442,8 +449,8 @@ def _collect_task_notifications(
     return result
 
 
-_ParseTuple = tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float]
-_EMPTY_PARSE: _ParseTuple = (0, 0, 0, 0.0, '', ('', '', {}), 0.0, 0.0)
+_ParseTuple = tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float, float]
+_EMPTY_PARSE: _ParseTuple = (0, 0, 0, 0.0, '', ('', '', {}), 0.0, 0.0, 0.0)
 
 
 def _parse_init(resume_after: float) -> dict[str, Any]:
@@ -453,7 +460,9 @@ def _parse_init(resume_after: float) -> dict[str, Any]:
     first-seen order (JSON objects keep it); a repeat write replaces the value
     in place, so the LAST-inserted id holds the run totals. ``cur`` is the
     message-scoped activity accumulator: ``tool`` is ``[name, input]`` or None,
-    ``text`` the first-line snippet of the last text block or None.
+    ``text`` the first-line snippet of the last text block or None, and ``ts``
+    the timestamp of the first line of the current message (the moment a
+    thinking block began).
     """
     return {
         'resume_after': resume_after,
@@ -463,7 +472,7 @@ def _parse_init(resume_after: float) -> dict[str, Any]:
         'end_ts':       0.0,
         'model':        '',
         'bash':         {},
-        'cur': {'mid': '', 'tool': None, 'text': None, 'has_content': False},
+        'cur': {'mid': '', 'tool': None, 'text': None, 'has_content': False, 'ts': 0.0},
     }
 
 
@@ -513,7 +522,7 @@ def _parse_fold(state: dict[str, Any], lines: list[bytes]) -> dict[str, Any]:
             elif stop != 'end_turn':
                 state['end_ts'] = 0.0
         except (ValueError, TypeError, AttributeError):
-            pass
+            line_ts = 0.0
         if not mid:
             continue
         first_sight = mid not in usage_by_id
@@ -527,7 +536,11 @@ def _parse_fold(state: dict[str, Any], lines: list[bytes]) -> dict[str, Any]:
         # Activity is message-scoped: accumulate across streamed writes of the
         # same id (tool_use > text > thinking), reset when the id changes.
         if mid != cur['mid']:
-            cur.update(mid=mid, tool=None, text=None, has_content=False)
+            cur.update(mid=mid, tool=None, text=None, has_content=False, ts=0.0)
+        if not cur.get('ts') and line_ts:
+            # First line of this message: for a thinking block this is when
+            # the model started thinking.
+            cur['ts'] = line_ts
         for item in (msg.get('content') or []):
             if not isinstance(item, dict):
                 continue
@@ -563,9 +576,11 @@ def _parse_result(state: dict[str, Any], totals_only: bool) -> _ParseTuple:
     )
     model         = ''
     last_activity: tuple[str, str, dict[str, object]] = ('', '', {})
+    last_activity_ts = 0.0
     if not totals_only:
         model = state['model']
         cur   = state['cur']
+        last_activity_ts = float(cur.get('ts', 0.0) or 0.0)
         # Prefer the last tool_use (a trailing narration must not mask it),
         # then the last text block's first non-empty line, then thinking.
         if cur['tool'] is not None:
@@ -576,7 +591,7 @@ def _parse_result(state: dict[str, Any], totals_only: bool) -> _ParseTuple:
             last_activity = ('thinking', '', {})
     return (
         billed_in, cache_read_in, output, state['first_ts'], model,
-        last_activity, state['end_ts'], state['run_start_ts'],
+        last_activity, state['end_ts'], state['run_start_ts'], last_activity_ts,
     )
 
 
@@ -616,7 +631,7 @@ def parse_transcript(
     Module-level so the workflow cohort reader (info/workflows.py) can call the
     identical token/activity/Done logic without duplicating it. Returns
     ``(billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts,
-    run_start_ts)``.
+    run_start_ts, last_activity_ts)``.
 
     ``resume_after``, when positive, is the caller's resume-boundary timestamp
     (typically the last-seen ``<task-notification>`` before the run being
@@ -660,6 +675,35 @@ def _build_tree_index(
         else:
             roots.append(sub)
     return children, roots
+
+
+def _agent_is_live(sub: RunningSubagent) -> bool:
+    'True while a subagent is still running, has no terminal signal, or has an in-flight Bash call.'
+    return (
+        subagent_status(sub) == 'running'
+        or sub.end_ts == 0
+        or bool(sub.bash_inflight)
+    )
+
+
+def _waiting_starts(subs: list[RunningSubagent]) -> dict[int, float]:
+    '''Latest start time of a live child, keyed by ``id(parent)``.
+
+    A parent whose transcript is silent because it is blocked on a child uses
+    this as the start of its waiting timer, so the timer tracks the age of the
+    worker it is waiting for rather than the parent's own last write.
+    '''
+    children, _roots = _build_tree_index(subs)
+    starts: dict[int, float] = {}
+    for parent_id, kids in children.items():
+        live_starts = [
+            kid.run_start_ts or kid.first_timestamp
+            for kid in kids
+            if _agent_is_live(kid)
+        ]
+        if live_starts:
+            starts[parent_id] = max(live_starts)
+    return starts
 
 
 def tree_order(subs: list[RunningSubagent]) -> list[tuple[RunningSubagent, int, bool]]:
@@ -876,6 +920,7 @@ class RunningSubagent:
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
         'mtime', 'agent_id', 'jsonl_path', 'parent_id', 'spawn_depth',
         'status', 'run_count', 'is_fork', 'resumed', 'run_start_ts', 'bash_inflight',
+        'last_activity_ts',
     )
 
     def __init__(
@@ -901,6 +946,7 @@ class RunningSubagent:
         resumed:         bool = False,  # a later notification/activity postdates the last-seen notification
         run_start_ts:    float | None = None,  # start of the CURRENT run; see subagent_dur_str
         bash_inflight:   tuple[tuple[str, float], ...] = (),  # (normalised command, tool_use ts) of Bash calls still running
+        last_activity_ts: float = 0.0,  # ts of the first line of the current activity (thinking start)
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -922,6 +968,7 @@ class RunningSubagent:
         self.is_fork          = is_fork
         self.resumed          = resumed
         self.bash_inflight    = bash_inflight
+        self.last_activity_ts = last_activity_ts
         # Per-run start anchor for duration display: the start of the CURRENT
         # run, not the agent's original spawn. Equals first_timestamp when
         # unset (never-resumed agents, and callers like info/workflows.py
@@ -940,7 +987,7 @@ class RunningSubagent:
             self.last_activity, self.end_ts, self.mtime, self.agent_id,
             self.jsonl_path, self.parent_id, self.spawn_depth,
             self.status, self.run_count, self.is_fork, self.resumed,
-            self.run_start_ts, self.bash_inflight,
+            self.run_start_ts, self.bash_inflight, self.last_activity_ts,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -958,7 +1005,8 @@ class RunningSubagent:
                 f'agent_id={self.agent_id!r}, jsonl_path={self.jsonl_path!r}, '
                 f'parent_id={self.parent_id!r}, spawn_depth={self.spawn_depth}, '
                 f'status={self.status!r}, run_count={self.run_count}, is_fork={self.is_fork}, '
-                f'resumed={self.resumed}, run_start_ts={self.run_start_ts})')
+                f'resumed={self.resumed}, run_start_ts={self.run_start_ts}, '
+                f'last_activity_ts={self.last_activity_ts})')
 
 
 class RunningSubagents:
@@ -1204,7 +1252,7 @@ class RunningSubagents:
                         totals_only_ids[jsonl.stem] = boundary_ts
 
                 walk = parse_transcript_state(jsonl, boundary_ts, cache=cache, st=st)
-                billed_in, cache_read_in, output, first_ts, model, last_activity, transcript_end_ts, parsed_run_start = (
+                billed_in, cache_read_in, output, first_ts, model, last_activity, transcript_end_ts, parsed_run_start, last_activity_ts = (
                     _EMPTY_PARSE if walk is None else _parse_result(walk, use_totals_only)
                 )
                 bash_calls = bash_inflight(walk.get('bash', {})) if walk is not None else ()
@@ -1259,6 +1307,7 @@ class RunningSubagents:
                     resumed         = resumed,
                     run_start_ts    = run_start_ts,
                     bash_inflight   = bash_calls,
+                    last_activity_ts = last_activity_ts,
                 ))
         except OSError:
             pass
@@ -1290,6 +1339,65 @@ class RunningSubagents:
                 parent = by_id.get(parent.parent_id) if parent.parent_id else None
         return ancestors
 
+    def with_activity(
+        self,
+        now: float,
+        usage: dict[str, Any] | None = None,
+    ) -> RunningSubagents:
+        """Rewrite agent rows to show the live command, a waiting state or thinking.
+
+        - A current Bash-family tool call with an owned live process: show that
+          process's command text instead of the full `;`/`|` chain from the
+          transcript. Agent rows always show current activity; the shell
+          badge/list keep the configured `command_mode`.
+        - Any OTHER current tool call (Read/Write/Edit/Grep/…) keeps the
+          transcript activity even when the agent still owns a background Bash
+          process: the row describes what the agent is doing now, while the
+          resource columns may still reflect that process.
+        - A running parent with no live command of its own but at least one
+          live child: show `waiting`, timed from the child's start. A parent
+          that is itself running a command is never waiting.
+        - A running Bash call with no live process (even when the tool result
+          hasn't been written yet, so `bash_inflight` still contains the call):
+          show `(thinking)` instead of the command that just finished.
+        - Everything else keeps the transcript activity, so a long Read/Grep
+          call is never relabelled as thinking.
+        """
+        live = usage or {}
+        waiting_starts = _waiting_starts(self.subagents)
+        out: list[RunningSubagent] = []
+        for sub in self.subagents:
+            u = live.get(sub.agent_id)
+            command = getattr(u, 'command', '')
+            last = sub.last_activity[0]
+            name = sub.last_activity[1]
+            if u is not None and command and last == 'tool_use' and name in BASH_TOOL_NAMES:
+                clone = copy.copy(sub)
+                clone.last_activity = ('tool_use', 'Bash', {'command': command})
+                clone.last_activity_ts = sub.mtime
+                out.append(clone)
+                continue
+            waiting_since = waiting_starts.get(id(sub))
+            if waiting_since is not None and u is None and subagent_status(sub) == 'running':
+                clone = copy.copy(sub)
+                clone.last_activity = ('waiting', '', {})
+                clone.last_activity_ts = waiting_since
+                out.append(clone)
+                continue
+            if (
+                subagent_status(sub) == 'running'
+                and u is None
+                and last == 'tool_use'
+                and name in BASH_TOOL_NAMES
+            ):
+                clone = copy.copy(sub)
+                clone.last_activity = ('thinking', '', {})
+                clone.last_activity_ts = sub.mtime
+                out.append(clone)
+                continue
+            out.append(sub)
+        return RunningSubagents(out, self.totals_only_ids)
+
     def visible(self, now: float, last_prompt_ts: float | None) -> list[RunningSubagent]:
         '''Compute the turn-scoped cohort visible in the statusline.
 
@@ -1298,9 +1406,10 @@ class RunningSubagents:
         last_prompt_ts) OR it is still being written (transcript written within
         LIVENESS_WINDOW_SECONDS), which keeps stragglers from the previous turn
         that haven't finished yet, OR it has a live descendant (a supervising
-        parent is transcript-silent while it waits on its children).  A
-        still-running agent (end_ts == 0) that is actively writing is always
-        included regardless.
+        parent is transcript-silent while it waits on its children). A
+        still-running agent (end_ts == 0) or one with an in-flight Bash call is
+        always included regardless of transcript silence: a long tool call or
+        thinking block writes nothing, so mtime alone cannot prove it stopped.
 
         When last_prompt_ts is None (hook unavailable), fall back to the
         JANITOR_HORIZON_SECONDS recency window: include any agent written within
@@ -1316,13 +1425,18 @@ class RunningSubagents:
             # Turn-scoped membership (Tasks 3.2 + 3.3), plus the supervising-
             # parent keep: a parent blocked in a long wait loop writes nothing
             # while its children work, so mtime alone would evict it and
-            # re-root its live children at the top level.
+            # re-root its live children at the top level. A running agent (or
+            # one with an in-flight Bash call) is also kept regardless of mtime:
+            # a long tool call / thinking block can be transcript-silent for
+            # far longer than the liveness window.
             live_parents = self._live_ancestors(self.subagents, now)
             candidates = [
                 sub for sub in self.subagents
                 if sub.first_timestamp >= last_prompt_ts
                 or now - sub.mtime <= self.LIVENESS_WINDOW_SECONDS
                 or id(sub) in live_parents
+                or sub.end_ts == 0
+                or bool(sub.bash_inflight)
             ]
         else:
             # No-marker fallback (Task 3.4): recency window
@@ -1330,6 +1444,7 @@ class RunningSubagents:
                 sub for sub in self.subagents
                 if now - sub.mtime <= self.JANITOR_HORIZON_SECONDS
                 or sub.end_ts == 0
+                or bool(sub.bash_inflight)
             ]
 
         if not candidates:
@@ -1344,6 +1459,10 @@ class RunningSubagents:
         all_done = all(sub.end_ts > 0 for sub in candidates)
 
         def _retired(sub: RunningSubagent) -> bool:
+            # A live Bash call is hard evidence the agent is still working,
+            # even when a stale end_ts or a silent transcript says otherwise.
+            if sub.bash_inflight:
+                return False
             if sub.end_ts > 0:
                 # Done member: a fully-clean cohort retires on
                 # COHORT_GRACE_SECONDS; a done member sitting inside a
@@ -1380,7 +1499,7 @@ class RunningSubagents:
                     boundary_ts = self.totals_only_ids[sub.agent_id]
                     jsonl = Path(sub.jsonl_path)
                     try:
-                        billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts, parsed_run_start = (
+                        billed_in, cache_read_in, output, first_ts, model, last_activity, end_ts, parsed_run_start, last_activity_ts = (
                             parse_transcript(jsonl, boundary_ts, totals_only=False)
                         )
                         # Rebuild the agent with the full-fidelity values.
@@ -1405,6 +1524,7 @@ class RunningSubagents:
                             is_fork         = sub.is_fork,
                             resumed         = sub.resumed,
                             run_start_ts    = parsed_run_start if parsed_run_start > 0 else boundary_ts if boundary_ts > 0 else first_ts,
+                            last_activity_ts = last_activity_ts,
                         )
                         reparsed_subs[id(sub)] = sub_rebuilt
                     except OSError:
@@ -1422,7 +1542,7 @@ class RunningSubagents:
     @staticmethod
     def _parse_transcript(
         jsonl: Path, resume_after: float = 0.0,
-    ) -> tuple[int, int, int, float, str, tuple[str, str, dict[str, object]], float, float]:
+    ) -> _ParseTuple:
         # Thin delegator to the module-level parse_transcript, kept so existing
         # callers/tests referencing RunningSubagents._parse_transcript still work.
         return parse_transcript(jsonl, resume_after)

@@ -913,6 +913,8 @@ class Renderer:
             if _visible_width(raw) > cap:
                 raw = raw[:cap] + ELLIPSIS
             return f'{GLYPH_TASKS} {name}[{raw}]'
+        if kind == 'waiting':
+            return f'{GLYPH_HOURGLASS} (waiting)'
         if kind == 'thinking':
             return f'{GLYPH_THINKING} (thinking)'
         if kind == 'text':
@@ -986,7 +988,7 @@ class Renderer:
         always limits the whole block.
         """
         shown = sc.commands[:cfg.max_items]
-        cmds = [strip_leading_cd(c.command) for c in shown]
+        cmds = [strip_leading_cd(c.shown_command) for c in shown]
         specs = (
             ('cpu',  cfg.cpu.enabled and any(c.cpu_percent is not None for c in shown),
              [f'{c.cpu_percent:.0f}%' if c.cpu_percent is not None else '' for c in shown]),
@@ -1102,6 +1104,8 @@ class Renderer:
         oneline_name_w: int | None = None,
         oneline_model_w: int | None = None,
         oneline_lines_w: int | None = None,
+        resource: str = '',
+        resource_w: int = 0,
     ) -> str:
         # Tree view: a plain branch prefix ('├ ', '└ ', indented deeper) eats
         # visible columns out of the front-field budget (between the duration
@@ -1479,6 +1483,14 @@ class Renderer:
                 # design mock's 'sonnet ·   <activity>'.
                 gap     = SUBAGENT_STATS_ACTIVITY_GAP  # ' · ' separator, no extra padding
                 dot_clr = self.CTX_DIM if is_done else self.LABEL
+                # Resource columns (cpu/mem/time) sit between the stats
+                # cluster and the activity/log column, so the log stays the
+                # last elastic field. `resource` is the styled cell; its width
+                # includes the leading gap.
+                if resource_w:
+                    avail_res = target_w - _visible_width(line1)
+                    if avail_res >= resource_w:
+                        line1 = f'{line1}{" " * SHELL_COL_GAP}{resource}'
                 # Only append the separator + activity when the row actually
                 # has room past the stats cluster — a tight side-by-side
                 # column can leave less slack than the separator itself, and
@@ -1625,6 +1637,13 @@ class Renderer:
             if avail_loc >= loc_field_w:
                 front_n   += f' {dot_n_clr}{MIDDLE_DOT}{self.R} {self.CTX_DIM}{loc_field_n}{self.R}'
                 front_n_w += 3 + loc_field_w
+
+        # Resource columns (cpu/mem/time) precede the activity/log segment, so
+        # log remains the row's last elastic field. `resource_w` includes the
+        # leading gap.
+        if resource_w and target_w - front_n_w >= resource_w:
+            front_n   += f'{" " * SHELL_COL_GAP}{resource}'
+            front_n_w += resource_w
 
         # Activity/log segment: last column, running agents only, and only
         # when at least 12 columns of slack remain past the token field — so

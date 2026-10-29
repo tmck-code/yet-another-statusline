@@ -1103,11 +1103,37 @@ def test_shell_commands_partial_group_defaults_missing_keys(tmp_path: Path) -> N
 
 
 @requires_tomllib
+def test_shell_commands_agents_style_accepted(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, '[shell_commands]\nstyle = "agents"\n')
+    assert cfg.shell_commands.style == 'agents'
+
+
+def test_shell_commands_command_mode_accepted(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, '[shell_commands]\ncommand_mode = "current"\n')
+    assert cfg.shell_commands.command_mode == 'current'
+
+
+def test_shell_commands_command_mode_defaults_to_chain(tmp_path: Path) -> None:
+    cfg = _load_sc(tmp_path, '[shell_commands]\n')
+    assert cfg.shell_commands.command_mode == 'chain'
+    assert cfg.errors == ()
+
+
+def test_agents_style_always_uses_current_process_selection(tmp_path: Path) -> None:
+    agents = _load_sc(tmp_path, '[shell_commands]\nstyle = "agents"\ncommand_mode = "chain"\n')
+    assert agents.shell_commands.effective_command_mode == 'current'
+    listed = _load_sc(tmp_path, '[shell_commands]\nstyle = "list"\ncommand_mode = "chain"\n')
+    assert listed.shell_commands.effective_command_mode == 'chain'
+
+
+
+@requires_tomllib
 @pytest.mark.parametrize('key, bad', [
     ('enabled', '"yes"'),
     ('style', '"table"'),
     ('style', '1'),
     ('position', '"left"'),
+    ('command_mode', '"chained"'),
     ('max_items', '0'),
     ('max_items', '"many"'),
     ('max_items', 'true'),

@@ -31,6 +31,7 @@ PID_REUSE_TOLERANCE_S = 3.0
 MAX_BG_COMMANDS = 200
 MAX_WALK = 64
 OWNER_TIE_S = 1.0  # two owners this close in start-time distance are indistinguishable
+MAIN_AGENT_ID = '__main__'  # synthetic owner key for the main Claude session
 
 # Anchored at the end: heredoc commands have no `< /dev/null` before `&& pwd -P`,
 # and the command body may itself contain `< /dev/null` or `&& pwd -P`.
@@ -52,28 +53,73 @@ class ProcEntry:
 
 @dataclass(frozen=True)
 class ShellCommand:
-    pid:         int
-    command:     str
-    background:  bool
-    elapsed_s:   float
-    cpu_percent: float | None
-    rss_kb:      int
+    pid:             int
+    command:         str      # the full Bash-tool chain, used for ownership matching
+    background:      bool
+    elapsed_s:       float
+    cpu_percent:     float | None
+    rss_kb:          int
+    display_command: str = ''  # the live process to show when command_mode = "current"
+    live_command:    str = ''  # the live process / first command, regardless of command_mode
+
+    @property
+    def shown_command(self) -> str:
+        'Display text: the current process in current mode, else the full chain.'
+        return self.display_command or self.command
+
+    @property
+    def preview_command(self) -> str:
+        """Agent-row preview: the live process, else the first command in the chain.
+
+        An agent row is about *current* activity, so it never shows a whole
+        `&&` / `;` / `|` chain. When the live child has already exited (a
+        builtin such as `cd`, or the gap between two segments) the first
+        individual command is a better preview than the full tool call.
+        """
+        return self.live_command or self.display_command or first_command(self.command)
 
 
 @dataclass(frozen=True)
 class AgentUsage:
-    'CPU, memory and longest elapsed time summed over one subagent\'s processes.'
-    cpu_percent: float | None
-    rss_kb:      int
-    elapsed_s:   float
+    'CPU, memory and longest elapsed time summed over one owner\'s processes.'
+    cpu_percent:   float | None
+    rss_kb:        int
+    elapsed_s:     float
+    command:       str = ''    # display text of the longest-running command
+    command_count: int = 0     # commands aggregated into this usage block
+    thinking:      bool = False
+    waiting:       bool = False
 
     @classmethod
     def of(cls, commands: tuple[ShellCommand, ...]) -> AgentUsage:
         cpus = [c.cpu_percent for c in commands if c.cpu_percent is not None]
+        longest = max(commands, key=lambda c: c.elapsed_s)
         return cls(
-            cpu_percent = sum(cpus) if cpus else None,
-            rss_kb      = sum(c.rss_kb for c in commands),
-            elapsed_s   = max(c.elapsed_s for c in commands),
+            cpu_percent   = sum(cpus) if cpus else None,
+            rss_kb        = sum(c.rss_kb for c in commands),
+            elapsed_s     = longest.elapsed_s,
+            command       = strip_leading_cd(longest.preview_command),
+            command_count = len(commands),
+        )
+
+    @classmethod
+    def thinking_for(cls, elapsed_s: float) -> AgentUsage:
+        'A thinking agent: no process, so zero CPU and memory, and a thinking timer.'
+        return cls(
+            cpu_percent   = 0.0,
+            rss_kb        = 0,
+            elapsed_s     = max(0.0, elapsed_s),
+            thinking      = True,
+        )
+
+    @classmethod
+    def waiting_for(cls, elapsed_s: float) -> AgentUsage:
+        'An agent blocked on a live child: no process of its own, so zero resources and a waiting timer.'
+        return cls(
+            cpu_percent   = 0.0,
+            rss_kb        = 0,
+            elapsed_s     = max(0.0, elapsed_s),
+            waiting       = True,
         )
 
 
@@ -157,20 +203,31 @@ class RunningShellCommands:
             return cls()
 
         mode = cfg.cpu.mode
+        current_mode = getattr(cfg, 'command_mode', 'chain') == 'current'
+        targets: list[tuple[ProcEntry, list[ProcEntry], str]] = []
+        for entry, cmd, tree in found:
+            current = select_current_process(tree, entry.pid)
+            live = current.argv if current is not None else first_command(cmd)
+            if current is not None and current_mode:
+                targets.append((current, subtree(current.pid, by_pid, kids), live))
+            else:
+                targets.append((entry, tree, live))
         cpus = cpu_percents(
-            [(e, sum(t.cpu_s for t in tree)) for e, _, tree in found],
+            [(target, sum(t.cpu_s for t in stats_tree)) for target, stats_tree, _ in targets],
             mode, session_id, now,
         )
         bg = background_commands(transcript_path, cache)
         out = []
-        for (entry, cmd, tree), cpu in zip(found, cpus):
+        for (entry, cmd, tree), (target, stats_tree, live), cpu in zip(found, targets, cpus):
             out.append(ShellCommand(
-                pid=entry.pid,
+                pid=target.pid,
                 command=_sanitize(' '.join(cmd.split())),
                 background=cmd.strip() in bg,
-                elapsed_s=entry.elapsed_s,
+                elapsed_s=target.elapsed_s,
                 cpu_percent=cpu,
-                rss_kb=sum(t.rss_kb for t in tree),
+                rss_kb=sum(t.rss_kb for t in stats_tree),
+                display_command=_sanitize(' '.join(live.split())) if current_mode else '',
+                live_command=_sanitize(' '.join(live.split())),
             ))
         return cls(commands=tuple(out))
 
@@ -185,6 +242,22 @@ def subtree(root: int, by_pid: dict[int, ProcEntry], kids: dict[int, list[int]])
         out.append(by_pid[pid])
         stack.extend(kids.get(pid, ()))
     return out
+
+
+def select_current_process(tree: list[ProcEntry], wrapper_pid: int) -> ProcEntry | None:
+    """The most representative live descendant of a Bash-tool wrapper.
+
+    A tool call can be a pipeline or `;`-chain. Pick the process doing the most
+    work (highest cumulative CPU), then the longest-running, then the largest.
+    Shell builtins (`cd`, `export`, `L=…`) have already exited and never appear.
+    """
+    candidates = [
+        p for p in tree
+        if p.pid != wrapper_pid and _basename(p.argv) != 'pwd'
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: (p.cpu_s, p.elapsed_s, p.rss_kb))
 
 
 def _basename(argv: str) -> str:
@@ -212,6 +285,41 @@ _LEADING_CD_RE = re.compile(
 
 
 _BARE_CD_RE = re.compile(r"""cd(?:\s+(?:"[^"]*"|'[^']*'|[^\s;&]+))?""")
+
+
+_CHAIN_STOP_CHARS = frozenset(';|\n')
+
+
+def first_command(command: str) -> str:
+    """The first individual command of a shell `&&` / `||` / `;` / `|` chain.
+
+    Used as the agents-row preview when no live child process remains: the row
+    is about current activity, so a whole tool-call chain hides the command it
+    is trying to show. Quotes are respected, so `echo "a|b" && ls` stays
+    whole in its first segment; an empty leading segment falls back to the
+    complete command.
+    """
+    quote = ''
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            if ch == '\\' and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ''
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+        elif ch == '\\':
+            i += 1  # escaped operator, not a chain boundary
+        elif ch in _CHAIN_STOP_CHARS or command.startswith(('&&', '||'), i):
+            head = command[:i].strip()
+            return head or command.strip()
+        i += 1
+    return command.strip() or command
 
 
 def strip_leading_cd(command: str) -> str:
@@ -365,13 +473,16 @@ def cpu_percents(
     for e, cpu in items:
         start = now - e.elapsed_s
         fresh[str(e.pid)] = {'start': start, 'cpu': cpu, 't': now}
+        # `current` needs two samples. The statusline is often invoked only once
+        # while a long command runs, so fall back to the lifetime average
+        # instead of showing a misleading 0%/blank on the first refresh.
+        pct = cpu / e.elapsed_s * 100 if e.elapsed_s > 0 else None
         old = prev.get(str(e.pid))
-        pct = None
         try:
             if old and abs(old['start'] - start) <= PID_REUSE_TOLERANCE_S and now > old['t']:
                 pct = max(0.0, (cpu - old['cpu']) / (now - old['t']) * 100)
         except (KeyError, TypeError):
-            pct = None
+            pass
         out.append(pct)
 
     try:
