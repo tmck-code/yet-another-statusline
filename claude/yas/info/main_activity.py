@@ -31,10 +31,6 @@ class MainActivity:
     def thinking(self) -> bool:
         return self.kind == 'thinking' and self.since > 0
 
-    def thinking_s(self, now: float) -> float:
-        'Seconds spent thinking, or 0 when the last activity is not thinking.'
-        return max(0.0, now - self.since) if self.thinking else 0.0
-
 
 def read_main_activity(
     transcript_path: str | None,

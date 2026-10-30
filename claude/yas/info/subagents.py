@@ -677,13 +677,14 @@ def _build_tree_index(
     return children, roots
 
 
+def _agent_has_live_signal(sub: RunningSubagent) -> bool:
+    'True when the subagent has no terminal signal or still has an in-flight Bash call.'
+    return sub.end_ts == 0 or bool(sub.bash_inflight)
+
+
 def _agent_is_live(sub: RunningSubagent) -> bool:
     'True while a subagent is still running, has no terminal signal, or has an in-flight Bash call.'
-    return (
-        subagent_status(sub) == 'running'
-        or sub.end_ts == 0
-        or bool(sub.bash_inflight)
-    )
+    return subagent_status(sub) == 'running' or _agent_has_live_signal(sub)
 
 
 def _waiting_starts(subs: list[RunningSubagent]) -> dict[int, float]:
@@ -1343,25 +1344,17 @@ class RunningSubagents:
         self,
         now: float,
         usage: dict[str, Any] | None = None,
+        *,
+        usage_attribution: bool = True,
     ) -> RunningSubagents:
-        """Rewrite agent rows to show the live command, a waiting state or thinking.
+        """Rewrite each agent's activity to describe what it is doing now.
 
-        - A current Bash-family tool call with an owned live process: show that
-          process's command text instead of the full `;`/`|` chain from the
-          transcript. Agent rows always show current activity; the shell
-          badge/list keep the configured `command_mode`.
-        - Any OTHER current tool call (Read/Write/Edit/Grep/…) keeps the
-          transcript activity even when the agent still owns a background Bash
-          process: the row describes what the agent is doing now, while the
-          resource columns may still reflect that process.
-        - A running parent with no live command of its own but at least one
-          live child: show `waiting`, timed from the child's start. A parent
-          that is itself running a command is never waiting.
-        - A running Bash call with no live process (even when the tool result
-          hasn't been written yet, so `bash_inflight` still contains the call):
-          show `(thinking)` instead of the command that just finished.
-        - Everything else keeps the transcript activity, so a long Read/Grep
-          call is never relabelled as thinking.
+        A live Bash command replaces its tool call; a running parent with no
+        command but a live child becomes ``waiting``; a Bash call with no live
+        process becomes ``thinking`` only when ``usage_attribution`` is on (no
+        process data was gathered otherwise). Other tool calls and text keep
+        the transcript activity, even while the agent owns a background Bash
+        process.
         """
         live = usage or {}
         waiting_starts = _waiting_starts(self.subagents)
@@ -1385,7 +1378,8 @@ class RunningSubagents:
                 out.append(clone)
                 continue
             if (
-                subagent_status(sub) == 'running'
+                usage_attribution
+                and subagent_status(sub) == 'running'
                 and u is None
                 and last == 'tool_use'
                 and name in BASH_TOOL_NAMES
@@ -1435,16 +1429,14 @@ class RunningSubagents:
                 if sub.first_timestamp >= last_prompt_ts
                 or now - sub.mtime <= self.LIVENESS_WINDOW_SECONDS
                 or id(sub) in live_parents
-                or sub.end_ts == 0
-                or bool(sub.bash_inflight)
+                or _agent_has_live_signal(sub)
             ]
         else:
             # No-marker fallback (Task 3.4): recency window
             candidates = [
                 sub for sub in self.subagents
                 if now - sub.mtime <= self.JANITOR_HORIZON_SECONDS
-                or sub.end_ts == 0
-                or bool(sub.bash_inflight)
+                or _agent_has_live_signal(sub)
             ]
 
         if not candidates:
@@ -1459,9 +1451,12 @@ class RunningSubagents:
         all_done = all(sub.end_ts > 0 for sub in candidates)
 
         def _retired(sub: RunningSubagent) -> bool:
-            # A live Bash call is hard evidence the agent is still working,
-            # even when a stale end_ts or a silent transcript says otherwise.
-            if sub.bash_inflight:
+            # A live Bash call is hard evidence a *still-running* agent is
+            # working, even when a stale end_ts or a silent transcript says
+            # otherwise. A Done agent still retires on its own horizon: a
+            # background call stays in `bash_inflight` forever, so treating it
+            # as live would pin the row forever.
+            if sub.bash_inflight and sub.end_ts == 0:
                 return False
             if sub.end_ts > 0:
                 # Done member: a fully-clean cohort retires on

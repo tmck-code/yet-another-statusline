@@ -9,6 +9,8 @@ from typing import Callable, NamedTuple
 from yas.config import Config, ShellCommandsConfig
 from yas.constants import (
     _ANSI_RE,
+    AGENT_THINKING_TEXT,
+    AGENT_WAITING_TEXT,
     BOX_H,
     BOX_H_DASH4,
     BOX_V,
@@ -661,6 +663,11 @@ def build_workflow_rows(
     return out
 
 
+# Shell data is best effort: an unreadable transcript/process table or a
+# malformed command entry must not take the statusline down. Anything else is
+# a real bug and should surface instead of silently emptying the section.
+_SHELL_LAYOUT_ERRORS = (OSError, ValueError, KeyError, TypeError)
+
 SHELL_BADGE_GAP = 3
 SHELL_SIDE_GAP  = 3  # ' │ ' between the subagent and shell commands sections
 SHELL_CLOSED_MIN_RIGHT = 60  # empty columns needed right of a closing divider, else the list is left open
@@ -676,7 +683,7 @@ def shell_badge(view: SessionView, r: Renderer) -> str:
         if not cfg.enabled or cfg.style != 'badge' or cfg.position != 'right' or not sc:
             return ''
         return r.shell_commands_badge(sc, cfg)
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return ''
 
 
@@ -704,7 +711,7 @@ def shell_rows(view: SessionView, r: Renderer, inner: int, *, own_badge: bool, l
         badge = r.shell_commands_badge(sc, cfg)
         pad = ' ' * max(0, inner - _visible_width(badge))
         return [RowSpec('content', content=f'{pad}{badge}')]
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return []
 
 
@@ -731,7 +738,7 @@ def shell_closed_rows(
         if inner - used - 2 < SHELL_CLOSED_MIN_RIGHT:
             return None
         labels = r.shell_commands_labels(sc, cfg, 3 + SHELL_LIST_INDENT, block_w) if labelled else []
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return None
     divider_col = 3 + used + 1
     divider = f'{r.grad_at(divider_col - 1, width, fill=fill)}{BOX_V}{RESET}'
@@ -787,7 +794,7 @@ def shell_side(
             lines = r.shell_commands_side(sc, cfg, max_width=avail, header=not labelled, grow=True)
         else:
             lines = capped
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return None
     right_w = _visible_width(lines[0])
     left_w = inner - SHELL_SIDE_GAP - right_w
@@ -804,7 +811,7 @@ def shell_border_labels(view: SessionView, r: Renderer, start_col: int, max_widt
         if not cfg.enabled or cfg.style != 'list' or not sc:
             return []
         return r.shell_commands_labels(sc, cfg, start_col, max_width, grow=grow)
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return []
 
 
@@ -846,7 +853,7 @@ def usage_plan(
         source = view.subagent_usage if usage is None else usage
         picked = {aid: u for aid, u in source.items() if aid in ids}
         plan = r.agent_usage_plan(picked, view.cfg.shell_commands, view.cfg.agents.resource_usage, labelled=labelled)
-    except Exception:
+    except _SHELL_LAYOUT_ERRORS:
         return None
     return plan if plan is not None and room - plan.width >= floor else None
 
@@ -872,8 +879,23 @@ def attach_badge(line: str, badge: str, inner: int) -> str:
     return f'{line}{" " * gap}{badge}'
 
 
-AGENT_THINKING_TEXT = '✻ Thinking…'
-AGENT_WAITING_TEXT  = '✻ Waiting…'
+def attach_labels(
+    rows: list[RowSpec],
+    labels: list[tuple[str, int]],
+    *,
+    kind: str = 'separator_dim',
+    ups: tuple[int, ...] = (),
+) -> None:
+    """Put `labels` on the separator above the next rows, adding one if needed.
+
+    The label row doubles as the next section's rule when a separator already
+    sits directly above; an `ups` elbow means that separator belongs to the
+    previous section and a fresh one is required.
+    """
+    if rows and rows[-1].kind.startswith('separator') and not ups:
+        rows[-1].labels.extend(labels)
+    else:
+        rows.append(RowSpec(kind, ups=ups, labels=labels))
 
 
 def agents_mode(view: SessionView) -> bool:
@@ -882,8 +904,12 @@ def agents_mode(view: SessionView) -> bool:
     return bool(cfg.enabled and cfg.style == 'agents')
 
 
-def agent_activity_text(usage: AgentUsage | None) -> str:
-    'Description text for an agents-style row: its command preview or thinking state.'
+def agent_activity_text(usage: AgentUsage | None, kind: str = '') -> str:
+    'Description text for an agents-style row, keyed first by its activity kind.'
+    if kind == 'thinking':
+        return AGENT_THINKING_TEXT
+    if kind == 'waiting':
+        return AGENT_WAITING_TEXT
     if usage is None:
         return ''
     if usage.command:
@@ -897,35 +923,24 @@ def agent_activity_text(usage: AgentUsage | None) -> str:
 
 
 def _activity_row(sub: RunningSubagent, usage: AgentUsage | None) -> RunningSubagent:
-    """Copy of `sub` whose description carries the command preview / thinking state.
+    """Copy of `sub` with its current activity moved into the description slot.
 
-    The description slot is for the row's *current* activity. A live Bash
-    preview only belongs there when the current tool call is itself
-    Bash-family; a Read/Write/Edit/Grep call stays in the activity/log column
-    even if the agent still owns a background Bash process (its cpu/mem/time
-    columns keep reflecting that process). Thinking and waiting are likewise
-    kept in the description slot, never masked by an owned process.
+    `with_activity` has already rewritten `last_activity` from live-process
+    ownership; this only maps that activity to row text. Non-Bash tool calls
+    and text replies stay in the activity/log column even when the agent owns a
+    background Bash process. The description replaces the activity column, so
+    the preview is not shown twice.
     """
     kind, name, _inp = sub.last_activity
     if kind == 'tool_use' and name not in BASH_TOOL_NAMES:
-        # Non-Bash tool call: render it in the activity/log column via
-        # `Renderer.subagent_activity`, exactly as the default layout does.
         return sub
     if kind == 'text':
-        # A reply snippet belongs in the activity/log column.
         return sub
-    if kind == 'thinking':
-        text = AGENT_THINKING_TEXT
-    elif kind == 'waiting':
-        text = AGENT_WAITING_TEXT
-    else:
-        text = agent_activity_text(usage)
+    text = agent_activity_text(usage, kind)
     if not text:
         return sub
     clone = copy.copy(sub)
     clone.description = text
-    # The preview replaces the activity column too — showing the same
-    # activity twice on one row would waste the columns the preview needs.
     clone.last_activity = ('', '', {})
     return clone
 
@@ -1027,6 +1042,63 @@ def agents_rows(
         else:
             labels.extend(plan.labels(3 + inner - uw))
     return lines, labels
+
+
+def subagent_section_rows(
+    view: SessionView, r: Renderer, width: int, fill: float,
+    visible_subs: list[RunningSubagent],
+) -> tuple[list[RowSpec], int | None]:
+    """Rows for the subagent block, or shell commands when no agent shows.
+
+    The badge rides the first subagent row and the resource columns share one
+    plan across the cohort. Returns the 1-indexed divider column when the shell
+    list sits to the right, so the caller can attach the matching elbow to its
+    preceding separator.
+    """
+    if not visible_subs:
+        shell = shell_rows(view, r, width - 4, own_badge=True)
+        return ([*shell, RowSpec('separator_dim')], None) if shell else ([], None)
+
+    cells = subagent_cells(visible_subs)
+    name_w = oneline_name_width(cells)
+    model_w = tree_model_width(cells)
+    badge = shell_badge(view, r)
+    plan = usage_plan(view, r, cells, labelled=False, room=width - 4,
+                      floor=max(SUBAGENT_ONELINE_MIN_W, oneline_right_floor(cells)))
+    uw = plan.width if plan else 0
+    side = shell_side(view, r, width - 4, cells,
+                      probe=lambda w: oneline_probe(r, cells, w, width, name_w, model_w), usage_w=uw)
+    sub_w = side.left_w if side else width - 4
+    sub_lines: list[str] = []
+    for i, (sub, prefix, depth) in enumerate(cells):
+        row_w = sub_w - (badge_width(badge) if i == 0 else 0)
+        if width > 100:
+            cell = plan.cells.get(sub.agent_id, plan.blank) if plan else ''
+            lines = r.subagent_row(sub, row_w, twoline=True, session_inout=0,
+                                   stats_col=100 if width >= 125 else None,
+                                   tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
+                                   oneline_model_w=model_w,
+                                   resource=cell, resource_w=uw).split('\n')
+        else:
+            lines = attach_usage(
+                r.subagent_row(sub, row_w - uw, twoline=False, session_inout=0,
+                               stats_col=100 if width >= 125 else None,
+                               tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
+                               oneline_model_w=model_w).split('\n'),
+                sub, plan, row_w)
+        if i == 0 and badge:
+            lines[0] = attach_badge(lines[0], badge, width - 4)
+        sub_lines.extend(lines)
+
+    if side:
+        divider_col = 3 + side.left_w + 1
+        out = shell_side_rows(side, sub_lines, divider_col, width, fill, r)
+        out.append(RowSpec('separator_dim', ups=(divider_col,)))
+        return out, divider_col
+    out = [RowSpec('content', content=line) for line in sub_lines]
+    out.extend(shell_rows(view, r, width - 4, own_badge=False))
+    out.append(RowSpec('separator_dim'))
+    return out, None
 
 
 def build_narrow(
@@ -1143,10 +1215,7 @@ def build_narrow(
             per_agent={}, twoline=True,
         )
         if labels:
-            if rows and rows[-1].kind.startswith('separator'):
-                rows[-1].labels.extend(labels)
-            else:
-                rows.append(RowSpec('separator_dim', labels=labels))
+            attach_labels(rows, labels)
         rows.extend(RowSpec('content', content=line) for line in lines)
         rows.append(RowSpec('separator_dim'))
     elif not side_by_side:
@@ -1154,50 +1223,10 @@ def build_narrow(
             for line in r.task_row(tasks, width - 4, compact=True):
                 rows.append(RowSpec('content', content=line))
             rows.append(RowSpec('separator_dim'))
-        if visible_subs:
-            cells = subagent_cells(visible_subs)
-            name_w = oneline_name_width(cells)
-            model_w = tree_model_width(cells)
-            badge = shell_badge(view, r)
-            plan = usage_plan(view, r, cells, labelled=False, room=width - 4,
-                              floor=max(SUBAGENT_ONELINE_MIN_W, oneline_right_floor(cells)))
-            uw = plan.width if plan else 0
-            side = shell_side(view, r, width - 4, cells, probe=lambda w: oneline_probe(r, cells, w, width, name_w, model_w), usage_w=uw)
-            sub_w = side.left_w if side else width - 4
-            sub_lines: list[str] = []
-            for i, (sub, prefix, depth) in enumerate(cells):
-                row_w = sub_w - (badge_width(badge) if i == 0 else 0)
-                if width > 100:
-                    cell = plan.cells.get(sub.agent_id, plan.blank) if plan else ''
-                    lines = r.subagent_row(sub, row_w, twoline=True, session_inout=0,
-                                           stats_col=100 if width >= 125 else None,
-                                           tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                           oneline_model_w=model_w,
-                                           resource=cell, resource_w=uw).split('\n')
-                else:
-                    lines = attach_usage(
-                        r.subagent_row(sub, row_w - uw, twoline=False, session_inout=0,
-                                       stats_col=100 if width >= 125 else None,
-                                       tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                       oneline_model_w=model_w).split('\n'),
-                        sub, plan, row_w)
-                if i == 0 and badge:
-                    lines[0] = attach_badge(lines[0], badge, width - 4)
-                sub_lines.extend(lines)
-            if side:
-                divider_col = 3 + side.left_w + 1
-                rows[-1].downs = rows[-1].downs + (divider_col,)
-                rows.extend(shell_side_rows(side, sub_lines, divider_col, width, fill, r))
-                rows.append(RowSpec('separator_dim', ups=(divider_col,)))
-            else:
-                rows.extend(RowSpec('content', content=line) for line in sub_lines)
-                rows.extend(shell_rows(view, r, width - 4, own_badge=False))
-                rows.append(RowSpec('separator_dim'))
-        else:
-            shell = shell_rows(view, r, width - 4, own_badge=True)
-            if shell:
-                rows.extend(shell)
-                rows.append(RowSpec('separator_dim'))
+        section, section_divider_col = subagent_section_rows(view, r, width, fill, visible_subs)
+        if section_divider_col is not None:
+            rows[-1].downs = rows[-1].downs + (section_divider_col,)
+        rows.extend(section)
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
     if wf_rows:
         rows.extend(wf_rows)
@@ -1284,56 +1313,14 @@ def build_medium(
             per_agent={}, twoline=True,
         )
         if labels:
-            if rows and rows[-1].kind.startswith('separator'):
-                rows[-1].labels.extend(labels)
-            else:
-                rows.append(RowSpec('separator_dim', labels=labels))
+            attach_labels(rows, labels)
         rows.extend(RowSpec('content', content=line) for line in lines)
         rows.append(RowSpec('separator_dim'))
-    elif visible_subs:
-        cells = subagent_cells(visible_subs)
-        name_w = oneline_name_width(cells)
-        model_w = tree_model_width(cells)
-        badge = shell_badge(view, r)
-        plan = usage_plan(view, r, cells, labelled=False, room=width - 4,
-                          floor=max(SUBAGENT_ONELINE_MIN_W, oneline_right_floor(cells)))
-        uw = plan.width if plan else 0
-        side = shell_side(view, r, width - 4, cells, probe=lambda w: oneline_probe(r, cells, w, width, name_w, model_w), usage_w=uw)
-        sub_w = side.left_w if side else width - 4
-        sub_lines: list[str] = []
-        for i, (sub, prefix, depth) in enumerate(cells):
-            row_w = sub_w - (badge_width(badge) if i == 0 else 0)
-            if width > 100:
-                lines = r.subagent_row(sub, row_w, twoline=True, session_inout=0,
-                                       stats_col=100 if width >= 125 else None,
-                                       tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                       oneline_model_w=model_w,
-                                       resource=plan.cells.get(sub.agent_id, plan.blank) if plan else '',
-                                       resource_w=uw).split('\n')
-            else:
-                lines = attach_usage(
-                    r.subagent_row(sub, row_w - uw, twoline=False, session_inout=0,
-                                   stats_col=100 if width >= 125 else None,
-                                   tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                   oneline_model_w=model_w).split('\n'),
-                    sub, plan, row_w)
-            if i == 0 and badge:
-                lines[0] = attach_badge(lines[0], badge, width - 4)
-            sub_lines.extend(lines)
-        if side:
-            divider_col = 3 + side.left_w + 1
-            rows[-1].downs = rows[-1].downs + (divider_col,)
-            rows.extend(shell_side_rows(side, sub_lines, divider_col, width, fill, r))
-            rows.append(RowSpec('separator_dim', ups=(divider_col,)))
-        else:
-            rows.extend(RowSpec('content', content=line) for line in sub_lines)
-            rows.extend(shell_rows(view, r, width - 4, own_badge=False))
-            rows.append(RowSpec('separator_dim'))
     else:
-        shell = shell_rows(view, r, width - 4, own_badge=True)
-        if shell:
-            rows.extend(shell)
-            rows.append(RowSpec('separator_dim'))
+        section, section_divider_col = subagent_section_rows(view, r, width, fill, visible_subs)
+        if section_divider_col is not None:
+            rows[-1].downs = rows[-1].downs + (section_divider_col,)
+        rows.extend(section)
     wf_rows = build_workflow_rows(view, width, r, per_agent=False)
     if wf_rows:
         rows.extend(wf_rows)
@@ -2162,11 +2149,7 @@ def build_wide(
         )
         # Consume the seam slot even when the header/tasks separator directly
         # above already serves as the section rule (no token rows at this width).
-        kind = sep_kind('separator_dim')
-        if rows and rows[-1].kind.startswith('separator') and not pending_ups:
-            rows[-1].labels.extend(labels)
-        else:
-            rows.append(RowSpec(kind, ups=pending_ups, labels=labels))
+        attach_labels(rows, labels, kind=sep_kind('separator_dim'), ups=pending_ups)
         rows.extend(RowSpec('content', content=line) for line in lines)
         pending_ups = ()
 
@@ -2232,6 +2215,21 @@ def build_wide(
                 rows.append(RowSpec('content', content=line))
             pending_ups = ()
             tail_ups    = (divider_col,)
+            # The side-by-side block leaves no room for the shell section
+            # beside it, so render it below. A badge becomes its own row here
+            # rather than disappearing with no subagent row to host it.
+            closed = shell_closed_rows(view, r, width, fill, labelled=view.cfg.labels)
+            shell = shell_rows(view, r, width - 4, own_badge=True, labelled=view.cfg.labels)
+            if closed and shell:
+                closed_rows, closed_col, closed_labels = closed
+                rows.append(RowSpec(sep_kind('separator_dim'), ups=tail_ups, downs=(closed_col,), labels=closed_labels))
+                rows.extend(closed_rows)
+                tail_ups = (closed_col,)
+            elif shell:
+                below = shell_border_labels(view, r, 3 + SHELL_LIST_INDENT, width - 4 - SHELL_LIST_INDENT) if view.cfg.labels else []
+                rows.append(RowSpec(sep_kind('separator_dim'), ups=tail_ups, labels=below))
+                rows.extend(shell)
+                tail_ups = ()
 
     if not side_by_side and not agents_style:
         if tasks.is_visible():

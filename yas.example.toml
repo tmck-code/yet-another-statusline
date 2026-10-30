@@ -224,8 +224,8 @@
 # elapsed = { enabled = true }    # time since the command started
 # cpu     = { enabled = true, mode = "current", warn_percent = 80.0 }
 #   mode: "current" = CPU used since the previous refresh divided by wall time
-#           (falls back to the lifetime average on the first refresh, and
-#           whenever a PID has been reused);
+#           (blank on the first refresh, and whenever a PID has been reused,
+#           because there is no previous sample to subtract);
 #         "average" = total CPU time / time since the command started
 #   warn_percent: number >= 0; CPU at or above this is drawn in the warn colour
 # memory  = { enabled = true, warn_mb = 1024.0 }

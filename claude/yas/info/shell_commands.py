@@ -15,13 +15,14 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, TypedDict
 
 from yas.constants import _sanitize, shell_cpu_cache_path
 from yas.info import bash_inflight
 from yas.info.parsecache import fold_file
 
 if TYPE_CHECKING:
+    from yas.config import ShellCommandsConfig
     from yas.info.parsecache import TranscriptCache
 
 FIXTURE_ENV = 'YAS_SHELL_COMMANDS_FIXTURE'
@@ -30,7 +31,7 @@ SHELL_NAMES = ('bash', 'zsh', 'sh')
 PID_REUSE_TOLERANCE_S = 3.0
 MAX_BG_COMMANDS = 200
 MAX_WALK = 64
-OWNER_TIE_S = 1.0  # two owners this close in start-time distance are indistinguishable
+OWNER_TIE_S = 1.0  # two owners' calls this close in time are indistinguishable
 MAIN_AGENT_ID = '__main__'  # synthetic owner key for the main Claude session
 
 # Anchored at the end: heredoc commands have no `< /dev/null` before `&& pwd -P`,
@@ -71,10 +72,9 @@ class ShellCommand:
     def preview_command(self) -> str:
         """Agent-row preview: the live process, else the first command in the chain.
 
-        An agent row is about *current* activity, so it never shows a whole
-        `&&` / `;` / `|` chain. When the live child has already exited (a
-        builtin such as `cd`, or the gap between two segments) the first
-        individual command is a better preview than the full tool call.
+        Rows describe current activity, so they never show the whole
+        `&&`/`;`/`|` chain; the first command also covers an already-exited
+        builtin such as `cd`.
         """
         return self.live_command or self.display_command or first_command(self.command)
 
@@ -152,7 +152,7 @@ class RunningShellCommands:
         cls,
         session_id: str,
         transcript_path: str | None,
-        cfg: Any,
+        cfg: ShellCommandsConfig,
         now: float | None = None,
         table: list[ProcEntry] | None = None,
         self_pid: int | None = None,
@@ -168,7 +168,7 @@ class RunningShellCommands:
         cls,
         session_id: str,
         transcript_path: str | None,
-        cfg: Any,
+        cfg: ShellCommandsConfig,
         now: float | None,
         table: list[ProcEntry] | None,
         self_pid: int | None,
@@ -350,8 +350,6 @@ def extract_command(argv: str) -> str | None:
     return unquote_eval(m.group('cmd'))
 
 
-# ---- process table -------------------------------------------------------
-
 def fixture_self_pid() -> int | None:
     path = os.environ.get(FIXTURE_ENV)
     if not path:
@@ -449,8 +447,6 @@ def read_ps_table() -> list[ProcEntry]:
     return parse_ps_output(res.stdout)
 
 
-# ---- cpu -----------------------------------------------------------------
-
 def cpu_percents(
     items: list[tuple[ProcEntry, float]],
     mode: str,
@@ -473,10 +469,10 @@ def cpu_percents(
     for e, cpu in items:
         start = now - e.elapsed_s
         fresh[str(e.pid)] = {'start': start, 'cpu': cpu, 't': now}
-        # `current` needs two samples. The statusline is often invoked only once
-        # while a long command runs, so fall back to the lifetime average
-        # instead of showing a misleading 0%/blank on the first refresh.
-        pct = cpu / e.elapsed_s * 100 if e.elapsed_s > 0 else None
+        # `current` needs two samples: the first refresh (and one whose PID was
+        # reused) has no delta to report, so leave the value blank rather than
+        # substituting the lifetime average.
+        pct: float | None = None
         old = prev.get(str(e.pid))
         try:
             if old and abs(old['start'] - start) <= PID_REUSE_TOLERANCE_S and now > old['t']:
@@ -495,13 +491,15 @@ def cpu_percents(
     return out
 
 
-# ---- background detection -----------------------------------------------
+class _BackgroundState(TypedDict):
+    cmds: list[str]
 
-def _bg_init() -> dict[str, Any]:
+
+def _bg_init() -> _BackgroundState:
     return {'cmds': []}
 
 
-def _bg_fold(state: dict[str, Any], lines: list[bytes]) -> dict[str, Any]:
+def _bg_fold(state: _BackgroundState, lines: list[bytes]) -> _BackgroundState:
     cmds = state.setdefault('cmds', [])
     for raw in lines:
         if b'run_in_background' not in raw:
@@ -533,13 +531,16 @@ def background_commands(transcript_path: str | None, cache: TranscriptCache | No
         return set()
 
 
-# ---- subagent ownership ---------------------------------------------------
+class _FlightState(TypedDict):
+    # `bash_inflight.fold_line` stores JSON triples `[command, ts, background]`.
+    calls: dict[str, list[Any]]
 
-def _flight_init() -> dict[str, Any]:
+
+def _flight_init() -> _FlightState:
     return {'calls': {}}
 
 
-def _flight_fold(state: dict[str, Any], lines: list[bytes]) -> dict[str, Any]:
+def _flight_fold(state: _FlightState, lines: list[bytes]) -> _FlightState:
     calls = state.setdefault('calls', {})
     for raw in lines:
         if b'"Bash"' in raw or b'tool_use_id' in raw:
@@ -570,7 +571,8 @@ def split_by_owner(
     A command is owned when its text equals an in-flight Bash call of exactly
     one subagent, judged by the call whose timestamp is closest to the process
     start. The main thread competes through `main_calls` (read only when a
-    subagent text matches). A tie between different owners leaves the command
+    subagent text matches). Two different owners whose calls are within
+    `OWNER_TIE_S` of each other are indistinguishable, so the command stays
     with the main thread; each in-flight call is claimed by one process.
     """
     pool: dict[str, list[tuple[str | None, float]]] = {}
@@ -592,7 +594,7 @@ def split_by_owner(
             continue
         best = ranked[0]
         rival = next((c for c in ranked[1:] if c[0] != best[0]), None)
-        if rival is not None and abs(rival[1] - start) - abs(best[1] - start) < OWNER_TIE_S:
+        if rival is not None and abs(rival[1] - best[1]) < OWNER_TIE_S:
             continue
         pool[cmd.command].remove(best)
         if best[0] is not None:

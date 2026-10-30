@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from functools import cached_property
 
 from yas.config import Config
-from yas.constants import subagent_status
 from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec
 from yas.session import SessionInfo
@@ -22,7 +22,7 @@ from yas.info.shell_commands import (
     MAIN_AGENT_ID, AgentUsage, RunningShellCommands, main_inflight, split_by_owner,
 )
 from yas.info.main_activity import MainActivity, read_main_activity
-from yas.info.subagents import RunningSubagents
+from yas.info.subagents import RunningSubagents, _agent_is_live
 from yas.info.workflows import RunningWorkflows
 from yas.info.tasks import TaskList
 from yas.tokens import compute_session_cost
@@ -79,9 +79,13 @@ def _fmt_elapsed(mtime: float | None, now: float) -> str:
     return _fmt_duration_ms(int(max(0, now - mtime) * 1000))
 
 
-# ---------------------------------------------------------------------------
-# SessionView
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ShellSplit:
+    'Main-thread shell commands and the resource usage of each running subagent.'
+    mine:       RunningShellCommands
+    usage:      dict[str, AgentUsage]
+    attributed: bool = True  # False when no process ownership was gathered
+
 
 class SessionView:
     def __init__(self, session: SessionInfo, cfg: Config, now: float | None = None, cache: TranscriptCache | None = None) -> None:
@@ -114,10 +118,14 @@ class SessionView:
     def subagents(self) -> RunningSubagents:
         # A running Bash tool call with no live process is a finished tool
         # whose result hasn't landed yet; show the agent as thinking, not as
-        # still running its previous command.
+        # still running its previous command. Only do that when ownership was
+        # actually gathered: with resource usage or the shell section disabled
+        # there is no process data, so the row keeps its Bash call.
+        split = self._shell_split
         return self._raw_subagents.with_activity(
             self.now,
-            self._shell_split[1],
+            split.usage,
+            usage_attribution=split.attributed,
         )
 
     @cached_property
@@ -138,25 +146,27 @@ class SessionView:
         )
 
     @cached_property
-    def _shell_split(self) -> tuple[RunningShellCommands, dict[str, AgentUsage]]:
+    def _shell_split(self) -> ShellSplit:
         'Main-thread commands, and the resource usage of the processes each running subagent owns.'
         every = self._shell_all
-        if not every or not self.cfg.agents.resource_usage.enabled:
-            return every, {}
+        if not self.cfg.agents.resource_usage.enabled or not self.cfg.shell_commands.enabled:
+            return ShellSplit(every, {}, attributed=False)
+        if not every:
+            return ShellSplit(every, {})
         owners = {s.agent_id: s.bash_inflight for s in self._raw_subagents.subagents
                   if s.status == 'running' and s.bash_inflight}
         if not owners:
-            return every, {}
+            return ShellSplit(every, {})
         mine, theirs = split_by_owner(
             every.commands, owners,
             lambda: main_inflight(self.session.transcript_path, self.parse_cache), self.now,
         )
-        return RunningShellCommands(commands=mine), {o: AgentUsage.of(cs) for o, cs in theirs.items()}
+        return ShellSplit(RunningShellCommands(commands=mine), {o: AgentUsage.of(cs) for o, cs in theirs.items()})
 
     @cached_property
     def shell_commands(self) -> RunningShellCommands:
         'Shell commands of the main thread (those owned by a subagent show on its row instead).'
-        return self._shell_split[0]
+        return self._shell_split.mine
 
     @cached_property
     def subagent_usage(self) -> dict[str, AgentUsage]:
@@ -168,7 +178,7 @@ class SessionView:
         """
         if not self.cfg.agents.resource_usage.enabled:
             return {}
-        usage = dict(self._shell_split[1])
+        usage = dict(self._shell_split.usage)
         for sub in self.subagents.subagents:
             if sub.agent_id in usage or sub.status != 'running':
                 continue
@@ -202,8 +212,10 @@ class SessionView:
         thinking timer.
         """
         try:
-            mine = self._shell_split[0]
-        except Exception:
+            mine = self._shell_split.mine
+        except (OSError, ValueError, KeyError, TypeError):
+            # Shell gathering is best effort; a bad transcript or process
+            # table must not remove the main row from the agents section.
             return None
         if mine:
             return AgentUsage.of(mine.commands)
@@ -224,8 +236,7 @@ class SessionView:
         starts = [
             s.run_start_ts or s.first_timestamp
             for s in subs
-            if (not s.parent_id or s.parent_id not in ids)
-            and (subagent_status(s) == 'running' or s.end_ts == 0 or s.bash_inflight)
+            if (not s.parent_id or s.parent_id not in ids) and _agent_is_live(s)
         ]
         return max(starts) if starts else None
 
@@ -243,23 +254,18 @@ class SessionView:
         return usage
 
     def _thinking_usage(self, kind: str, since: float, mtime: float) -> AgentUsage | None:
-        """A thinking AgentUsage, or None when the agent is not processing or is stale.
+        """A thinking AgentUsage, or None when the agent is not thinking or is stale.
 
-        A running agent with no live Bash process is *processing*: between tool
-        calls the transcript often still carries the previous `tool_use` as its
-        last activity until the next thinking/text block is written. Use the
-        transcript's mtime as the start of that gap. A recorded `thinking`
-        block is authoritative and keeps its own first-line timestamp.
+        Only a recorded `thinking` block gets the timer, anchored at that
+        block's first line. A running Bash call with no live process is
+        rewritten to `thinking` by `with_activity` before this is called, so it
+        still gets a timer; a `tool_use` / `text` / empty activity does not.
         """
-        if kind == 'thinking' and since > 0:
-            start = since
-        elif kind in ('tool_use', 'text', '') and mtime > 0:
-            start = mtime
-        else:
+        if kind != 'thinking' or since <= 0:
             return None
         if self.now - mtime > RunningSubagents.ABANDONED_HORIZON_SECONDS:
             return None
-        return AgentUsage.thinking_for(self.now - start)
+        return AgentUsage.thinking_for(self.now - since)
 
     @cached_property
     def workflows(self) -> RunningWorkflows:

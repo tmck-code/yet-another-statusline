@@ -466,6 +466,7 @@ LABEL_ABBREVIATIONS: dict[str, str] = {
 # maps to exactly ONE ASCII char so visible width \u2014 and therefore the
 # hand-tuned border/elbow column math \u2014 is preserved.
 ASCII_GLYPHS: dict[str, str] = {
+    '✻':                '*',  # agent thinking/waiting status marker
     ICON_COST:          '$',
     ICON_TOK_RATE:      '~',
     GLYPH_MODEL:        '@',
@@ -663,12 +664,17 @@ WORKFLOW_RUN_CAP          = 2
 # At most SUBAGENT_DISPLAY_CAP subagent rows render in the standalone cohort;
 # the layout builders keep the most recent (latest-started) rows and drop the
 # older overflow. Matches WORKFLOW_AGENT_CAP so both sections cap identically.
+SUBAGENT_DISPLAY_CAP      = 6
+
 # Spaces before the shell commands list content; border_line adds one more,
 # so rows start 2 columns in, like the subagent rows.
 SHELL_LIST_INDENT = 1
 SHELL_COL_GAP     = 2  # spaces between the command column and each number column
+SHELL_BG_LABEL    = 'bg'  # background process marker before a shell command
+SHELL_FG_LABEL    = 'fg'  # foreground process marker before a shell command
 
-SUBAGENT_DISPLAY_CAP      = 6
+AGENT_THINKING_TEXT = '✻ Thinking…'
+AGENT_WAITING_TEXT  = '✻ Waiting…'
 
 # A terminal (completed/killed/stopped/failed) subagent row is retained for at
 # most this many seconds after its end_ts before it drops from the cohort

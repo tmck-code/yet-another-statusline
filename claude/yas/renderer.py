@@ -81,7 +81,9 @@ from yas.constants import (
     GLYPH_WF_SUMMARY,
     ICON_COST,
     ICON_TERMINAL,
+    SHELL_BG_LABEL,
     SHELL_COL_GAP,
+    SHELL_FG_LABEL,
     SHELL_LIST_INDENT,
     ICON_LIMIT_5H,
     ICON_LIMIT_7D,
@@ -280,7 +282,7 @@ class UsagePlan(NamedTuple):
         out = []
         offset = SHELL_COL_GAP
         for name, w in self.fields:
-            out.append((name, start_col + offset + w - len(name)))
+            out.append((name, start_col + offset + w - _visible_width(name)))
             offset += w + SHELL_COL_GAP
         return out
 
@@ -995,14 +997,17 @@ class Renderer:
             ('mem',  cfg.memory.enabled, [_fmt_rss(c.rss_kb) for c in shown]),
             ('time', cfg.elapsed.enabled, [fmt_duration(c.elapsed_s) for c in shown]),
         )
-        fields = [(name, max([len(name)] + [len(v) for v in vals]), vals) for name, on, vals in specs if on]
+        fields = [
+            (name, max([_visible_width(name)] + [_visible_width(v) for v in vals]), vals)
+            for name, on, vals in specs if on
+        ]
         cols = [
             (' ' * SHELL_COL_GAP).join(
                 f'{self._shell_value_clr(name, c, cfg)}{vals[i].rjust(w)}{self.R}' for name, w, vals in fields)
             for i, c in enumerate(shown)
         ]
         right_w = sum(w for _, w, _ in fields) + SHELL_COL_GAP * max(0, len(fields) - 1)
-        longest = max((len(c) for c in cmds), default=0)
+        longest = max((_visible_width(c) for c in cmds), default=0)
         cmd_w = max(1, longest if grow else min(cfg.max_command_width, longest))
         if max_width is not None:
             cmd_w = max(1, min(cmd_w, max_width - 4 - (SHELL_COL_GAP + right_w if right_w else 0)))
@@ -1036,7 +1041,12 @@ class Renderer:
         for name, on, fmt in specs:
             if on:
                 vals = {aid: fmt(u) for aid, u in usage.items()}
-                fields.append((name, max([len(name) if labelled else 0] + [len(v) for v in vals.values()]), vals))
+                fields.append((
+                    name,
+                    max([_visible_width(name) if labelled else 0]
+                        + [_visible_width(v) for v in vals.values()]),
+                    vals,
+                ))
         if not fields:
             return None
         cells = {
@@ -1060,7 +1070,7 @@ class Renderer:
         labels = [(f'shell commands ({sc.count})', start_col)]
         offset = 4 + plan.cmd_w + SHELL_COL_GAP
         for name, width in plan.fields:
-            labels.append((name, start_col + offset + width - len(name)))
+            labels.append((name, start_col + offset + width - _visible_width(name)))
             offset += width + SHELL_COL_GAP
         return labels
 
@@ -1077,9 +1087,11 @@ class Renderer:
         if header:
             width = max(width, _visible_width(head))
         for c, command, right in zip(plan.shown, plan.cmds, plan.cols):
-            cmd = command if len(command) <= cmd_w else command[:cmd_w - 1] + '…'
+            cmd = command if _visible_width(command) <= cmd_w else command[:cmd_w - 1] + '…'
+            pad = ' ' * max(0, cmd_w - _visible_width(cmd))
             tail = ' ' * SHELL_COL_GAP + right if right else ''
-            lines.append(f'{self.CTX_DIM}{"bg" if c.background else "fg"}{self.R}  {self.PWD}{cmd.ljust(cmd_w)}{self.R}{tail}')
+            label = SHELL_BG_LABEL if c.background else SHELL_FG_LABEL
+            lines.append(f'{self.CTX_DIM}{label}{self.R}  {self.PWD}{cmd}{pad}{self.R}{tail}')
         hidden = sc.count - len(plan.shown)
         if hidden > 0:
             lines.append(f'    {self.CTX_DIM}+{hidden} more{self.R}')

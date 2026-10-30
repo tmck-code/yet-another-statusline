@@ -1200,8 +1200,9 @@ _FALLBACK_CHILDREN: dict[str, list[str]] = {
     _CURRENT_CHAIN: [],
 }
 
-# The -200 shell-commands scenarios fill the terminal instead of stopping at max_width.
-_SHELL_WIDTHS = (('', None, ''), ('-80', 80, ''), ('-200', 200, '[layout]\nfull_width = true\nlabels = true\n'))
+# The -80/-140/-200/-300 shell-commands scenarios fill the terminal instead of stopping at max_width.
+_SHELL_WIDE_TOML = '[layout]\nfull_width = true\nlabels = true\n'
+_SHELL_WIDTHS = (('', None, ''), ('-80', 80, ''), ('-140', 140, _SHELL_WIDE_TOML), ('-200', 200, _SHELL_WIDE_TOML), ('-300', 300, _SHELL_WIDE_TOML))
 
 
 def _subagent_bash_commands(subagents: list[tuple[object, ...]]) -> set[str]:
@@ -1904,7 +1905,7 @@ seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * 
         subagents      = _SHELL_SUBAGENTS,
         shell_commands = _SHELL_COMMANDS,
         columns        = 200,
-        yas_toml       = _SHELL_WIDTHS[2][2] + _SHELL_LIST_TOML,
+        yas_toml       = _SHELL_WIDE_TOML + _SHELL_LIST_TOML,
     ),
     *(
         ScenarioConfig(
@@ -1927,11 +1928,11 @@ seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * 
             columns        = cols,
             yas_toml       = layout_toml + _SHELL_SIDE_TOML,
         )
-        for suffix, cols, layout_toml in (_SHELL_WIDTHS[0], _SHELL_WIDTHS[2])
+        for suffix, cols, layout_toml in (_SHELL_WIDTHS[0], _SHELL_WIDTHS[3])
     ),
     ScenarioConfig(
         # Wide terminal: the command grows into the free space and the subagent side keeps its natural width.
-        name           = 'shell-commands-side-300',
+        name           = 'shell-commands-side-long-300',
         subagents      = _SHELL_LONG_SUBAGENTS,
         shell_commands = _SHELL_LONG_COMMANDS,
         columns        = 300,

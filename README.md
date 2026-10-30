@@ -276,10 +276,10 @@ memory  = { enabled = true, warn_mb = 1024.0 }
   CPU and keeps the other keys at their defaults; `cpu = true` means defaults).
   Missing keys take their defaults.
 - `cpu.mode = "current"` shows CPU used since the previous refresh divided by
-  wall time. On the first refresh (and after a PID is reused) it falls back to
-  the lifetime average, so a single statusline invocation still shows a useful
-  number instead of blank/0%. `"average"` always shows total CPU time divided
-  by time since the command started.
+  wall time. The first refresh (and a refresh after a PID is reused) has no
+  previous sample, so the value is blank rather than a lifetime average.
+  `"average"` always shows total CPU time divided by time since the command
+  started.
 - CPU at or above `cpu.warn_percent`, and memory at or above `memory.warn_mb`,
   are drawn in the warn colour.
 - An invalid value falls back to its default like every other knob and is
@@ -299,11 +299,13 @@ resource_usage = { enabled = true, cpu = true, memory = true, elapsed = true }
   `mem` and `time` labels are drawn over them. The log column shrinks first.
 - A process belongs to a subagent when its command text equals a Bash call of that
   subagent that has no result yet, or was run in the background. If several owners
-  have the same command, the call closest to the process start wins; a tie keeps
-  it in the shell commands section. The section shows only main-thread commands
+  have the same command, the call closest to the process start wins; two owners
+  whose calls are within 1 s of each other are indistinguishable, so the command
+  stays in the shell commands section. The section shows only main-thread commands
   and is hidden when none remain.
 - `resource_usage = false` turns it off (processes stay in the shell commands
-  section); `true` means all defaults. Each inner key is a bool; a bad value falls
+  section, and agent rows keep their Bash call instead of showing a thinking
+  state); `true` means all defaults. Each inner key is a bool; a bad value falls
   back to its default and is reported as e.g. `agents.resource_usage.cpu`.
 - Number formats and warn colours come from `[shell_commands]`
   (`cpu.warn_percent`, `memory.warn_mb`).

@@ -109,10 +109,10 @@ CFG_CUR_COMMAND = SimpleNamespace(
 )
 
 
-def test_current_mode_single_sample_chain_reports_average_not_zero():
-    # From yas-0-cpu-example.txt: one Bash tool call containing a git/make/tail
-    # chain. `current` used to need a second sample and rendered 0%; the first
-    # sample must fall back to the tree's lifetime average.
+def test_current_mode_first_sample_is_blank_not_the_lifetime_average():
+    # `current` is a delta since the previous refresh, so the first sample has
+    # nothing to compare against and must stay blank rather than substitute the
+    # tree's lifetime average.
     chain = (
         'git worktree add .claude/worktrees/feat-mandala-promotion -b feat-mandala-promotion master 2>&1 | tail -2 '
         '&& mkdir -p .claude/worktrees/feat-mandala-promotion/.scratch/feat-mandala-promotion/orchestrator-promote '
@@ -128,8 +128,7 @@ def test_current_mode_single_sample_chain_reports_average_not_zero():
     (cmd,) = RunningShellCommands.from_session(
         's1', None, CFG_CUR, now=NOW, table=table, self_pid=30,
     ).commands
-    assert cmd.cpu_percent == pytest.approx(0.8 / 76 * 100)
-    assert cmd.cpu_percent > 0
+    assert cmd.cpu_percent is None
     assert cmd.rss_kb == 67 * 1024
 
 
@@ -236,11 +235,11 @@ def test_current_first_none_then_value_and_pid_reuse(tmp_home):
             's1', None, CFG_CUR, now=now, table=t, self_pid=30,
         ).commands[0].cpu_percent
 
-    # first refresh has no delta: fall back to the lifetime average
-    assert go(table(10, 100), NOW) == pytest.approx(10.0)
+    # first refresh has no delta: blank until a previous sample exists
+    assert go(table(10, 100), NOW) is None
     assert go(table(15, 110), NOW + 10) == pytest.approx(50.0)
-    # same pid, different start time: reused pid is ignored and falls back to average
-    assert go(table(1, 5), NOW + 20) == pytest.approx(20.0)
+    # same pid, different start time: reused pid is ignored and stays blank
+    assert go(table(1, 5), NOW + 20) is None
 
 
 def test_ps_time_parsing():

@@ -21,7 +21,7 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Literal, NamedTuple, TYPE_CHECKING, TypeVar, overload
 
 from yas.constants import (
     DEFAULT_CONTEXT_LABELS,
@@ -547,16 +547,11 @@ def _choice(options: tuple[str, ...]) -> Callable[[object, str], str]:
     return parse
 
 
-_SHELL_COMMAND_PARSERS: dict[str, Callable[[object, str], object]] = {
-    'enabled':           _parse_bool,
-    'style':             _choice(SHELL_COMMAND_STYLES),
-    'position':          _choice(SHELL_COMMAND_POSITIONS),
-    'command_mode':      _choice(SHELL_COMMAND_COMMAND_MODES),
-    'max_items':         _int_min(1),
-    'max_command_width': _int_min(8),
-}
+_ShellGroupConfig = ElapsedConfig | CpuConfig | MemoryConfig
 
-_SHELL_COMMAND_GROUPS: dict[str, tuple[Callable[..., object], dict[str, Callable[[object, str], object]]]] = {
+_SHELL_COMMAND_GROUPS: dict[
+    str, tuple[Callable[..., _ShellGroupConfig], dict[str, Callable[[object, str], object]]],
+] = {
     'elapsed': (ElapsedConfig, {'enabled': _parse_bool}),
     'cpu':     (CpuConfig, {
         'enabled':      _parse_bool,
@@ -567,42 +562,93 @@ _SHELL_COMMAND_GROUPS: dict[str, tuple[Callable[..., object], dict[str, Callable
 }
 
 
-def _parse_shell_command_group(
-    name: str, raw: object, errors: list[str], debug: list[str],
-) -> object:
-    """Validate one [shell_commands.<name>] group; a bool is shorthand for ``enabled``."""
-    cls, parsers = _SHELL_COMMAND_GROUPS[name]
-    label = f'shell_commands.{name}'
+def _parse_bool_or_table(
+    raw: object, *,
+    label: str,
+    parsers: dict[str, Callable[[object, str], _T]],
+    defaults: object,
+    errors: list[str],
+    debug: list[str],
+) -> bool | dict[str, _T]:
+    """Resolve a bool shorthand or a table's typed fields.
+
+    A bool means "set ``enabled``" and is returned as-is; a non-table is
+    recorded and yields an empty dict, so the caller's defaults apply unchanged.
+    """
     if isinstance(raw, bool):
-        return cls(enabled=raw)
+        return raw
     if not isinstance(raw, dict):
         errors.append(label)
         debug.append(f'{label}: value {raw!r} rejected (expected a boolean or a table)')
-        return cls()
-    defaults = cls()
-    values: dict[str, object] = {}
-    for key, parse in parsers.items():
-        if key in raw:
-            values[key] = _resolve(
-                f'{label}.{key}', [('toml', raw[key])], parse,
-                getattr(defaults, key), errors, debug)
-    return cls(**values)
+        return {}
+    return {
+        key: _resolve(
+            f'{label}.{key}', [('toml', raw[key])], parse,
+            getattr(defaults, key), errors, debug)
+        for key, parse in parsers.items() if key in raw
+    }
+
+
+@overload
+def _parse_shell_command_group(
+    name: Literal['elapsed'], raw: object, errors: list[str], debug: list[str],
+) -> ElapsedConfig: ...
+
+
+@overload
+def _parse_shell_command_group(
+    name: Literal['cpu'], raw: object, errors: list[str], debug: list[str],
+) -> CpuConfig: ...
+
+
+@overload
+def _parse_shell_command_group(
+    name: Literal['memory'], raw: object, errors: list[str], debug: list[str],
+) -> MemoryConfig: ...
+
+
+def _parse_shell_command_group(
+    name: str, raw: object, errors: list[str], debug: list[str],
+) -> _ShellGroupConfig:
+    """Validate one [shell_commands.<name>] group; a bool is shorthand for ``enabled``."""
+    cls, parsers = _SHELL_COMMAND_GROUPS[name]
+    parsed = _parse_bool_or_table(
+        raw, label=f'shell_commands.{name}', parsers=parsers,
+        defaults=cls(), errors=errors, debug=debug,
+    )
+    return cls(enabled=parsed) if isinstance(parsed, bool) else cls(**parsed)
 
 
 def _parse_shell_commands(raw: object, errors: list[str], debug: list[str]) -> ShellCommandsConfig:
     """Validate the [shell_commands] table; a bad key falls back to its default."""
     if not isinstance(raw, dict):
         return DEFAULT_SHELL_COMMANDS
-    values: dict[str, Any] = {}  # kwargs for the NamedTuple, one type per field
-    for key, parse in _SHELL_COMMAND_PARSERS.items():
-        if key in raw:
-            values[key] = _resolve(
-                f'shell_commands.{key}', [('toml', raw[key])], parse,
-                getattr(DEFAULT_SHELL_COMMANDS, key), errors, debug)
-    for name in _SHELL_COMMAND_GROUPS:
-        if name in raw:
-            values[name] = _parse_shell_command_group(name, raw[name], errors, debug)
-    return ShellCommandsConfig(**values)
+
+    def pick(key: str, parse: Callable[[object, str], _T], default: _T) -> _T:
+        sources = [('toml', raw[key])] if key in raw else []
+        return _resolve(f'shell_commands.{key}', sources, parse, default, errors, debug)
+
+    defaults = DEFAULT_SHELL_COMMANDS
+    return ShellCommandsConfig(
+        enabled           = pick('enabled', _parse_bool, defaults.enabled),
+        style             = pick('style', _choice(SHELL_COMMAND_STYLES), defaults.style),
+        position          = pick('position', _choice(SHELL_COMMAND_POSITIONS), defaults.position),
+        command_mode      = pick('command_mode', _choice(SHELL_COMMAND_COMMAND_MODES), defaults.command_mode),
+        max_items         = pick('max_items', _int_min(1), defaults.max_items),
+        max_command_width = pick('max_command_width', _int_min(8), defaults.max_command_width),
+        elapsed           = (
+            _parse_shell_command_group('elapsed', raw['elapsed'], errors, debug)
+            if 'elapsed' in raw else defaults.elapsed
+        ),
+        cpu               = (
+            _parse_shell_command_group('cpu', raw['cpu'], errors, debug)
+            if 'cpu' in raw else defaults.cpu
+        ),
+        memory            = (
+            _parse_shell_command_group('memory', raw['memory'], errors, debug)
+            if 'memory' in raw else defaults.memory
+        ),
+    )
 
 
 class ResourceUsageConfig(NamedTuple):
@@ -624,19 +670,12 @@ RESOURCE_USAGE_KEYS = ('enabled', 'cpu', 'memory', 'elapsed')
 
 def _parse_resource_usage(raw: object, errors: list[str], debug: list[str]) -> ResourceUsageConfig:
     """Validate ``agents.resource_usage``; a bool is shorthand for ``enabled``."""
-    label = 'agents.resource_usage'
-    if isinstance(raw, bool):
-        return ResourceUsageConfig(enabled=raw)
-    if not isinstance(raw, dict):
-        errors.append(label)
-        debug.append(f'{label}: value {raw!r} rejected (expected a boolean or a table)')
-        return ResourceUsageConfig()
-    defaults = ResourceUsageConfig()
-    values = {
-        key: _resolve(f'{label}.{key}', [('toml', raw[key])], _parse_bool, getattr(defaults, key), errors, debug)
-        for key in RESOURCE_USAGE_KEYS if key in raw
-    }
-    return ResourceUsageConfig(**values)
+    parsed = _parse_bool_or_table(
+        raw, label='agents.resource_usage',
+        parsers={key: _parse_bool for key in RESOURCE_USAGE_KEYS},
+        defaults=ResourceUsageConfig(), errors=errors, debug=debug,
+    )
+    return ResourceUsageConfig(enabled=parsed) if isinstance(parsed, bool) else ResourceUsageConfig(**parsed)
 
 
 def _parse_agents(raw: object, errors: list[str], debug: list[str]) -> AgentsConfig:
