@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Keep in sync with pyproject.toml's [project] version — pyproject isn't
 # shipped with the runtime copy under ~/.claude, so the value lives here too.
-VERSION    = '0.10.0'
+VERSION    = '0.11.0'
 # Bumped by any future on-disk relayout under yas/; stamped into
 # state/version.json by yas.migrate so a future migration can detect and
 # convert an older layout.
