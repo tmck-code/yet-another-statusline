@@ -172,6 +172,25 @@ def test_three_subagents_medium_produces_six_rows(monkeypatch: pytest.MonkeyPatc
 # the still-live workflow-cohort two-column equivalent.
 
 
+def test_hour_long_duration_does_not_shift_the_front_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A timer that has rolled to H:MM:SS is two columns wider than a fresh
+    # M:SS one. The cohort must right-justify every row's duration to the
+    # measured max, or the long row's elbow/name/description drift right of
+    # its siblings (the ragged tree this regression guards).
+    now = time.time()
+    short = _make_sub('short', first_timestamp=now - 64)
+    long = _make_sub('long', first_timestamp=now - (6 * 3600 + 28 * 60 + 32))
+    long.description = 'long desc'
+    _inject(monkeypatch, [short, long])
+    for spec in (layout.build_wide(_view(), _tick(), 160, _r), layout.build_narrow(_view(), 80, _r)):
+        rows = [strip_ansi(row.content) for row in spec.rows if row.kind == 'content']
+        short_row = next(r for r in rows if 'short' in r)
+        long_row = next(r for r in rows if 'long' in r)
+        assert short_row.index('short') == long_row.index('long')
+
+
 def _content_blocks(spec: layout.LayoutSpec) -> list[list[str]]:
     'Runs of consecutive content rows, ANSI-stripped.'
     blocks: list[list[str]] = []

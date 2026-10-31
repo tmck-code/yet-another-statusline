@@ -1116,6 +1116,7 @@ class Renderer:
         tree_activity_col: int | None = None,
         tree_model_w: int | None = None,
         tree_lines_w: int | None = None,
+        tree_dur_w: int | None = None,
         lines: tuple[int, int] | None = None,
         oneline_name_w: int | None = None,
         oneline_model_w: int | None = None,
@@ -1174,7 +1175,14 @@ class Renderer:
         mark        = strike if is_done else str
         run_count   = getattr(sub, 'run_count', 0)
         is_resumed  = (not is_done) and (getattr(sub, 'resumed', False) or run_count >= 1)
+        # Pad the timer to the cohort's measured width (see
+        # `layout.tree_duration_width`). Past one hour `subagent_dur_str`
+        # grows from `M:SS` to `H:MM:SS`; without a shared width that row's
+        # elbow/name/description all shift two columns right of its siblings.
+        # No-op for a standalone row (no cohort width supplied).
         dur_s   = subagent_dur_str(sub, now)
+        if tree_dur_w:
+            dur_s = dur_s.rjust(tree_dur_w)
 
         # Display form keeps any bracketed context-size suffix (e.g. 'sonnet[1m]')
         # from agent frontmatter; colour lookup still keys off the bare family.

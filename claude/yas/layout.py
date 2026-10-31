@@ -386,12 +386,28 @@ def tree_desc_content_width(cells: list[tuple[RunningSubagent, str, int]]) -> in
     return max((_visible_width(sub.description or '') for sub, _, _ in cells), default=0)
 
 
+def tree_duration_width(cells: list[tuple[RunningSubagent, str, int]]) -> int:
+    """Widest duration string across a tree cohort's visible rows.
+
+    `subagent_dur_str` is not fixed-width: it rolls from ``M:SS`` to
+    ``H:MM:SS`` at one hour, so a long-running agent's timer is two columns
+    wider than a fresh child's. Rendering each row's duration at its own
+    width pushes that row's elbow/name (and every column after it) two
+    columns right, which is exactly the ragged tree the cohort-wide value
+    prevents. `subagent_row` right-justifies every row's duration to this
+    measured width.
+    """
+    now = time.time()
+    return max((_visible_width(subagent_dur_str(sub, now)) for sub, _, _ in cells), default=0)
+
+
 def tree_columns(
     cells: list[tuple[RunningSubagent, str, int]],
     width: int,
     *,
     cluster_full_w: int = 0,
     model_w: int = 0,
+    dur_w: int = 0,
 ) -> tuple[int, int, int]:
     """Compute the (desc_col, stats_col, activity_col) anchors for tree-single rows.
 
@@ -420,6 +436,10 @@ def tree_columns(
     accounted for; past that, the description is held at its floor and the
     cluster starts shedding fields instead (see the "anchored" branch of
     `Renderer.subagent_row`).
+
+    ``dur_w`` is the cohort-wide duration-field width (see
+    `tree_duration_width`); when supplied, every row's front field is measured
+    at that width, matching the right-justified timer `subagent_row` paints.
     """
     now      = time.time()
     desc_col = 0
@@ -437,10 +457,10 @@ def tree_columns(
         # field after the name, where X is the run-state marker/separator
         # glyph (0 when model_w is 0, e.g. an empty cohort) — keep all of it
         # in lockstep with `subagent_row`'s own front_w formula.
-        dur_w      = _visible_width(subagent_dur_str(sub, now))
+        row_dur_w  = dur_w or _visible_width(subagent_dur_str(sub, now))
         model_gap  = 3 if model_w else 0  # ' X ' marker/separator ahead of the model field
         name_w     = min(_visible_width(subagent_type_label(sub)), SUBAGENT_NAME_MAX)
-        front_w    = dur_w + 1 + name_w + model_gap + model_w  # dur + ' ' + type + marker + model
+        front_w    = row_dur_w + 1 + name_w + model_gap + model_w  # dur + ' ' + type + marker + model
         desc_col   = max(desc_col, prefix_w + front_w + 1)  # +1: leading space of ' · '
 
     # Everything after `desc_col + 3` (the ' · ' before the description) is up
@@ -644,11 +664,16 @@ def build_workflow_rows(
             left_count   = (len(agents) + 1) // 2  # ceil: left column gets the extra agent
             left_agents  = agents[:left_count]
             right_agents = agents[left_count:]
+            dur_w        = tree_duration_width([(a, '', 0) for a in agents])
             for i in range(len(left_agents)):
-                left_raw = r.subagent_row(left_agents[i], half_w, twoline=True, session_inout=0)
+                left_raw = r.subagent_row(
+                    left_agents[i], half_w, twoline=True, session_inout=0, tree_dur_w=dur_w,
+                )
                 left_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in left_raw.split('\n')]
                 if i < len(right_agents):
-                    right_raw = r.subagent_row(right_agents[i], half_w, twoline=True, session_inout=0)
+                    right_raw = r.subagent_row(
+                        right_agents[i], half_w, twoline=True, session_inout=0, tree_dur_w=dur_w,
+                    )
                     right_lines = [f'{ln}{" " * max(0, half_w - _visible_width(ln))}' for ln in right_raw.split('\n')]
                 else:
                     right_lines = [' ' * half_w] * len(left_lines)
@@ -665,8 +690,11 @@ def build_workflow_rows(
         if per_agent:
             agents        = run.agents[-WORKFLOW_AGENT_CAP:]  # most recent, chronological (first_timestamp asc)
             hidden_agents = run.agent_count - len(agents)
+            dur_w = tree_duration_width([(a, '', 0) for a in agents])
             for sub in agents:
-                for line in r.subagent_row(sub, inner, twoline=width > 100, session_inout=0).split('\n'):
+                for line in r.subagent_row(
+                    sub, inner, twoline=width > 100, session_inout=0, tree_dur_w=dur_w,
+                ).split('\n'):
                     out.append(RowSpec('content', content=line))
         out.append(RowSpec('content', content=r.workflow_summary(run, inner, hidden_agents=hidden_agents, show_icons=view.cfg.show_icons)))
     if hidden_runs > 0:
@@ -838,11 +866,13 @@ def oneline_probe(
 ) -> list[str]:
     'Subagent rows as the narrow/medium tiers render them, at `row_w` content columns inside a `width`-column box.'
     out: list[str] = []
+    dur_w = tree_duration_width(cells)
     for sub, prefix, depth in cells:
         out.extend(r.subagent_row(sub, row_w, twoline=width > 100, session_inout=0,
                                   stats_col=100 if width >= 125 else None,
-                                  tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                  oneline_model_w=model_w).split('\n'))
+                                  tree_prefix=prefix, tree_depth=depth,
+                                  oneline_name_w=name_w, oneline_model_w=model_w,
+                                  tree_dur_w=dur_w).split('\n'))
     return out
 
 
@@ -1055,22 +1085,23 @@ def agents_rows(
         floor=max(SUBAGENT_ONELINE_MIN_W, oneline_right_floor(cells)),
         usage=usage,
     )
-    uw = plan.width if plan else 0
+    uw      = plan.width if plan else 0
     model_w = tree_model_width(cells)
-    name_w = oneline_name_width(cells)
+    dur_w   = tree_duration_width(cells)
+    name_w  = oneline_name_width(cells)
     lines: list[str] = []
     if twoline:
         lines_w = tree_lines_width(cells, per_agent, view.tool_counts.main_lines)
         cluster_w = subagent_cluster_width(lines_w)
         desc_col, stats_col, activity_col = tree_columns(
-            cells, inner - uw, cluster_full_w=cluster_w, model_w=model_w,
+            cells, inner - uw, cluster_full_w=cluster_w, model_w=model_w, dur_w=dur_w,
         )
         for sub, prefix, depth in cells:
             lines.extend(r.subagent_row(
                 sub, inner, twoline=True, session_inout=0, stats_col=stats_col,
                 tree_prefix=prefix, tree_depth=depth, tree_single=True,
                 tree_desc_col=desc_col, tree_activity_col=activity_col,
-                tree_model_w=model_w, tree_lines_w=lines_w,
+                tree_model_w=model_w, tree_lines_w=lines_w, tree_dur_w=dur_w,
                 lines=(view.tool_counts.main_lines if sub.agent_id == MAIN_AGENT_ID
                        else per_agent.get(sub.jsonl_path)),
                 resource=plan.cells.get(sub.agent_id, plan.blank) if plan else '',
@@ -1083,6 +1114,7 @@ def agents_rows(
                     sub, inner - uw, twoline=False, session_inout=0,
                     tree_prefix=prefix, tree_depth=depth,
                     oneline_name_w=name_w, oneline_model_w=model_w,
+                    tree_dur_w=dur_w,
                 ).split('\n'),
                 sub, plan, inner,
             ))
@@ -1106,9 +1138,10 @@ def subagent_section_rows(
     standalone shell commands section. Every row shares one resource-column
     plan, keeping main and the subagents aligned.
     """
-    cells = regular_agent_cells(view, visible_subs)
-    name_w = oneline_name_width(cells)
+    cells   = regular_agent_cells(view, visible_subs)
+    name_w  = oneline_name_width(cells)
     model_w = tree_model_width(cells)
+    dur_w   = tree_duration_width(cells)
     plan = usage_plan(view, r, cells, labelled=False, room=width - 4,
                       floor=max(SUBAGENT_ONELINE_MIN_W, oneline_right_floor(cells)),
                       usage=view.agent_usage)
@@ -1120,7 +1153,7 @@ def subagent_section_rows(
             lines = r.subagent_row(sub, width - 4, twoline=True, session_inout=0,
                                    stats_col=100 if width >= 125 else None,
                                    tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                   oneline_model_w=model_w,
+                                   oneline_model_w=model_w, tree_dur_w=dur_w,
                                    lines=lines_for(view, sub),
                                    resource=cell, resource_w=uw).split('\n')
         else:
@@ -1128,7 +1161,7 @@ def subagent_section_rows(
                 r.subagent_row(sub, width - 4 - uw, twoline=False, session_inout=0,
                                stats_col=100 if width >= 125 else None,
                                tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                               oneline_model_w=model_w,
+                               oneline_model_w=model_w, tree_dur_w=dur_w,
                                lines=lines_for(view, sub)).split('\n'),
                 sub, plan, width - 4)
         sub_lines.extend(lines)
@@ -1219,13 +1252,14 @@ def build_narrow(
             left_lines  = r.task_row(tasks, left_w)
             name_w  = oneline_name_width(cells)
             model_w = tree_model_width(cells)
+            dur_w   = tree_duration_width(cells)
             right_lines = [
                 line
                 for sub, prefix, depth in cells
                 for line in attach_usage(
                     r.subagent_row(sub, right_w - uw, twoline=False, session_inout=0,
                                    tree_prefix=prefix, tree_depth=depth, oneline_name_w=name_w,
-                                   oneline_model_w=model_w,
+                                   oneline_model_w=model_w, tree_dur_w=dur_w,
                                    lines=lines_for(view, sub)).split('\n'),
                     sub, plan, right_w)
             ]
@@ -2217,12 +2251,14 @@ def build_wide(
                                       usage=view.agent_usage)
             right_uw     = right_plan.width if right_plan else 0
             right_model_w = tree_model_width(right_cells)
+            right_dur_w   = tree_duration_width(right_cells)
             right_lines_w = tree_lines_width(
                 right_cells, view.tool_counts.per_agent, view.tool_counts.main_lines,
             )
             right_cluster_w = subagent_cluster_width(right_lines_w)
             right_desc_col, right_stats_col, right_activity_col = tree_columns(
-                right_cells, right_w - right_uw, cluster_full_w=right_cluster_w, model_w=right_model_w,
+                right_cells, right_w - right_uw, cluster_full_w=right_cluster_w,
+                model_w=right_model_w, dur_w=right_dur_w,
             )
             right_lines: list[str] = []
             for sub, prefix, depth in right_cells:
@@ -2231,7 +2267,7 @@ def build_wide(
                     stats_col=right_stats_col, tree_prefix=prefix, tree_depth=depth,
                     tree_single=True, tree_desc_col=right_desc_col,
                     tree_activity_col=right_activity_col, tree_model_w=right_model_w,
-                    tree_lines_w=right_lines_w,
+                    tree_lines_w=right_lines_w, tree_dur_w=right_dur_w,
                     lines=lines_for(view, sub),
                     resource=right_plan.cells.get(sub.agent_id, right_plan.blank) if right_plan else '',
                     resource_w=right_uw).split('\n'))
@@ -2267,12 +2303,13 @@ def build_wide(
         uw = plan.width if plan else 0
         inner = width - 4
         model_w = tree_model_width(sub_cells)
+        dur_w = tree_duration_width(sub_cells)
         lines_w = tree_lines_width(
             sub_cells, view.tool_counts.per_agent, view.tool_counts.main_lines,
         )
         cluster_w = subagent_cluster_width(lines_w)
         desc_col, stats_col_v, activity_col = tree_columns(
-            sub_cells, inner - uw, cluster_full_w=cluster_w, model_w=model_w,
+            sub_cells, inner - uw, cluster_full_w=cluster_w, model_w=model_w, dur_w=dur_w,
         )
         # Overlay column labels on the section header (the
         # `separator_dim` row just appended above): 'name' over the
@@ -2342,7 +2379,7 @@ def build_wide(
                 stats_col=stats_col_v,
                 tree_prefix=prefix, tree_depth=depth, tree_single=True,
                 tree_desc_col=desc_col, tree_activity_col=activity_col,
-                tree_model_w=model_w, tree_lines_w=lines_w,
+                tree_model_w=model_w, tree_lines_w=lines_w, tree_dur_w=dur_w,
                 oneline_name_w=name_w, oneline_model_w=oneline_model_w,
                 lines=lines_for(view, sub),
                 resource=cell, resource_w=uw,
