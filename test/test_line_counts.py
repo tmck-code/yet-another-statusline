@@ -348,9 +348,13 @@ def test_gather_lines_totals_equal_main_plus_sum_of_subagents(tmp_path: Path) ->
         tc.lines_changed
         == main_stats.lines_changed + sub1_stats.lines_changed + sub2_stats.lines_changed
     )
-    # Per-agent breakdown matches each subagent's own (self-scoped) stats.
+    # Main's own self-scoped pair is exposed separately (no longer discarded).
+    assert tc.main_lines == (main_stats.lines_read, main_stats.lines_changed)
+    # Per-agent breakdown matches each subagent's own (self-scoped) stats and
+    # stays subagent-only (main is not keyed into it).
     assert tc.per_agent[sub1_path] == (sub1_stats.lines_read, sub1_stats.lines_changed)
     assert tc.per_agent[sub2_path] == (sub2_stats.lines_read, sub2_stats.lines_changed)
+    assert set(tc.per_agent) == {sub1_path, sub2_path}
 
 
 # --- 7.6: pre-filter (V2 byte-level) vs naive full-decode equivalence --------

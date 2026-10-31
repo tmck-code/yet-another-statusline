@@ -9,7 +9,7 @@ import yas.info.subagents as subagents_mod
 import yas.layout as layout
 from helper import iso_ts, strip_ansi
 from yas.config import AgentsConfig, Config, ResourceUsageConfig, ShellCommandsConfig
-from yas.constants import CLR_WARN, SHELL_COL_GAP
+from yas.constants import CLR_WARN, ICON_TERMINAL, SHELL_COL_GAP
 from yas.info import SessionView
 from yas.info.bash_inflight import fold_line, inflight
 from yas.info.parsecache import TranscriptCache
@@ -450,14 +450,14 @@ def test_activity_column_truncates_to_make_room(renderer, build_view, make_sub, 
     assert rows[0].index('0:20') < rows[0].index('Bash[')
 
 
-def test_side_section_is_balanced_and_keeps_owned_columns(renderer, owned_view) -> None:
+def test_regular_section_keeps_owned_columns_and_drops_the_shell_block(renderer, owned_view) -> None:
     shell = ShellCommandsConfig(style='list', position='right')
     view = owned_view(labels=True, shell=shell)
     spec = _build(view, 200, renderer)
     assert len(_block_widths(spec)) == 1
     plain = [strip_ansi(c) for c in _contents(spec)]
-    assert any('a1' in p and '12%' in p and '│' in p for p in plain)
-    assert any('shell commands (1)' in p or 'make demo' in p for p in plain)
+    assert any('a1' in p and '12%' in p for p in plain)
+    assert not any('shell commands' in p for p in plain)
 
 
 def test_columns_omitted_when_the_row_would_fall_below_its_minimum(renderer, owned_view) -> None:
@@ -477,11 +477,12 @@ def test_plan_gap_matches_shell_section(renderer) -> None:
 
 
 @pytest.mark.parametrize('width', (80, 140, 200))
-def test_badge_sits_right_of_the_columns_on_the_first_row(width: int, renderer, owned_view) -> None:
+def test_badge_style_keeps_columns_and_draws_no_badge(width: int, renderer, owned_view) -> None:
     shell = ShellCommandsConfig(style='badge', position='right')
     spec = _build(owned_view(shell=shell), width, renderer)
     own = next(strip_ansi(c) for c in _contents(spec) if 'a1' in strip_ansi(c))
-    assert own.index('12%') < own.index('\uf120')
+    assert '12%' in own
+    assert not any(ICON_TERMINAL in strip_ansi(c) for c in _contents(spec))
     assert len(_block_widths(spec)) == 1
 
 

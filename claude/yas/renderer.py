@@ -928,6 +928,10 @@ class Renderer:
             return f'{GLYPH_REPLYING} {raw}'
         return ''
 
+    def _row_activity(self, sub: RunningSubagent, cap: int) -> str:
+        'A row pre-formatted log text when present, else its live activity.'
+        return sub.log_text or self.subagent_activity(sub.last_activity, cap=cap)
+
     def _subagent_desc_tint(
         self, desc_text: str, desc_max: int, is_done: bool,
     ) -> tuple[str, int]:
@@ -1112,6 +1116,7 @@ class Renderer:
         tree_activity_col: int | None = None,
         tree_model_w: int | None = None,
         tree_lines_w: int | None = None,
+        tree_dur_w: int | None = None,
         lines: tuple[int, int] | None = None,
         oneline_name_w: int | None = None,
         oneline_model_w: int | None = None,
@@ -1170,7 +1175,14 @@ class Renderer:
         mark        = strike if is_done else str
         run_count   = getattr(sub, 'run_count', 0)
         is_resumed  = (not is_done) and (getattr(sub, 'resumed', False) or run_count >= 1)
+        # Pad the timer to the cohort's measured width (see
+        # `layout.tree_duration_width`). Past one hour `subagent_dur_str`
+        # grows from `M:SS` to `H:MM:SS`; without a shared width that row's
+        # elbow/name/description all shift two columns right of its siblings.
+        # No-op for a standalone row (no cohort width supplied).
         dur_s   = subagent_dur_str(sub, now)
+        if tree_dur_w:
+            dur_s = dur_s.rjust(tree_dur_w)
 
         # Display form keeps any bracketed context-size suffix (e.g. 'sonnet[1m]')
         # from agent frontmatter; colour lookup still keys off the bare family.
@@ -1513,7 +1525,7 @@ class Renderer:
                 avail_act = target_w - _visible_width(line1)
                 if avail_act >= gap:
                     act_w    = avail_act - gap
-                    activity = self.subagent_activity(sub.last_activity, cap=max(0, act_w - 3))
+                    activity = self._row_activity(sub, max(0, act_w - 3))
                     if _visible_width(activity) > act_w:
                         activity = activity[:max(0, act_w - 1)] + ELLIPSIS
                     if is_done:
@@ -1534,7 +1546,7 @@ class Renderer:
             target_w2    = max(1, target_w - prefix_w)
             avail2       = max(0, target_w2 - 6)  # '   '(3) + └ + '  '(2)
             activity_cap = min(100, avail2)
-            activity     = self.subagent_activity(sub.last_activity, cap=activity_cap)
+            activity     = self._row_activity(sub, activity_cap)
             if _visible_width(activity) > avail2:
                 activity = activity[:max(0, avail2 - 1)] + ELLIPSIS
             left2_w = 6 + _visible_width(activity)  # measured before the strike
@@ -1665,7 +1677,16 @@ class Renderer:
         if not is_done:
             avail_n = target_w - front_n_w - 3  # ' · '
             if avail_n >= 12:
-                activity = self.subagent_activity(sub.last_activity, cap=avail_n)
+                # `_activity_row` moves a Bash/thinking/waiting state into
+                # `description` and clears `last_activity`. The one-line form
+                # otherwise only reads `last_activity`, which would drop the
+                # synthetic main row's activity entirely.
+                if sub.log_text:
+                    activity = sub.log_text
+                elif sub.last_activity == ('', '', {}) and sub.description:
+                    activity = sub.description
+                else:
+                    activity = self._row_activity(sub, avail_n)
                 if _visible_width(activity) > avail_n:
                     activity = activity[:max(0, avail_n - 1)] + ELLIPSIS
                 if activity:

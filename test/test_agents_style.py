@@ -20,6 +20,7 @@ from yas.info import SessionView
 from yas.info.main_activity import MainActivity
 from yas.info.shell_commands import MAIN_AGENT_ID, RunningShellCommands
 from yas.info.parsecache import TranscriptCache
+from yas.info.toolcounts import ToolCounts
 from yas.render.text import _visible_width
 from yas.renderer import Renderer
 from yas.tokens import TickRecord, TokenLog
@@ -77,6 +78,13 @@ def test_main_is_always_first_and_present_without_subagents(monkeypatch: pytest.
     main = _agent_line(lines, 'main')
     assert 'main' in main
     assert {_visible_width(line) for line in lines} == {width}
+
+
+def test_main_row_shows_its_own_loc_pair(renderer, build_view) -> None:
+    view = build_view([])
+    view.__dict__['tool_counts'] = ToolCounts(main_lines=(1234, 56))
+    main = _agent_line(_lines(view, 160, renderer), 'main')
+    assert '1.23K' in main and '56' in main
 
 
 @pytest.mark.parametrize('width', (50, 70, 140))

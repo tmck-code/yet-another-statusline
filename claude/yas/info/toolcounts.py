@@ -442,9 +442,9 @@ def count_transcript(
 
 
 class ToolCounts:
-    """Per-tool ``(main, sub)`` tool_use counts, session line totals, and per-agent breakdown."""
+    """Per-tool ``(main, sub)`` counts, session line totals, main's own share, and per-agent breakdown."""
 
-    __slots__ = ('counts', 'lines_read', 'lines_changed', 'per_agent')
+    __slots__ = ('counts', 'lines_read', 'lines_changed', 'main_lines', 'per_agent')
 
     def __init__(
         self,
@@ -452,6 +452,7 @@ class ToolCounts:
         lines_read: int = 0,
         lines_changed: int = 0,
         per_agent: dict[str, tuple[int, int]] | None = None,
+        main_lines: tuple[int, int] | None = None,
     ) -> None:
         # tool name (MCP-normalized) -> (main_count, sub_count)
         self.counts = counts if counts is not None else {}
@@ -460,6 +461,8 @@ class ToolCounts:
         self.lines_changed = lines_changed
         # Per-subagent breakdown: transcript path -> (lines_read, lines_changed)
         self.per_agent = per_agent if per_agent is not None else {}
+        # Main transcript only; `per_agent` stays subagent-scoped.
+        self.main_lines = main_lines if main_lines is not None else (0, 0)
 
     @property
     def total_types(self) -> int:
@@ -476,6 +479,7 @@ class ToolCounts:
             self.counts == other.counts
             and self.lines_read == other.lines_read
             and self.lines_changed == other.lines_changed
+            and self.main_lines == other.main_lines
             and self.per_agent == other.per_agent
         )
 
@@ -487,6 +491,7 @@ class ToolCounts:
             f'counts={self.counts!r}, '
             f'lines_read={self.lines_read}, '
             f'lines_changed={self.lines_changed}, '
+            f'main_lines={self.main_lines!r}, '
             f'per_agent={self.per_agent!r})'
         )
 
@@ -500,7 +505,8 @@ class ToolCounts:
     ) -> ToolCounts:
         """Build the merged ``(main, sub)`` counts and session line totals.
 
-        Also computes per-subagent line counts. The sidechain skip is asymmetric
+        Also keeps main's own line counts (`main_lines`) apart from the
+        per-subagent breakdown. The sidechain skip is asymmetric
         (main only, not subagents) — if applied to subagents, some dispatch
         conventions would zero the entire subagent contribution, breaking the
         by-construction invariant ``session_total == main + Σ(subagents)``.
@@ -543,4 +549,5 @@ class ToolCounts:
             lines_read=total_lines_read,
             lines_changed=total_lines_changed,
             per_agent=per_agent_lines,
+            main_lines=(main_stats.lines_read, main_stats.lines_changed),
         )

@@ -67,8 +67,12 @@ def test_build_wide_visible_emits_one_content_row_per_line(monkeypatch: pytest.M
     _no_subagents(monkeypatch)
     _stub_tasks(monkeypatch, visible=True, lines=STUB_LINES)
     spec = _spec(layout.build_wide, 140)
-    rows = _task_rows(spec)
-    assert [strip_ansi(r.content) for r in rows] == STUB_LINES
+    # The always-present main row sits to the right of the checklist, so each
+    # task line is padded to its column before the divider.
+    plain = [strip_ansi(r.content) for r in spec.rows if r.kind == 'content']
+    task_lines = [p for p in plain if p.lstrip().startswith('TASKLINE')]
+    assert [p.startswith(line) for p, line in zip(task_lines, STUB_LINES)] == [True] * len(STUB_LINES)
+    assert len(task_lines) == len(STUB_LINES)
 
 
 def test_build_wide_not_visible_emits_no_task_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,7 +122,7 @@ def test_build_narrow_visible_emits_single_compact_line(monkeypatch: pytest.Monk
     _no_subagents(monkeypatch)
     # compact path: task_row returns exactly one line
     _stub_tasks(monkeypatch, visible=True, lines=['TASKLINE_HDR'])
-    spec = _spec(layout.build_narrow, 80)
+    spec = _spec(layout.build_narrow, 44)
     rows = _task_rows(spec)
     assert [strip_ansi(r.content) for r in rows] == ['TASKLINE_HDR']
 
@@ -136,8 +140,8 @@ def test_build_narrow_calls_task_row_compact(monkeypatch: pytest.MonkeyPatch) ->
     )
     monkeypatch.setattr(tasks_mod.TaskList, 'is_visible', lambda self, now=None: True)
     monkeypatch.setattr(renderer_mod.Renderer, 'task_row', _spy)
-    _spec(layout.build_narrow, 80)
-    assert seen == [True]  # D7: narrow shows the compact line
+    _spec(layout.build_narrow, 44)
+    assert seen == [True]  # D7: below the side-by-side threshold, narrow shows the compact line
 
 
 def test_build_narrow_not_visible_emits_no_task_rows(monkeypatch: pytest.MonkeyPatch) -> None:
