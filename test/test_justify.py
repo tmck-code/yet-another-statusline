@@ -116,13 +116,12 @@ def test_justify_slack_zero_matches_unjustified(
     view_on  = SessionView(session, Config(justify=True))
     view_off = SessionView(session, Config(justify=False))
 
-    # The tokens │ cost │ rate row is the final block (its content row plus the
-    # separator above and bottom border below). Its dividers — and therefore the
-    # ┬/┴ elbows on those two border rows — shift with its own justify slack, so
-    # exclude the trailing block and compare the path/model and context rows,
-    # which is where the path-row slack=0 equivalence actually holds.
-    lines_on  = _rendered_lines(view_on,  160)[:-3]
-    lines_off = _rendered_lines(view_off, 160)[:-3]
+    # The seam row and everything below it (the always-present main row, tokens
+    # block and bottom border) carries its own justify slack pool, so compare
+    # only the static top block (border, path/model content, separator, first
+    # static row), where the path-row slack=0 equivalence actually holds.
+    lines_on  = _rendered_lines(view_on,  160)[:4]
+    lines_off = _rendered_lines(view_off, 160)[:4]
     assert lines_on == lines_off
 
 

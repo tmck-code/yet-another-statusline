@@ -167,10 +167,12 @@ def test_seam_present_with_dynamic_section(monkeypatch: pytest.MonkeyPatch) -> N
     assert _kinds(spec).count('separator_seam') == 1
 
 
-def test_no_seam_without_dynamic_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_row_always_introduces_the_seam(monkeypatch: pytest.MonkeyPatch) -> None:
     _silence_dynamic(monkeypatch)
     spec = layout.build_wide(_view(), _tick(), 140, _r)
-    assert 'separator_seam' not in _kinds(spec)
+    # The main agent row is always present, so the static -> dynamic seam is
+    # always drawn even with no subagents or tasks.
+    assert 'separator_seam' in _kinds(spec)
     assert _kinds(spec)[-1] == 'bottom_border'
 
 
@@ -992,9 +994,15 @@ def test_tasks_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) 
                         classmethod(lambda cls, path, **kwargs: tl))
 
     spec = layout.build_wide(_view(), _tick(), 140, _r)
-    assert _divider_content_idx(spec) == [], 'tasks-only must not compose a divider column'
+    # The main row always companions the checklist, so the side-by-side
+    # divider is present even with no subagents.
+    assert _divider_content_idx(spec) != []
     assert any(row.kind == 'content' and GLYPH_TASKS in strip_ansi(row.content) for row in spec.rows), \
         'task checklist should render'
+    assert any(row.kind == 'content' and 'sonnet' in strip_ansi(row.content) for row in spec.rows), \
+        'main row should render beside the checklist'
+    assert any(row.kind == 'content' and 'main' in strip_ansi(row.content) for row in spec.rows), \
+        'the main row name reads main'
 
 
 def test_subagents_only_renders_full_width_stacked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1529,7 +1537,7 @@ def test_tree_labels_loc_slash_stacks_over_data_slash(monkeypatch: pytest.Monkey
     view.__dict__['tool_counts'] = type(
         'FakeTC', (), {
             'counts': {}, 'per_agent': {'/fake/ui.jsonl': (381, 239)},
-            'lines_read': 381, 'lines_changed': 239,
+            'lines_read': 381, 'lines_changed': 239, 'main_lines': (0, 0),
         },
     )()
 

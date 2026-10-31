@@ -185,12 +185,15 @@
 # output         = 5.0
 
 # [shell_commands]  # every running Bash-tool command, foreground and background
-# enabled = true            # bool; show running shell commands at all
-# style = "badge"           # "badge" = a compact one-line summary;
-#                           #   "list" = a header plus one line per command;
-#                           #   "agents" = one row per agent (main first) with the current
-#                           #   command / thinking / waiting state and cpu/mem/time columns; the
-#                           #   separate shell commands section is not drawn (position is ignored).
+# enabled = true            # bool; gather running shell commands at all. In every non-"agents"
+#                           #   layout the agent section always draws a synthetic main row first
+#                           #   (even when idle or with no subagents); main's commands move onto
+#                           #   that row and the standalone badge/list/side section is suppressed.
+# style = "badge"           # "badge" / "list" = the regular agent section with the always-present
+#                           #   main row (their historical standalone badge/list rendering is no
+#                           #   longer drawn). "agents" = one row per agent (main first) with the
+#                           #   current command / thinking / waiting state and cpu/mem/time columns;
+#                           #   the separate shell commands section is not drawn (position is ignored).
 #                           #   Thinking rows show 0% / 0M plus the time since thinking began;
 #                           #   waiting rows show 0% / 0M plus the age of the live child they wait on.
 #                           #   The per-agent preview always follows the live child process (never
@@ -199,23 +202,15 @@
 #                           #   even when the agent owns a background Bash process, which still drives
 #                           #   the cpu/mem/time columns; thinking and waiting are not masked either.
 #                           #   The synthetic main row shows its current tool call under the same rule.
-# position = "right"        # "right" = badge on the first subagent row, or the list as a
-#                           #   section beside the subagents (falls back to "below" when the
-#                           #   box is too narrow or there are no subagents);
-#                           #   "below" = rows under the subagents (a badge gets its own row)
-# command_mode = "chain"    # "chain" = show the whole Bash-tool command, including `;` /
-#                           #   `|` chains; "current" = show the busiest live child process
-#                           #   (e.g. `cargo test`) and use its cpu/mem/time. Shell builtins
-#                           #   such as `cd` / `export` have already exited; if no child
-#                           #   remains, the first command in the chain is shown. This applies
-#                           #   to badge / list only: style = "agents" always uses "current".
-# max_items = 5             # int >= 1; most commands listed (style = "list")
-# max_command_width = 40    # int >= 8; command text is truncated to this many columns (list below, badge,
-#                           #   and a squeezed side section). In the side section the command grows into free
-#                           #   space; the cap applies only when space is short. With no subagents the list
-#                           #   may grow to 2x this and is closed by a divider if >= 60 columns stay empty
-#                           #   to its right. Leading `cd <path> &&` segments are dropped when a later
-#                           #   command is displayed.
+# position = "right"        # retained for config compatibility; ignored by the current rendering
+#                           #   (the standalone badge/list/side section is suppressed, and agents
+#                           #   mode ignores position)
+# command_mode = "chain"    # retained for config compatibility; kept for the historical badge/list
+#                           #   rendering. Agent-row previews always follow the live child process.
+# max_items = 5             # int >= 1; retained for config compatibility (style = "list")
+# max_command_width = 40    # int >= 8; retained for config compatibility (list below, badge,
+#                           #   and a squeezed side section). Agent rows are measured, not capped
+#                           #   by this.
 #
 # Each group below is an inline table. It may instead be written as a
 # [shell_commands.cpu] sub-table (identical), or as a bool shorthand:

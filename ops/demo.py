@@ -649,6 +649,7 @@ def write_transcript(
     cache_1h_tier: bool = False,
     bash_calls: list[tuple[str, bool]] | None = None,
     thinking_secs_ago: float | None = None,
+    lines: tuple[int, int] | None = None,
 ) -> None:
     if base_time is None:
         base_time = time.time()
@@ -750,6 +751,54 @@ def write_transcript(
                 }],
             },
         })
+    if lines is not None:
+        read_n, changed_n = lines
+        if read_n > 0:
+            msgs.append({
+                'type': 'assistant',
+                'timestamp': _iso(base_time),
+                'message': {
+                    'id': 'msg_main_lines_read',
+                    'role': 'assistant',
+                    'content': [{
+                        'type': 'tool_use',
+                        'id':   'tool_main_lines_read',
+                        'name': 'Read',
+                        'input': {'file_path': 'claude/yas/layout.py'},
+                    }],
+                },
+            })
+            content = '\n'.join(f'{n}\tline{n}' for n in range(1, read_n + 1)) + '\n'
+            msgs.append({
+                'type': 'user',
+                'timestamp': _iso(base_time),
+                'message': {
+                    'role': 'user',
+                    'content': [{
+                        'type': 'tool_result',
+                        'tool_use_id': 'tool_main_lines_read',
+                        'content': content,
+                    }],
+                },
+            })
+        if changed_n > 0:
+            msgs.append({
+                'type': 'assistant',
+                'timestamp': _iso(base_time),
+                'message': {
+                    'id': 'msg_main_lines_changed',
+                    'role': 'assistant',
+                    'content': [{
+                        'type': 'tool_use',
+                        'name': 'Edit',
+                        'input': {
+                            'file_path': 'claude/yas/layout.py',
+                            'old_string': 'x\n' * changed_n,
+                            'new_string': 'y',
+                        },
+                    }],
+                },
+            })
     if thinking_secs_ago is not None:
         # A trailing thinking-only assistant message: its first-line timestamp
         # is the thinking start the agents-style main row times from.
@@ -991,6 +1040,9 @@ class ScenarioConfig:
     # Seconds ago the main transcript's last assistant message started a
     # thinking block; None writes no thinking block.
     thinking_secs_ago: float | None = None
+    # Main transcript's own (lines_read, lines_changed) pair, driving the
+    # main row's self-scoped LOC field.
+    main_lines: tuple[int, int] | None = None
 
 
 _SHELL_SUBAGENTS: list[tuple[object, ...]] = [
@@ -1016,6 +1068,13 @@ _SHELL_LONG_SUBAGENTS: list[tuple[object, ...]] = [
     ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
 ]
 
+
+_MAIN_ROW_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore', 'Search codebase - looking for token tracking', 3_200, 420,
+     ('Bash', {'command': 'grep -rn "billed_in" claude/'}), None, None, None, (120, 8)),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850,
+     ('Read', {'file_path': 'claude/statusline_command.py'}), None, None, None, (340, 56)),
+]
 
 _USAGE_SUBAGENTS: list[tuple[object, ...]] = [
     ('explore', 'Build the release binary', 4_100, 600, ('Bash', {'command': 'cargo build --release --workspace'})),
@@ -1880,7 +1939,8 @@ seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * 
     ),
     *(
         ScenarioConfig(
-            # Shell-commands badge on the right of the first subagent row.
+            # Regular layout: the always-present main row replaces the old
+            # badge/side section; main carries the command + resource columns.
             name           = f'shell-commands-badge{suffix}',
             subagents      = _SHELL_SUBAGENTS,
             shell_commands = _SHELL_COMMANDS,
@@ -1891,13 +1951,33 @@ seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * 
     ),
     *(
         ScenarioConfig(
-            # Shell-commands list below the rows, capped so `+1 more` shows.
+            # Same suppression in list style: only the main row's activity and
+            # resource columns remain (no standalone command list).
             name           = f'shell-commands-list{suffix}',
             shell_commands = _SHELL_COMMANDS,
             columns        = cols,
             yas_toml       = layout_toml + _SHELL_LIST_TOML,
         )
         for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    ScenarioConfig(
+        # Regular (non-agents) layout: main is the first row and carries its
+        # own LOC pair, alongside two subagents with their own LOC.
+        name           = 'main-row-with-subagents-160',
+        subagents      = _MAIN_ROW_SUBAGENTS,
+        shell_commands = _SHELL_COMMANDS,
+        main_lines     = (420, 65),
+        columns        = 160,
+        yas_toml       = _SHELL_BADGE_TOML,
+    ),
+    ScenarioConfig(
+        # Regular layout with no subagents: the section is the main row only;
+        # the standalone shell list is suppressed.
+        name           = 'main-row-only-80',
+        shell_commands = _SHELL_COMMANDS[:2],
+        main_lines     = (180, 12),
+        columns        = 80,
+        yas_toml       = _SHELL_LIST_TOML,
     ),
     ScenarioConfig(
         # Subagents present, list below: the list block is closed by a divider like the no-subagent list.
@@ -1909,7 +1989,7 @@ seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * 
     ),
     *(
         ScenarioConfig(
-            # Shell-commands list as a side section right of the subagents; -80 falls back to below.
+            # No side list in the regular layout: main + subagents only.
             name           = f'shell-commands-side{suffix}',
             subagents      = _SHELL_SUBAGENTS,
             shell_commands = _SHELL_COMMANDS,
@@ -2143,6 +2223,7 @@ def render_scenario(
         cache_1h_tier=cfg.cache_1h_tier,
         bash_calls=[(c[0], c[4]) for c in cfg.shell_commands if c[0] not in _subagent_bash_commands(cfg.subagents)] or None,
         thinking_secs_ago=cfg.thinking_secs_ago,
+        lines=cfg.main_lines,
     )
     write_settings(claude, cfg.plugins)
     yas_toml_path = claude / 'yas.toml'

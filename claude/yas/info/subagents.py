@@ -921,7 +921,7 @@ class RunningSubagent:
         'model', 'cache_read_in', 'total_input', 'last_activity', 'end_ts',
         'mtime', 'agent_id', 'jsonl_path', 'parent_id', 'spawn_depth',
         'status', 'run_count', 'is_fork', 'resumed', 'run_start_ts', 'bash_inflight',
-        'last_activity_ts',
+        'last_activity_ts', 'log_text',
     )
 
     def __init__(
@@ -948,6 +948,7 @@ class RunningSubagent:
         run_start_ts:    float | None = None,  # start of the CURRENT run; see subagent_dur_str
         bash_inflight:   tuple[tuple[str, float], ...] = (),  # (normalised command, tool_use ts) of Bash calls still running
         last_activity_ts: float = 0.0,  # ts of the first line of the current activity (thinking start)
+        log_text:        str = '',     # pre-formatted log-column text, overriding last_activity
     ) -> None:
         self.agent_type      = agent_type
         self.description      = description
@@ -970,6 +971,7 @@ class RunningSubagent:
         self.resumed          = resumed
         self.bash_inflight    = bash_inflight
         self.last_activity_ts = last_activity_ts
+        self.log_text         = log_text
         # Per-run start anchor for duration display: the start of the CURRENT
         # run, not the agent's original spawn. Equals first_timestamp when
         # unset (never-resumed agents, and callers like info/workflows.py
@@ -989,6 +991,7 @@ class RunningSubagent:
             self.jsonl_path, self.parent_id, self.spawn_depth,
             self.status, self.run_count, self.is_fork, self.resumed,
             self.run_start_ts, self.bash_inflight, self.last_activity_ts,
+            self.log_text,
         )
 
     __hash__ = None  # type: ignore[assignment]
@@ -1007,7 +1010,7 @@ class RunningSubagent:
                 f'parent_id={self.parent_id!r}, spawn_depth={self.spawn_depth}, '
                 f'status={self.status!r}, run_count={self.run_count}, is_fork={self.is_fork}, '
                 f'resumed={self.resumed}, run_start_ts={self.run_start_ts}, '
-                f'last_activity_ts={self.last_activity_ts})')
+                f'last_activity_ts={self.last_activity_ts}, log_text={self.log_text!r})')
 
 
 class RunningSubagents:

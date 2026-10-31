@@ -214,14 +214,24 @@ cpu     = { enabled = true, mode = "current", warn_percent = 80.0 }  # mode: or 
 memory  = { enabled = true, warn_mb = 1024.0 }
 ```
 
-`[shell_commands]` controls the display of running Bash-tool commands
-(foreground and background):
+`[shell_commands]` controls how running Bash-tool commands (foreground and
+background) are attributed to agents.
 
-- `style` picks what is drawn: `"badge"` is a compact summary, `"list"` is a
-  header plus one line per command, up to `max_items` lines, each command cut
-  to `max_command_width` columns (the cap applies in the list below, and in the
-  side section only when space is short). `"agents"` folds the commands into
-  the agent section instead: one row per agent, main first, with the current
+In every non-`agents` layout (that is, whenever `style` is `"badge"` or
+`"list"`, or the section is disabled) the regular agent section always draws a
+synthetic **main** row first. It shows main's current live child command
+(`Bash[…] +N`), `✻ Thinking…`, `✻ Waiting…`, or its current non-Bash tool call,
+plus the `cpu` / `mem` / `time` columns, the context-window token count, a
+timer, and main's own self-scoped lines read/changed pair. Main's commands
+therefore move onto that row, and the standalone badge/list/side section is
+**suppressed**. The main row is drawn even when main is idle and when there are
+no subagents (a main-only section is the result). The `[shell_commands]` keys
+are still parsed, and `style = "agents"` still uses them as described below.
+
+- `style` picks the agent-row presentation: `"badge"` and `"list"` both use the
+  regular section described above (their historical standalone badge/list
+  rendering is no longer drawn); `"agents"` folds the commands into an
+  agents-style section instead: one row per agent, main first, with the current
   activity (`Bash[…]`, `✻ Thinking…` or `✻ Waiting…`) and `cpu` / `mem` / `time`
   columns before it, with the activity/log last. The separate shell commands
   section is not drawn in this mode and `position` is ignored. The per-agent
@@ -236,20 +246,12 @@ memory  = { enabled = true, warn_mb = 1024.0 }
   owned process.
   `command_mode` does not apply to agent-row previews. A leading
   `cd <path> &&` / `;` segment is dropped when a later command is displayed.
-  Number columns are right-aligned, 2 spaces apart. `position` picks where
-  (for `"badge"` and `"list"`):
-  - `badge` + `right`: the badge at the right end of the first subagent row.
-  - `badge` + `below`: the badge on its own row under the subagents.
-  - `list` + `below`: the list rows under the subagents, full width.
-  - `list` + `right`: the list as its own section beside the subagents, split
-    by a `│` divider. The subagents keep the width their longest row needs;
-    the list takes the rest, and its command column grows to fill it (up to
-    the longest command). If both do not fit, the command is capped at
-    `max_command_width` and the subagents are truncated. If the subagents
-    would lose their name or model, it falls back to `list` + `below`.
-  - With no subagents, `list` shows as a compact block (command up to
-    2 x `max_command_width`). It is closed by a `│` divider when at least
-    60 columns stay empty to its right; otherwise it has no divider.
+  Number columns are right-aligned, 2 spaces apart.
+- `position`, `max_items`, `max_command_width` and `command_mode` remain
+  accepted for configuration compatibility. In the current statusline the
+  standalone badge/list/side rendering they used to control is suppressed in
+  favour of the main row (and `position` is ignored in `agents` mode), so they
+  no longer change the rendered section.
 - In `agents` mode the synthetic **main** row is always first, even with no
   subagents. A command owned by an agent appears once on that agent's row;
   commands that cannot be attributed stay on main. Several commands under one

@@ -134,8 +134,8 @@ def test_zero_state_omits_row_and_separator(monkeypatch: pytest.MonkeyPatch) -> 
     view.__dict__['tool_counts'] = ToolCounts({})
     spec = layout.build_wide(view, _tick(), 140, _r)
     kinds = [r.kind for r in spec.rows]
-    # No dynamic section at all -> no seam, box closes with the bottom border.
-    assert 'separator_seam' not in kinds
+    # The always-present main row is dynamic, so the seam is drawn.
+    assert 'separator_seam' in kinds
     assert kinds[-1] == 'bottom_border'
 
 
@@ -146,8 +146,8 @@ def test_row_hidden_when_show_tool_uses_false(monkeypatch: pytest.MonkeyPatch) -
     spec = layout.build_wide(view, _tick(), 160, _r)
     kinds = [r.kind for r in spec.rows]
     assert 'Zbash' not in _content_texts(spec)
-    # No dynamic section precedes it -> no seam, box closes with the bottom border.
-    assert 'separator_seam' not in kinds
+    # The main row still introduces the seam; the box closes normally.
+    assert 'separator_seam' in kinds
     assert kinds[-1] == 'bottom_border'
 
 
