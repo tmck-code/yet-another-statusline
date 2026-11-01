@@ -222,7 +222,120 @@ thresholds = [25, 50, 70, 90]
 
 [openspec]
 scan_depth = 1
+
+[shell_commands]
+enabled = true
+style = "badge"          # "badge", "list" or "agents"
+position = "right"       # "right" or "below"
+command_mode = "chain"   # "chain" or "current"
+max_items = 5
+max_command_width = 40
+elapsed = { enabled = true }
+cpu     = { enabled = true, mode = "current", warn_percent = 80.0 }  # mode: or "average"
+memory  = { enabled = true, warn_mb = 1024.0 }
 ```
+
+`[shell_commands]` controls the display of running Bash-tool commands
+(foreground and background):
+
+- `style` picks what is drawn: `"badge"` is a compact summary, `"list"` is a
+  header plus one line per command, up to `max_items` lines, each command cut
+  to `max_command_width` columns (the cap applies in the list below, and in the
+  side section only when space is short). `"agents"` folds the commands into
+  the agent section instead: one row per agent, main first, with the current
+  activity (`Bash[…]`, `✻ Thinking…` or `✻ Waiting…`) and `cpu` / `mem` / `time`
+  columns before it, with the activity/log last. The separate shell commands
+  section is not drawn in this mode and `position` is ignored. The per-agent
+  preview always follows the live child process (the individual command
+  currently running), so an `&&` / `;` / `|` chain is never shown whole; when no
+  child process remains it falls back to the first command in the chain.
+  A non-Bash tool call (`Read`, `Write`, `Edit`, `Grep`, `Glob`, …) is shown as
+  the row's activity even while the agent still owns a background Bash process;
+  that process keeps driving `cpu` / `mem` / `time`. This applies to the
+  synthetic main row too, which now shows its current tool call rather than
+  only Bash. `✻ Thinking…` and `✻ Waiting…` are likewise not masked by an
+  owned process.
+  `command_mode` does not apply to agent-row previews. A leading
+  `cd <path> &&` / `;` segment is dropped when a later command is displayed.
+  Number columns are right-aligned, 2 spaces apart. `position` picks where
+  (for `"badge"` and `"list"`):
+  - `badge` + `right`: the badge at the right end of the first subagent row.
+  - `badge` + `below`: the badge on its own row under the subagents.
+  - `list` + `below`: the list rows under the subagents, full width.
+  - `list` + `right`: the list as its own section beside the subagents, split
+    by a `│` divider. The subagents keep the width their longest row needs;
+    the list takes the rest, and its command column grows to fill it (up to
+    the longest command). If both do not fit, the command is capped at
+    `max_command_width` and the subagents are truncated. If the subagents
+    would lose their name or model, it falls back to `list` + `below`.
+  - With no subagents, `list` shows as a compact block (command up to
+    2 x `max_command_width`). It is closed by a `│` divider when at least
+    60 columns stay empty to its right; otherwise it has no divider.
+- In `agents` mode the synthetic **main** row is always first, even with no
+  subagents. A command owned by an agent appears once on that agent's row;
+  commands that cannot be attributed stay on main. Several commands under one
+  owner are aggregated (CPU and memory summed, elapsed = longest) and the
+  preview gains `+N`. An agent with no running command but a thinking
+  transcript shows `0%`, `0M` and the time since thinking began. An agent that
+  has finished its own work and is waiting on a live child shows `✻ Waiting…`
+  with `0%`, `0M` and a timer that starts when that child began; a main row is
+  waiting when it has no command of its own and a top-level subagent is still
+  running (unless main is actively thinking). With
+  `labels = true`, `cpu`, `mem` and `time` labels are drawn over the columns.
+  The existing minimum-width fallback drops the columns when they would leave
+  a row too narrow.
+- `command_mode = "current"` shows the busiest live process inside each Bash
+  tool call (for example `cargo test` rather than the whole `gate.sh … | tail
+  …; grep …` chain) in the badge and list. The cpu/memory/time columns then
+  describe that process and its subprocesses. The default (`"chain"`) keeps the
+  full command text for badge/list. Agent rows always show the individual live
+  command, independent of `command_mode`. Shell builtins (`cd`, `export`,
+  assignments) have already exited and are never shown; if no child process
+  remains, the first command in the chain is used.
+- `elapsed`, `cpu` and `memory` are groups. Each can be an inline table, a
+  `[shell_commands.cpu]` sub-table, or a bool shorthand (`cpu = false` hides
+  CPU and keeps the other keys at their defaults; `cpu = true` means defaults).
+  Missing keys take their defaults.
+- `cpu.mode = "current"` shows CPU used since the previous refresh divided by
+  wall time. The first refresh (and a refresh after a PID is reused) has no
+  previous sample, so the value is blank rather than a lifetime average.
+  `"average"` always shows total CPU time divided by time since the command
+  started.
+- CPU at or above `cpu.warn_percent`, and memory at or above `memory.warn_mb`,
+  are drawn in the warn colour.
+- An invalid value falls back to its default like every other knob and is
+  reported with its dotted name (for example `shell_commands.cpu.mode`).
+
+Per-subagent resource usage is set in the `[agents]` table:
+
+```toml
+[agents]
+resource_usage = { enabled = true, cpu = true, memory = true, elapsed = true }
+```
+
+- A running Bash process that belongs to a subagent is shown on that subagent's
+  row instead of in the shell commands section: CPU and memory summed over its
+  processes, and the longest elapsed time, right-aligned in columns shared by all
+  subagent rows (rows without a process stay blank). With `labels = true`, `cpu`,
+  `mem` and `time` labels are drawn over them. The log column shrinks first.
+- A process belongs to a subagent when its command text equals a Bash call of that
+  subagent that has no result yet, or was run in the background. If several owners
+  have the same command, the call closest to the process start wins; two owners
+  whose calls are within 1 s of each other are indistinguishable, so the command
+  stays in the shell commands section. The section shows only main-thread commands
+  and is hidden when none remain.
+- `resource_usage = false` turns it off (processes stay in the shell commands
+  section, and agent rows keep their Bash call instead of showing a thinking
+  state); `true` means all defaults. Each inner key is a bool; a bad value falls
+  back to its default and is reported as e.g. `agents.resource_usage.cpu`.
+- Number formats and warn colours come from `[shell_commands]`
+  (`cpu.warn_percent`, `memory.warn_mb`).
+- On narrow layouts the columns are omitted when the subagent row would drop below
+  its minimum width.
+- With `[shell_commands] style = "agents"`, the same columns are shown on every
+  agent row (main included), thinking agents show `0%` / `0M` plus a thinking
+  timer, and waiting agents show `0%` / `0M` plus a timer started when their last
+  live child began; see the shell commands section above.
 
 > **`yas.toml` requires Python 3.11+** — it is parsed with the stdlib `tomllib`.
 > On Python 3.10 the file is silently skipped; **environment variables work on

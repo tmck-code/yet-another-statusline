@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 
+from yas.constants import PARSE_FOLD_VERSION
 from yas.info import SessionView
 from yas.info.git import GitInfo
 from yas.info.openspec import OpenSpec
@@ -837,7 +838,7 @@ def test_session_view_cache_not_written_until_save(tmp_home: Path, frozen_clock:
     st = os.stat(agent_jsonl_path)
 
     # The view should have triggered a parse, so get_parse should return a result
-    parse_result = cache.get_fold(str(agent_jsonl_path), st, 'parse', repr(0.0))
+    parse_result = cache.get_fold(str(agent_jsonl_path), st, 'parse', repr(0.0), PARSE_FOLD_VERSION)
     assert parse_result is not None, (
         "Cache should contain a parse result after field access; "
         "the view did not actually populate the cache"

@@ -196,13 +196,17 @@ def _subagent_content_block(spec: object) -> dict[str, object] | None:
 
     ('text', '<snippet>')   -> a text block   (renders `GLYPH_REPLYING <snippet>`)
     ('<Tool>', {..input..}) -> a tool_use block (renders `GLYPH_TASKS Tool[arg]`)
+    ('thinking', '<text>')  -> a thinking block (renders as a thinking agent)
 
-    The two forms are distinguished by the second element's type (str vs dict),
-    which lets a scenario interleave them in a single message (e.g. the
-    [text, tool_use, text] case the parser must collapse to the tool_use).
+    The forms are distinguished by the second element's type (str vs dict) and
+    the head name, which lets a scenario interleave them in a single message
+    (e.g. the [text, tool_use, text] case the parser must collapse to the
+    tool_use).
     """
     if isinstance(spec, tuple) and len(spec) == 2:
         head, body = spec
+        if head == 'thinking' and isinstance(body, str):
+            return {'type': 'thinking', 'thinking': body}
         if head == 'text' and isinstance(body, str):
             return {'type': 'text', 'text': body}
         if isinstance(body, dict):
@@ -643,6 +647,8 @@ def write_transcript(
     base_time: float | None = None,
     cache_anchor_secs_ago: float | None = None,
     cache_1h_tier: bool = False,
+    bash_calls: list[tuple[str, bool]] | None = None,
+    thinking_secs_ago: float | None = None,
 ) -> None:
     if base_time is None:
         base_time = time.time()
@@ -730,6 +736,36 @@ def write_transcript(
                     'content': [content],
                 },
             })
+    for i, (command, background) in enumerate(bash_calls or []):
+        msgs.append({
+            'type': 'assistant',
+            'timestamp': _iso(base_time),
+            'message': {
+                'id': f'msg_bash_{i}',
+                'role': 'assistant',
+                'content': [{
+                    'type': 'tool_use',
+                    'name': 'Bash',
+                    'input': {'command': command, 'run_in_background': background},
+                }],
+            },
+        })
+    if thinking_secs_ago is not None:
+        # A trailing thinking-only assistant message: its first-line timestamp
+        # is the thinking start the agents-style main row times from.
+        msgs.append({
+            'type': 'assistant',
+            'timestamp': _iso(base_time - thinking_secs_ago),
+            'message': {
+                'id': 'msg_main_thinking',
+                'role': 'assistant',
+                'usage': {
+                    'input_tokens': 0, 'cache_creation_input_tokens': 0,
+                    'cache_read_input_tokens': 0, 'output_tokens': 0,
+                },
+                'content': [{'type': 'thinking', 'thinking': 'Working through the next step'}],
+            },
+        })
     transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
 
 
@@ -947,6 +983,272 @@ class ScenarioConfig:
     cache_anchor_secs_ago: float | None      = None
     cache_1h_tier:         bool              = False
     columns:       int | None                = None
+    # (command, rss_mb, cpu_seconds, elapsed_seconds, background) per running
+    # shell command; rendered via the YAS_SHELL_COMMANDS_FIXTURE process table.
+    shell_commands: list[tuple[str, int, float, float, bool]] = field(default_factory=list)
+    # command -> live child argv list, for `command_mode = "current"` demos.
+    shell_children: dict[str, list[str]] = field(default_factory=dict)
+    # Seconds ago the main transcript's last assistant message started a
+    # thinking block; None writes no thinking block.
+    thinking_secs_ago: float | None = None
+
+
+_SHELL_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore',         'Search codebase - looking for token tracking', 3_200,   420, ('Bash', {'command': 'grep -rn "billed_in" claude/'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+_SHELL_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('make demo/img',                                              600,  300.0,  120.0, False),
+    ('tail -f /var/log/very/long/path/to/application/output/' * 2 + 'server.log', 40, 0.5, 3_600.0, True),
+    ('uv run pytest -q',                                         3_072,   40.0,   95.0, False),
+]
+
+_SHELL_LONG_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('cd /home/user/dev/project/.scratch/feat-section-taxonomy/reanalyse/w2 && '
+     "jq -c '.[]' results.json | ./run.sh --tracks 54 --out /tmp/reanalysed.json | tail -3", 27, 12.0, 282.0, False),
+    ('make demo/img', 600, 300.0, 120.0, False),
+]
+
+_SHELL_LONG_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore', 'Search codebase - looking for token tracking', 3_200, 420,
+     ('Bash', {'command': 'jq -c ".[]" results.json; ./run.sh | tail -3'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+
+_USAGE_SUBAGENTS: list[tuple[object, ...]] = [
+    ('explore', 'Build the release binary', 4_100, 600, ('Bash', {'command': 'cargo build --release --workspace'})),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm', 8_700, 1_850, ('Read', {'file_path': 'claude/statusline_command.py'})),
+]
+
+# The first command is run by the first subagent above (matched by its text); the second by the main thread.
+_USAGE_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('cargo build --release --workspace', 900, 240.0, 95.0, False),
+    ('make demo/img',                     600, 300.0, 120.0, False),
+]
+
+
+_SHELL_BADGE_TOML = '''
+[shell_commands]
+enabled = true
+style = "badge"
+position = "right"
+cpu = { mode = "average", warn_percent = 150 }
+memory = { warn_mb = 2048 }
+'''
+
+_SHELL_LIST_TOML = '''
+[shell_commands]
+enabled = true
+style = "list"
+position = "below"
+max_items = 2
+max_command_width = 40
+elapsed = { enabled = true }
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+_SHELL_SIDE_TOML = '''
+[shell_commands]
+enabled = true
+style = "list"
+position = "right"
+max_items = 2
+max_command_width = 40
+elapsed = { enabled = true }
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+_AGENTS_TOML = '''
+[shell_commands]
+enabled = true
+style = "agents"
+position = "right"
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+
+_AGENTS_SUBAGENTS: list[tuple[object, ...]] = [
+    ('worker', 'Gate PR 266 review findings', 4_300, 900,
+     ('Bash', {'command': 'gate.sh -s 500 make test'}), None, None, None, None, 397),
+    ('worker', 'Boundary + lanes refactor', 2_600, 700,
+     ('Bash', {'command': "sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'"}), None, None, None, None, 376),
+]
+
+_AGENTS_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('make dev > .scratch/make-dev-266.log 2>&1', 101, 0.0, 688.0, True),
+    ('gate.sh -s 500 make test', 12, 200.0, 397.0, False),
+    ("sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'", 54, 180.0, 376.0, False),
+]
+
+# The agents style always previews the live child process, so every command
+# here needs a realistic child to show instead of a whole `&&` / `|` chain.
+_AGENTS_CHILDREN: dict[str, list[str]] = {
+    'make dev > .scratch/make-dev-266.log 2>&1': [
+        'make dev > .scratch/make-dev-266.log 2>&1',
+        'node .scratch/master/make-dev-266.mjs',
+    ],
+    'gate.sh -s 500 make test': [
+        'cargo test --workspace --all-targets',
+        'tail -4',
+    ],
+    "sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'": [
+        "sed -n '1,200p' claude/yas/layout.py",
+        "rg -n 'shell' claude/yas/layout.py",
+    ],
+    'cargo test --workspace --all-targets': [
+        'cargo test --workspace --all-targets',
+        'rustc --test main',
+    ],
+    'cargo clippy --workspace --all-targets': [
+        'cargo clippy --workspace --all-targets',
+    ],
+}
+
+_AGENTS_THINKING_SUBAGENTS: list[tuple[object, ...]] = [
+    ('worker', 'Mandala vote pair_differs', 4_300, 900,
+     ('thinking', 'Comparing the two vote records'), None, None, None, None, 27),
+    ('worker', 'Boundary + lanes refactor', 2_600, 700,
+     ('thinking', 'Checking lane boundaries'), None, None, None, None, 8),
+]
+
+_AGENTS_MANY_SUBAGENTS: list[tuple[object, ...]] = [
+    ('worker', 'Gate and lint the workspace', 8_700, 1_200, [
+        ('Bash', {'command': 'cargo test --workspace --all-targets'}),
+        ('Bash', {'command': 'cargo clippy --workspace --all-targets'}),
+    ], None, None, None, None, 191),
+]
+
+_AGENTS_MANY_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('make dev > .scratch/make-dev-266.log 2>&1', 101, 0.0, 688.0, True),
+    ('cargo test --workspace --all-targets', 1_430, 570.0, 191.0, False),
+    ('cargo clippy --workspace --all-targets', 640, 210.0, 120.0, False),
+]
+
+_AGENTS_WAITING_SUBAGENTS: list[tuple[object, ...]] = [
+    ('worker', 'Gate PR 266 review findings', 4_300, 900,
+     ('Bash', {'command': 'gate.sh -s 500 make test'}), None, None, None, None, 47),
+]
+
+_AGENTS_WAITING_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('gate.sh -s 500 make test', 12, 10.0, 47.0, False),
+]
+
+# A parent orchestrator with no command of its own, waiting on a nested worker.
+_AGENTS_WAITING_TREE_SUBAGENTS: list[tuple[object, ...]] = [
+    ('orchestrator', 'Dispatch the review to workers', 2_000, 400,
+     ('text', 'All checks dispatched; waiting on the worker'), None, None, None, None, 140),
+    ('worker', 'Gate PR 266 review findings', 4_300, 900,
+     ('Bash', {'command': 'gate.sh -s 500 make test'}), None, 1, None, None, 47),
+]
+
+_AGENTS_CURRENT_TOML = '''
+[shell_commands]
+enabled = true
+style = "agents"
+command_mode = "current"
+cpu = { enabled = true, mode = "average", warn_percent = 150 }
+memory = { enabled = true, warn_mb = 2048 }
+'''
+
+_CURRENT_SIDE_TOML = _SHELL_SIDE_TOML + 'command_mode = "current"\n'
+
+_CURRENT_CHAIN = (
+    'cd /home/freman/dev/audiovis/.claude/worktrees/fix-mandala-drop-iterations-floor; '
+    'export TEST_CPUS=2 RUST_DEVSHELL_ID=; '
+    '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" '
+    '.scratch/fix-mandala-drop-iterations-floor/gate-generator.log make test '
+    "RK='--test all generator::' 2>&1 | tail -4; "
+    'L=.scratch/fix-mandala-drop-iterations-floor/gate-generator.log; '
+    'grep "test result" $L; grep -E "^test .*FAILED|panicked" $L | head'
+)
+
+_CURRENT_SUBAGENTS: list[tuple[object, ...]] = [
+    ('worker', 'Gate generator tests', 4_300, 900,
+     ('Bash', {'command': _CURRENT_CHAIN}), None, None, None, None, 397),
+    ('worker', 'Boundary + lanes refactor', 2_600, 700,
+     ('Bash', {'command': "sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'"}), None, None, None, None, 376),
+]
+
+_CURRENT_COMMANDS: list[tuple[str, int, float, float, bool]] = [
+    ('make dev > .scratch/make-dev-266.log 2>&1', 101, 0.0, 688.0, True),
+    (_CURRENT_CHAIN, 12, 200.0, 397.0, False),
+    ("sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'", 54, 180.0, 376.0, False),
+]
+
+_CURRENT_CHILDREN: dict[str, list[str]] = {
+    _CURRENT_CHAIN: ['cargo test --test all generator::', 'tail -4'],
+    'make dev > .scratch/make-dev-266.log 2>&1': [
+        'make dev > .scratch/make-dev-266.log 2>&1',
+        'node .scratch/master/make-dev-266.mjs',
+    ],
+    "sed -n '1,200p' claude/yas/layout.py | rg -n 'shell'": [
+        "sed -n '1,200p' claude/yas/layout.py",
+        "rg -n 'shell' claude/yas/layout.py",
+    ],
+}
+
+# The `cd … ; export … ; gate.sh …` chain with no live child left (a builtin
+# segment is running, or the shell is between segments): the agents preview
+# must show the first individual command, not the whole tool call.
+_FALLBACK_CHILDREN: dict[str, list[str]] = {
+    **_CURRENT_CHILDREN,
+    _CURRENT_CHAIN: [],
+}
+
+# The -80/-140/-200/-300 shell-commands scenarios fill the terminal instead of stopping at max_width.
+_SHELL_WIDE_TOML = '[layout]\nfull_width = true\nlabels = true\n'
+_SHELL_WIDTHS = (('', None, ''), ('-80', 80, ''), ('-140', 140, _SHELL_WIDE_TOML), ('-200', 200, _SHELL_WIDE_TOML), ('-300', 300, _SHELL_WIDE_TOML))
+
+
+def _subagent_bash_commands(subagents: list[tuple[object, ...]]) -> set[str]:
+    'Commands of the Bash tool_use actions in a scenario\'s subagents (their transcripts, not the main one, record them).'
+    out: set[str] = set()
+    for row in subagents:
+        action = row[4] if len(row) > 4 else None
+        actions = action if isinstance(action, list) else [action]
+        for item in actions:
+            if isinstance(item, tuple) and len(item) == 2 and item[0] == 'Bash' and isinstance(item[1], dict):
+                out.add(str(item[1].get('command', '')))
+    return out
+
+
+def build_shell_fixture(
+    commands: list[tuple[str, int, float, float, bool]],
+    children: dict[str, list[str]] | None = None,
+) -> dict[str, object]:
+    """Process table: statusline -> sh -> claude -> wrapper bash -> child."""
+    procs: list[dict[str, object]] = [
+        {'pid': 10, 'ppid': 1,  'rss_kb': 300_000, 'cpu_s': 900.0, 'elapsed_s': 7_200.0, 'argv': '/usr/bin/claude'},
+        {'pid': 20, 'ppid': 10, 'rss_kb': 2_000,   'cpu_s': 0.1,   'elapsed_s': 1.0,     'argv': '/bin/sh -c statusline'},
+        {'pid': 30, 'ppid': 20, 'rss_kb': 30_000,  'cpu_s': 0.1,   'elapsed_s': 1.0,     'argv': 'python3 statusline_command.py'},
+    ]
+    for i, (command, rss_mb, cpu_s, elapsed_s, _bg) in enumerate(commands):
+        pid = 100 + 10 * i
+        argv = (
+            '/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1.sh'
+            f" && eval '{command}' < /dev/null && pwd -P >| /tmp/claude-{i:04x}-cwd"
+        )
+        procs.append({'pid': pid, 'ppid': 10, 'rss_kb': 4_000, 'cpu_s': 0.0, 'elapsed_s': elapsed_s, 'argv': argv})
+        live = (children or {}).get(command)
+        if live is None:
+            live = [f'worker-0 {command.split()[0]}', f'worker-1 {command.split()[0]}']
+        for j, child_argv in enumerate(live):
+            # Weight the first child so `command_mode = "current"` has a clear
+            # busiest process (the real selector picks by cumulative CPU).
+            cpu_weight = 0.85 if j == 0 else 0.15
+            rss_weight = 0.75 if j == 0 else 0.25
+            procs.append({
+                'pid': pid + 1 + j, 'ppid': pid,
+                'rss_kb': int((rss_mb * 1024 - 4_000) * rss_weight),
+                'cpu_s': cpu_s * cpu_weight, 'elapsed_s': elapsed_s,
+                'argv': child_argv,
+            })
+    return {'self_pid': 30, 'processes': procs}
 
 
 SCENARIOS: list[ScenarioConfig] = [
@@ -1576,6 +1878,170 @@ five_hour = { budget = 90_000, window = "5h", anchor = "rolling" }
 seven_day = { budget = 130_000, window = "7d", anchor = "fixed", epoch = "0 0 * * 0" }
 ''',
     ),
+    *(
+        ScenarioConfig(
+            # Shell-commands badge on the right of the first subagent row.
+            name           = f'shell-commands-badge{suffix}',
+            subagents      = _SHELL_SUBAGENTS,
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_BADGE_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    *(
+        ScenarioConfig(
+            # Shell-commands list below the rows, capped so `+1 more` shows.
+            name           = f'shell-commands-list{suffix}',
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_LIST_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    ScenarioConfig(
+        # Subagents present, list below: the list block is closed by a divider like the no-subagent list.
+        name           = 'shell-commands-list-subagents-200',
+        subagents      = _SHELL_SUBAGENTS,
+        shell_commands = _SHELL_COMMANDS,
+        columns        = 200,
+        yas_toml       = _SHELL_WIDE_TOML + _SHELL_LIST_TOML,
+    ),
+    *(
+        ScenarioConfig(
+            # Shell-commands list as a side section right of the subagents; -80 falls back to below.
+            name           = f'shell-commands-side{suffix}',
+            subagents      = _SHELL_SUBAGENTS,
+            shell_commands = _SHELL_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_SIDE_TOML,
+        )
+        for suffix, cols, layout_toml in _SHELL_WIDTHS
+    ),
+    *(
+        ScenarioConfig(
+            # A running Bash command owned by a subagent shows on that subagent's row (cpu / mem / time);
+            # the main-thread command stays in the shell commands section.
+            name           = f'subagent-resource-usage{suffix}',
+            subagents      = _USAGE_SUBAGENTS,
+            shell_commands = _USAGE_COMMANDS,
+            columns        = cols,
+            yas_toml       = layout_toml + _SHELL_SIDE_TOML,
+        )
+        for suffix, cols, layout_toml in (_SHELL_WIDTHS[0], _SHELL_WIDTHS[3])
+    ),
+    ScenarioConfig(
+        # Wide terminal: the command grows into the free space and the subagent side keeps its natural width.
+        name           = 'shell-commands-side-long-300',
+        subagents      = _SHELL_LONG_SUBAGENTS,
+        shell_commands = _SHELL_LONG_COMMANDS,
+        columns        = 300,
+        yas_toml       = '[layout]\nfull_width = true\nlabels = true\n' + _SHELL_SIDE_TOML,
+    ),
+    *(
+        ScenarioConfig(
+            # Agents style: main is the first row, every row carries its own
+            # command preview plus the cpu/mem/time columns.
+            name           = f'agent-main-and-subagents{suffix}',
+            subagents      = _AGENTS_SUBAGENTS,
+            shell_commands = _AGENTS_COMMANDS,
+            shell_children = _AGENTS_CHILDREN,
+            cache_anchor_secs_ago = 289.0,
+            columns        = cols,
+            yas_toml       = layout_toml + _AGENTS_TOML,
+        )
+        for suffix, cols, layout_toml in (('', 160, ''), ('-80', 80, ''))
+    ),
+    ScenarioConfig(
+        # Main thinking (no main command) while the subagents run commands.
+        name           = 'agent-main-thinking-160',
+        subagents      = _AGENTS_SUBAGENTS,
+        shell_commands = _AGENTS_COMMANDS[1:],
+        shell_children = _AGENTS_CHILDREN,
+        thinking_secs_ago = 12,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 160,
+        yas_toml       = _AGENTS_TOML,
+    ),
+    *(
+        ScenarioConfig(
+            # Subagents thinking: 0% / 0M plus the thinking timer, at two widths.
+            name           = f'agent-thinking{subdir_suffix}',
+            subagents      = _AGENTS_THINKING_SUBAGENTS,
+            shell_commands = _AGENTS_COMMANDS[:1],
+            shell_children = _AGENTS_CHILDREN,
+            cache_anchor_secs_ago = 289.0,
+            columns        = cols,
+            yas_toml       = layout_toml + _AGENTS_TOML,
+        )
+        for subdir_suffix, cols, layout_toml in (('-160', 160, ''), ('-80', 80, ''))
+    ),
+    ScenarioConfig(
+        # Aggregation: one subagent owns two commands -> summed cpu/mem,
+        # longest elapsed and `+1` next to the preview.
+        name           = 'agent-many-200',
+        subagents      = _AGENTS_MANY_SUBAGENTS,
+        shell_commands = _AGENTS_MANY_COMMANDS,
+        shell_children = _AGENTS_CHILDREN,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 200,
+        yas_toml       = '[layout]\nfull_width = true\nlabels = true\n' + _AGENTS_TOML,
+    ),
+    ScenarioConfig(
+        # command_mode = "current": the long `;`/`|` chain is replaced by the
+        # busiest live child process, with that process's cpu/mem/time.
+        name           = 'agent-current-command-160',
+        subagents      = _CURRENT_SUBAGENTS,
+        shell_commands = _CURRENT_COMMANDS,
+        shell_children = _CURRENT_CHILDREN,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 160,
+        yas_toml       = _AGENTS_CURRENT_TOML,
+    ),
+    ScenarioConfig(
+        # Same agents style with no live child left for the long chain: the
+        # preview falls back to the first individual command (`cd …`), never the
+        # whole `&&` / `;` tool call.
+        name           = 'agent-current-fallback-160',
+        subagents      = _CURRENT_SUBAGENTS,
+        shell_commands = _CURRENT_COMMANDS,
+        shell_children = _FALLBACK_CHILDREN,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 160,
+        yas_toml       = _AGENTS_CURRENT_TOML,
+    ),
+    ScenarioConfig(
+        # Main has no command of its own and a top-level worker is running:
+        # main shows ✻ Waiting… with 0% / 0M and the worker's age as the timer.
+        name           = 'agent-waiting-160',
+        subagents      = _AGENTS_WAITING_SUBAGENTS,
+        shell_commands = _AGENTS_WAITING_COMMANDS,
+        shell_children = _AGENTS_CHILDREN,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 160,
+        yas_toml       = _AGENTS_TOML,
+    ),
+    ScenarioConfig(
+        # Default resource layout: a nested orchestrator with no command of its
+        # own waits on a worker, showing (waiting) plus 0% / 0M / timer.
+        name           = 'shell-commands-waiting-200',
+        subagents      = _AGENTS_WAITING_TREE_SUBAGENTS,
+        shell_commands = _AGENTS_WAITING_COMMANDS,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 200,
+        yas_toml       = '[layout]\nfull_width = true\nlabels = true\n' + _SHELL_SIDE_TOML,
+    ),
+    ScenarioConfig(
+        # Same rewrite in the default subagent-resource layout: each subagent
+        # row shows the live child process, not the whole Bash chain.
+        name           = 'shell-commands-current-process-200',
+        subagents      = _CURRENT_SUBAGENTS,
+        shell_commands = _CURRENT_COMMANDS,
+        shell_children = _CURRENT_CHILDREN,
+        cache_anchor_secs_ago = 289.0,
+        columns        = 200,
+        yas_toml       = '[layout]\nfull_width = true\nlabels = true\n' + _CURRENT_SIDE_TOML,
+    ),
 ]
 
 
@@ -1675,6 +2141,8 @@ def render_scenario(
         tasks=cfg.tasks or None,
         cache_anchor_secs_ago=cfg.cache_anchor_secs_ago,
         cache_1h_tier=cfg.cache_1h_tier,
+        bash_calls=[(c[0], c[4]) for c in cfg.shell_commands if c[0] not in _subagent_bash_commands(cfg.subagents)] or None,
+        thinking_secs_ago=cfg.thinking_secs_ago,
     )
     write_settings(claude, cfg.plugins)
     yas_toml_path = claude / 'yas.toml'
@@ -1755,6 +2223,12 @@ def render_scenario(
     snap_env.setdefault('STATUSLINE_TOKEN_WINDOW', str(SNAP_WINDOW))
     if theme is not None:
         snap_env['YAS_THEME'] = theme
+    if cfg.shell_commands:
+        fixture_p = tmpdir / 'shell-commands-fixture.json'
+        fixture_p.write_text(json.dumps(build_shell_fixture(cfg.shell_commands, cfg.shell_children)))
+        snap_env['YAS_SHELL_COMMANDS_FIXTURE'] = str(fixture_p)
+    else:
+        snap_env.pop('YAS_SHELL_COMMANDS_FIXTURE', None)
     out = render_once(snap_env, json.dumps(raw))
     stem = theme if theme is not None else cfg.name
     out_dir.mkdir(parents=True, exist_ok=True)

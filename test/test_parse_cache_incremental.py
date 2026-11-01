@@ -137,7 +137,7 @@ def test_v2_cache_file_discarded(tmp_home: Path, tmp_path: Path) -> None:
     cp = cache_path('sess')
     cp.parent.mkdir(parents=True, exist_ok=True)
     cp.write_text(json.dumps({'v': 2, 'session': 'sess', 'saved': 0, 'entries': {str(path): {'seen': 1e12}}}))
-    assert TRANSCRIPT_CACHE_VERSION == 3
+    assert TRANSCRIPT_CACHE_VERSION == 4
     assert TranscriptCache.load('sess')._entries == {}
 
 

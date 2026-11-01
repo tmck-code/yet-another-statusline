@@ -1726,14 +1726,14 @@ def test_build_wide_tree_mode_renders_branches(monkeypatch: pytest.MonkeyPatch) 
     assert len(kid_lines) == 2                     # one line per subagent
     # All three default to still-running, so every connector segment is
     # active (solid '─'/'│'), not dashed.
-    assert ' ├─── ' in kid_lines[0] and 'kid-one' in kid_lines[0] and 'Bash[' in kid_lines[0]
+    assert ' ├─── ' in kid_lines[0] and 'kid-one' in kid_lines[0]
     assert ' └─── ' in kid_lines[1] and 'kid-two' in kid_lines[1] and 'Read[' in kid_lines[1]
     # tree mode stacks single-column even above TWO_COL_SUBAGENT_WIDTH; the root
-    # is a single line carrying its own activity, no separate continuation row.
-    # The root branches off the implicit main thread and — as the sole
-    # top-level agent with two children — gets its own '└┬' elbow.
+    # is a single line, no separate continuation row. The root branches off the
+    # implicit main thread and — as the sole top-level agent with two live
+    # children — gets its own '└┬' elbow and a waiting activity.
     root_lines = [ln for ln in out if 'root-agent' in ln]
-    assert len(root_lines) == 1 and '└┬─ ' in root_lines[0] and 'Task[' in root_lines[0]
+    assert len(root_lines) == 1 and '└┬─ ' in root_lines[0] and '(waiting)' in root_lines[0]
     # Description and activity columns line up across depths: root (its own
     # elbow, longer type name) vs the indented children (shorter names).
     all_rows  = root_lines + kid_lines

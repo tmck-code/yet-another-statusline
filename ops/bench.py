@@ -70,6 +70,7 @@ def run_hyperfine(base_script: Path, head_script: Path, base_label: str, runs: i
         subprocess.run(
             [
                 'hyperfine',
+                '--shell',  'sh',  # hyperfine 2.x refuses the `<` redirect without an explicit shell
                 '--warmup', str(warmup),
                 '--runs',   str(runs),
                 '--command-name', base_label, shell_invocation(base_script),

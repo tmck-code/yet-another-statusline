@@ -59,6 +59,7 @@ def _sub(
     description: str       = 'test-agent',
     agent_id: str          = '',
     parent_id: str         = '',
+    bash_inflight: tuple[tuple[str, float], ...] = (),
 ) -> RunningSubagent:
     return RunningSubagent(
         agent_type      = 'Explore',
@@ -70,6 +71,7 @@ def _sub(
         end_ts          = end_ts,
         agent_id        = agent_id,
         parent_id       = parent_id,
+        bash_inflight   = bash_inflight,
     )
 
 
@@ -94,6 +96,28 @@ def test_pre_turn_still_writing_kept() -> None:
     '''Agent started before the prompt but still writing (within liveness window) is kept.'''
     last_prompt_ts = NOW - 10.0
     sub = _sub(first_timestamp=NOW - 60.0, mtime=NOW - (LIVENESS - 5))
+    result = _cohort(sub).visible(NOW, last_prompt_ts)
+    assert sub in result
+
+
+def test_pre_turn_running_agent_kept_while_transcript_silent() -> None:
+    '''A still-running agent from an earlier turn must not vanish just because
+    its long tool call has written nothing for longer than the liveness window.'''
+    last_prompt_ts = NOW - 10.0
+    sub = _sub(first_timestamp=NOW - 300.0, mtime=NOW - (LIVENESS + 60), end_ts=0.0)
+    result = _cohort(sub).visible(NOW, last_prompt_ts)
+    assert sub in result
+
+
+def test_pre_turn_agent_with_inflight_bash_kept_even_with_stale_end_ts() -> None:
+    '''A live Bash call is evidence the agent is running, even if a stale
+    terminal signal set end_ts.'''
+    last_prompt_ts = NOW - 10.0
+    sub = _sub(
+        first_timestamp=NOW - 300.0, mtime=NOW - (LIVENESS + 60),
+        end_ts=NOW - (LIVENESS + 50),
+        bash_inflight=(('gate.sh make test', NOW - 100.0),),
+    )
     result = _cohort(sub).visible(NOW, last_prompt_ts)
     assert sub in result
 

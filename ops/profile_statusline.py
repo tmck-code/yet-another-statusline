@@ -50,7 +50,6 @@ def profile_full(raw: str) -> None:
     pr.enable()
     # Imported inside the profiled region so per-module import cost shows up.
     from yas.app import render
-    from yas.constants import MIN_WIDTH
     info = json.loads(raw)
     pr.disable()  # exclude json of the raw fixture from the cold measure boundary
     pr.enable()
