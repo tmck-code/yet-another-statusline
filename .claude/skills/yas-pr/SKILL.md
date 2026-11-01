@@ -10,15 +10,18 @@ the template structure — read it from the repo so the two never drift.
 
 ## Steps
 
-1. **Sanity-check the branch and hooks.** Confirm the current branch is not `main` and has
-   commits ahead of `origin/main`. If it's `main` or has no diff, stop and tell the user. Also
-   check `git config --local --get core.hooksPath`; if it isn't `.github/hooks`, offer to run
-   `make hooks` so the contributor gets pre-commit checks (don't enable it without their yes).
+1. **Sanity-check the branch and hooks.** Confirm the current branch is not `main` or `dev` and
+   has commits ahead of its base. Feature work targets `dev` (the integration branch), so use
+   `origin/dev` as the base by default; a hotfix may target `origin/main`. If the branch has no
+   diff, stop and tell the user. Also check `git config --local --get core.hooksPath`; if it
+   isn't `.github/hooks`, offer to run `make hooks` so the contributor gets pre-commit checks
+   (don't enable it without their yes).
 
 2. **Read the template.** Load `.github/pull_request_template.md`. This is the single source of
    truth for the section structure — mirror its headings exactly.
 
-3. **Draft Context and Changes.** From `git diff main...HEAD` plus the conversation:
+3. **Draft Context and Changes.** From `git diff <base>...HEAD` (normally `dev`; `main` for a
+   hotfix) plus the conversation:
    - **Context** — *why* the change is needed; the higher-level goal/problem. Link the related
      issue/PRD (`.scratch/<feature>/...`) if one exists. If this PR bumps the version (step 8),
      reference the new version number here.
@@ -34,7 +37,8 @@ the template structure — read it from the repo so the two never drift.
    failures and ask the user whether to fix first or proceed. Optionally also run `uv run ruff
    check` and `uv run mypy .` and note results.
 
-6. **Benchmark.** Run `make bench` (times this branch vs `main` via a throwaway git worktree).
+6. **Benchmark.** Run `make bench BENCH_ARGS=--base=dev` for a feature PR (or `make bench` for
+   a hotfix against `main`) — it times this branch vs that base via a throwaway git worktree.
    If `hyperfine` is not on PATH, `bench.py` prints an install hint and falls back to a Python
    timer — before letting it fall back, offer to install hyperfine (`apt`/`brew`/`cargo`) and ask
    the user; only fall back if they decline. Paste the paste-ready table into the Benchmark
@@ -65,8 +69,9 @@ the template structure — read it from the repo so the two never drift.
      ask rather than bumping blindly.
 
 9. **Confirm, then create the draft.** Show the fully assembled body (Screenshots section already
-   populated with the agent's table). After the user confirms, run `gh pr create --draft` with
-   that body. Print the PR URL and tell the user to click "Ready for review" when done.
+   populated with the agent's table). After the user confirms, run `gh pr create --draft --base dev`
+   with that body (`--base main` only for a hotfix). Print the PR URL and tell the user to click
+   "Ready for review" when done.
 
 ## Notes
 

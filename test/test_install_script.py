@@ -340,6 +340,7 @@ def _seed_installed_plugins(config_dir: Path, plugin_root: Path) -> None:
 
 
 MARKETPLACE_SOURCE = 'tmck-code/yet-another-statusline#main'
+DEV_MARKETPLACE_SOURCE = 'tmck-code/yet-another-statusline#dev'
 
 
 def _seed_known_marketplace(config_dir: Path, source: dict) -> None:
@@ -389,6 +390,67 @@ def test_dry_run_replaces_marketplace_not_on_main(full_dry_env, source, recorded
     assert result.returncode == 0, result.stderr
     assert f"Would replace marketplace on ref '{recorded}' with main" in result.stdout
     assert f'Would add marketplace: {MARKETPLACE_SOURCE}' in result.stdout
+
+
+@requires_full_preflight
+def test_dry_run_dev_flag_adds_the_dev_marketplace(full_dry_env):
+    config_dir, plugin_root, env = full_dry_env
+    _seed_installed_plugins(config_dir, plugin_root)
+    result = run_install('--full', '--dev', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert f'Would add marketplace: {DEV_MARKETPLACE_SOURCE}' in result.stdout
+
+
+@requires_full_preflight
+def test_dry_run_yas_ref_selects_the_same_ref(full_dry_env):
+    config_dir, plugin_root, env = full_dry_env
+    _seed_installed_plugins(config_dir, plugin_root)
+    result = run_install('--full', '--dry-run', env_extra={**env, 'YAS_REF': 'dev'})
+    assert result.returncode == 0, result.stderr
+    assert f'Would add marketplace: {DEV_MARKETPLACE_SOURCE}' in result.stdout
+
+
+@requires_full_preflight
+def test_dry_run_switches_an_existing_main_install_to_dev(full_dry_env):
+    config_dir, plugin_root, env = full_dry_env
+    _seed_installed_plugins(config_dir, plugin_root)
+    _seed_known_marketplace(
+        config_dir, {'source': 'github', 'repo': 'tmck-code/yet-another-statusline', 'ref': 'main'}
+    )
+    result = run_install('--full', '--dev', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert "Would replace marketplace on ref 'main' with dev" in result.stdout
+    assert f'Would add marketplace: {DEV_MARKETPLACE_SOURCE}' in result.stdout
+
+
+@requires_full_preflight
+def test_dry_run_updates_an_install_already_on_dev(full_dry_env):
+    config_dir, plugin_root, env = full_dry_env
+    _seed_installed_plugins(config_dir, plugin_root)
+    _seed_known_marketplace(
+        config_dir, {'source': 'github', 'repo': 'tmck-code/yet-another-statusline', 'ref': 'dev'}
+    )
+    result = run_install('--full', '--dev', '--dry-run', env_extra=env)
+    assert result.returncode == 0, result.stderr
+    assert 'Would update marketplace: yet-another-statusline' in result.stdout
+    assert 'Would replace marketplace' not in result.stdout
+
+
+@requires_full_preflight
+def test_main_flag_overrides_yas_ref(full_dry_env):
+    config_dir, plugin_root, env = full_dry_env
+    _seed_installed_plugins(config_dir, plugin_root)
+    result = run_install('--full', '--main', '--dry-run', env_extra={**env, 'YAS_REF': 'dev'})
+    assert result.returncode == 0, result.stderr
+    assert f'Would add marketplace: {MARKETPLACE_SOURCE}' in result.stdout
+
+
+@requires_full_preflight
+def test_invalid_release_ref_is_rejected(full_dry_env):
+    _config_dir, _plugin_root, env = full_dry_env
+    result = run_install('--full', '--dry-run', env_extra={**env, 'YAS_REF': 'bad ref'})
+    assert result.returncode != 0
+    assert 'invalid release ref' in result.stdout
 
 
 @requires_full_preflight
