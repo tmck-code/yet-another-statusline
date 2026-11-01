@@ -27,13 +27,13 @@
 
 ## Benchmark
 
-<!-- `make bench` times the statusline command on this branch vs `main` (git worktree,
-     hyperfine if installed, Python fallback otherwise) and prints a paste-ready table.
-     Paste it below. -->
+<!-- `make bench` times the statusline command on this branch vs its base branch
+     (`dev` for feature PRs, `main` for hotfixes) via a git worktree, and prints a
+     paste-ready table. Paste it below. -->
 
 | Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
 |:---|---:|---:|---:|---:|
-| `main` | | | | |
+| `base` | | | | |
 | `PR` | | | | |
 
 - [ ] N/A — no performance-relevant change

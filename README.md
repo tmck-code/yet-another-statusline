@@ -38,6 +38,27 @@ curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/ma
 curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/main/ops/install.sh | YAS_NO_TTY=1 YAS_PYTHON=3.15 bash
 ```
 
+### Bleeding edge — the `dev` branch
+
+`dev` is the integration branch: changes land there first and are promoted to
+`main` once they have had some real-world use. Install it with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmck-code/yet-another-statusline/dev/ops/install.sh | bash -s -- --dev
+```
+
+Or manually:
+
+```bash
+claude plugin marketplace add tmck-code/yet-another-statusline#dev
+claude plugin install yas@yet-another-statusline
+claude -p "/yas:init"
+```
+
+The installer pins the marketplace to the selected ref, so re-running the
+normal `main` one-liner switches an existing install back to the stable branch.
+`YAS_REF=<branch-or-tag>` is equivalent to `--dev` for scripted installs.
+
 ### Upgrading — the `yas/` layout move
 
 Everything YAS writes except `yas.toml` now lives under a single

@@ -18,7 +18,13 @@
 # Override with --wire-only / --full / --uninstall.
 #
 # Usage:
-#   bash ops/install.sh [--wire-only|--full|--uninstall] [--dry-run] [--main]
+#   bash ops/install.sh [--wire-only|--full|--uninstall] [--dry-run] [--main|--dev]
+#
+# Release ref:
+#   Installs the marketplace pinned to `main` by default. Pass `--dev` (or set
+#   YAS_REF=dev) to install the integration branch instead:
+#     curl -fsSL .../dev/ops/install.sh | bash -s -- --dev
+#   YAS_REF accepts any branch or tag name.
 
 # NOTE: -e is intentionally omitted. Several probe commands below are expected
 # to return non-zero (e.g. `command -v`, json_py key-presence checks); using -e
@@ -32,6 +38,8 @@ UNINSTALL_FLAG=0
 RECONFIGURE_FLAG=0
 DRY_RUN=0
 
+REF="${YAS_REF:-main}"
+
 for arg in "$@"; do
     case "$arg" in
         --wire-only)   WIRE_ONLY_FLAG=1   ;;
@@ -39,13 +47,22 @@ for arg in "$@"; do
         --uninstall)   UNINSTALL_FLAG=1   ;;
         --reconfigure) RECONFIGURE_FLAG=1 ;;
         --dry-run)     DRY_RUN=1          ;;
-        --main)        ;;  # reserved — accept silently, no behaviour change
+        --main)        REF="main"         ;;
+        --dev)         REF="dev"          ;;
         *)
             printf "! unknown argument: %s\n" "$arg"
             exit 1
             ;;
     esac
 done
+
+# Keep the ref usable as a single marketplace argument (no whitespace/# tricks).
+case "$REF" in
+    ''|*[!A-Za-z0-9._/-]*)
+        printf "! invalid release ref: %s\n" "$REF"
+        exit 1
+        ;;
+esac
 
 # Determine mode
 if   [ "$UNINSTALL_FLAG"   = "1" ]; then MODE="uninstall"
@@ -58,10 +75,10 @@ fi
 
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-# Marketplace identity. The source pins `#main`: without a ref, `marketplace add`
-# clones the GitHub default branch, which may be a docs branch.
+# Marketplace identity. The source always pins an explicit ref: without one,
+# `marketplace add` clones the GitHub default branch, which may be a docs branch.
 MARKETPLACE_NAME="yet-another-statusline"
-MARKETPLACE_SOURCE="tmck-code/yet-another-statusline#main"
+MARKETPLACE_SOURCE="tmck-code/yet-another-statusline#${REF}"
 
 # Interactivity / TTY gating --------------------
 # Interactive is the default. We force non-interactive when YAS_NO_TTY=1 OR no
@@ -812,11 +829,12 @@ ensure_marketplace() {
     present=$(json_py has-key "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" "$MARKETPLACE_NAME" 2>/dev/null) || present="false"
 
     # `marketplace add` without a ref clones the GitHub default branch, and
-    # `marketplace update` refreshes whatever ref is recorded. Pin main so an
-    # entry recorded on another ref (or none) is replaced, not updated in place.
+    # `marketplace update` refreshes whatever ref is recorded. Pin the requested
+    # ref so an entry recorded on another ref (or none) is replaced, not updated
+    # in place — switching main <-> dev must actually move the clone.
     if [ "$present" = "true" ]; then
         ref=$(json_py get-key "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" "$MARKETPLACE_NAME.source.ref" 2>/dev/null) || ref=""
-        if [ "$ref" = "main" ]; then
+        if [ "$ref" = "$REF" ]; then
             if [ "$DRY_RUN" = "1" ]; then
                 step "  Would update marketplace: $MARKETPLACE_NAME"
             else
@@ -826,9 +844,9 @@ ensure_marketplace() {
             return 0
         fi
         if [ "$DRY_RUN" = "1" ]; then
-            step "  Would replace marketplace on ref '${ref:-none}' with main"
+            step "  Would replace marketplace on ref '${ref:-none}' with $REF"
         else
-            step "  Replacing marketplace on ref '${ref:-none}' with main…"
+            step "  Replacing marketplace on ref '${ref:-none}' with $REF…"
             if ! run_claude_green claude plugin marketplace remove "$MARKETPLACE_NAME"; then
                 fail "! marketplace remove failed — marketplace left unchanged"
                 return 1
